@@ -621,11 +621,11 @@ class MOCSolver:
         plt.tight_layout()
         plt.show()
 
-    def build_paper_data(self, extra_meta=None):
+    def build_result_data(self, extra_meta=None):
             """
             Returns the full result dict (wall/axis/mesh data, all JSON-safe
             plain floats/lists) without touching the filesystem -- the part
-            of export_full_paper_data that's actually reusable in-memory
+            of export_full_result_data that's actually reusable in-memory
             (e.g. by moc.api), split out so that function can just json.dump
             this instead of duplicating the dict-building logic.
             """
@@ -662,7 +662,7 @@ class MOCSolver:
                 data["meta"] = extra_meta
             return data
 
-    def export_full_paper_data(self, filename="moc_paper_data.json", extra_meta=None):
-            data = self.build_paper_data(extra_meta=extra_meta)
+    def export_full_result_data(self, filename="moc_result_data.json", extra_meta=None):
+            data = self.build_result_data(extra_meta=extra_meta)
             with open(filename, 'w') as f:
                 json.dump(data, f, indent=4)

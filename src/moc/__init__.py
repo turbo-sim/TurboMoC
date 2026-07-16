@@ -9,7 +9,7 @@ Two solver variants sharing one thermodynamic/characteristics core
   - moc.solvers.mln.MOCSolverMLN          -- minimum-length (sharp-corner)
     nozzle, centred expansion fan from the throat corner.
 
-Both accept the same style of config dict and export_full_paper_data()
+Both accept the same style of config dict and export_full_result_data()
 schema, so results are directly comparable.
 """
 

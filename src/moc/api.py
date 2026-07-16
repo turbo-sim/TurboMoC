@@ -100,7 +100,7 @@ def design_nozzle(
     -------
     dict with keys:
       wall_final, div_wall, kernel_wall, sauer, IVP, mesh_data, axis
-        -- same schema as MOCSolver.build_paper_data / export_full_paper_data
+        -- same schema as MOCSolver.build_result_data / export_full_result_data
       fluid_name, solver, design_Noz_Mach, p_back, converged, runtime_s
     """
     import time
@@ -169,7 +169,7 @@ def design_nozzle(
     exit_M = float(s.axis_points_vec[-1].M) if s.axis_points_vec else float("nan")
     converged = bool(np.isfinite(exit_M) and abs(exit_M - design_Noz_Mach) / max(design_Noz_Mach, 1e-9) < 0.05)
 
-    data = s.build_paper_data(extra_meta=dict(
+    data = s.build_result_data(extra_meta=dict(
         solver=solver, P0=float(P0), T0=T0_resolved, Q0=float(Q0),
         p_back=p_back, design_Noz_Mach=design_Noz_Mach,
         y_t=y_t, n=n, rho_t=rho_t, rho_d=rho_d, delta_flow=delta_flow,

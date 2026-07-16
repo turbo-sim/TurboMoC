@@ -140,7 +140,7 @@ class MOCSolverMLN:
         self.length              = []
 
         # Full mesh capture, so any figure can be reproduced from the saved
-        # JSON without re-running the solve (see export_full_paper_data).
+        # JSON without re-running the solve (see export_full_result_data).
         self.mesh_data = {
             "stage2_c_plus": [],
             "stage2_c_minus": [],
@@ -708,13 +708,13 @@ class MOCSolverMLN:
 
     # ------------------------------------------------------------------
     # DATA EXPORT — full mesh + wall + axis data, so any figure can be
-    # reproduced later without re-running the solve. Schema matches
-    # moc_tool_flashing's export_full_paper_data for interchangeability.
+    # reproduced later without re-running the solve. Same schema as
+    # ConventionalSolver's export_full_result_data, for interchangeability.
     # ------------------------------------------------------------------
-    def build_paper_data(self, extra_meta=None):
+    def build_result_data(self, extra_meta=None):
         """Returns the full result dict without touching the filesystem --
-        see moc.solvers.conventional.MOCSolver.build_paper_data (same schema,
-        reused as-is by moc.api)."""
+        see moc.solvers.conventional.MOCSolver.build_result_data (same
+        schema, reused as-is by moc.api)."""
         def to_l(pts, attr): return [float(getattr(p, attr)) for p in pts]
 
         # Wall points carry u,v (set by ReflexLine) but ThermoFlowProp() was
@@ -748,7 +748,7 @@ class MOCSolverMLN:
             data["meta"] = extra_meta
         return data
 
-    def export_full_paper_data(self, filename="moc_paper_data.json", extra_meta=None):
-        data = self.build_paper_data(extra_meta=extra_meta)
+    def export_full_result_data(self, filename="moc_result_data.json", extra_meta=None):
+        data = self.build_result_data(extra_meta=extra_meta)
         with open(filename, 'w') as f:
             json.dump(data, f, indent=4)

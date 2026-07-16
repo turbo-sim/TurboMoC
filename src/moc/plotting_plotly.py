@@ -6,7 +6,7 @@ its plotting_plotly.py) -- a callback calls moc.design_nozzle(...) once,
 then these functions to build the figures it returns.
 
 Same inputs as plotting_mpl: the `data` dict from design_nozzle() /
-MOCSolver.build_paper_data(). No solver/UI objects, no state.
+MOCSolver.build_result_data(). No solver/UI objects, no state.
 
 Every function also accepts an optional `reference=<second data dict>` to
 overlay a second design for comparison (same color, dashed/lighter) -- see

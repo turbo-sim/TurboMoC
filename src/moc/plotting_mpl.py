@@ -1,13 +1,13 @@
 """
 moc.plotting_mpl -- matplotlib plots built from moc.design_nozzle's result
-dict. Static/paper-quality output, matching the color/style conventions
+dict. Static/publication-quality output, matching the color/style conventions
 already established across the NICFD_2026 postprocessing scripts (pressure
 in orange, Mach in green, jaxprop.COLORS_PYTHON).
 
 Mirrors turbodash's plotting_mpl.py/plotting_plotly.py split: this module
 is the matplotlib half; moc.plotting_plotly provides the same functions
 returning go.Figure instead, for the Dash app. Both take the SAME `data`
-dict (design_nozzle's return value, or MOCSolver.build_paper_data()) and
+dict (design_nozzle's return value, or MOCSolver.build_result_data()) and
 an optional existing axes/figure to draw into -- nothing here calls the
 solver or knows about MOCSolver/FluidManager.
 

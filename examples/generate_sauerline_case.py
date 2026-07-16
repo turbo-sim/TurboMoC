@@ -51,7 +51,7 @@ out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output", "co
 case_dir = os.path.join(out_dir, f"dT_{dT}K")
 os.makedirs(case_dir, exist_ok=True)
 
-with open(os.path.join(case_dir, "moc_paper_data.json"), "w") as f:
+with open(os.path.join(case_dir, "moc_result_data.json"), "w") as f:
     json.dump(data, f, indent=4)
 
 wall = data["wall_final"]

@@ -61,7 +61,7 @@ for dT in dT_list:
             results.append(dict(dT=dT, solver=solver, T0=T0, failed=str(e)))
             continue
 
-        with open(os.path.join(case_dir, "moc_paper_data.json"), "w") as f:
+        with open(os.path.join(case_dir, "moc_result_data.json"), "w") as f:
             json.dump(data, f, indent=4)
 
         wall = data["wall_final"]
