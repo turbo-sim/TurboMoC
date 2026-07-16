@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "moc"
+version = "0.1.0"
+description = "Method of Characteristics solvers for two-phase and single-phase nozzle/stator design (minimum-length and conventional/arc-flashing variants)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "jaxprop>=0.5.6",
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "pandas",
+    "plotly",
+    "dash[diskcache]",
+]
+
+[project.optional-dependencies]
+# STEP export for moc.geometry.export_blade_step -- pulls in OCCT, best
+# installed via conda-forge (see environment.yaml) rather than pip on
+# Windows. moc.geometry.parametrize_stator_blade itself has no cadquery
+# dependency.
+cad = ["cadquery"]
+
+[project.scripts]
+moc-app = "moc.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
