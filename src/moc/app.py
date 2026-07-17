@@ -44,7 +44,16 @@ import plotly.graph_objects as go
 
 import moc
 from moc import design_nozzle, list_supported_fluids, make_progress_reporter, NozzleDesignError
-from moc.geometry import move_control_point_along_normal, parametrize_stator_blade
+from moc.geometry import (
+    move_control_point_along_normal,
+    parametrize_stator_blade,
+    parametrize_stator_blade_semi,
+)
+
+BLADE_PARAM_FUNCS = {
+    "full": parametrize_stator_blade,
+    "semi": parametrize_stator_blade_semi,
+}
 
 # Tab key -> label, and the two per-tab plot functions: the interactive
 # Plotly one (display) and the matplotlib one + filename base (download).
@@ -222,6 +231,24 @@ blade_controls = html.Div(
             "Builds a closed stator blade profile from Phase 1's nozzle "
             "wall contour (used as the divergent-section suction side). "
             "Run Phase 1 Compute first.",
+            style={"fontSize": "11px", "color": "#888", "marginBottom": "10px"},
+        ),
+        dcc.RadioItems(
+            id="blade-method",
+            options=[
+                {"label": " Full (pressure side mirrors the nozzle wall)", "value": "full"},
+                {"label": " Semi (pressure side is a single circular arc)", "value": "semi"},
+            ],
+            value="full",
+            labelStyle={"display": "block", "fontSize": "13px"},
+        ),
+        html.Div(
+            "Semi is a lighter-weight passage: the pressure side doesn't "
+            "reuse the wall at all, just an arc between two points near "
+            "the leading/trailing edge -- shorter chord, no fixed-endpoint "
+            "constraint on the control-point fit. Default inlet opening "
+            "ratio differs by method (1.8 full / 2.5 semi); adjust below "
+            "if you switch.",
             style={"fontSize": "11px", "color": "#888", "marginBottom": "10px"},
         ),
         _field("Metal angle in (deg)", "metal_angle_in", BLADE_DEFAULTS["metal_angle_in"]),
@@ -461,6 +488,7 @@ def download_plot(n_clicks, active_tab, data, reference, fmt):
     Output("blade-status-message", "children"),
     Input("compute-blade-btn", "n_clicks"),
     State("result-store", "data"),
+    State("blade-method", "value"),
     State("metal_angle_in", "value"),
     State("metal_angle_out", "value"),
     State("r_trailing", "value"),
@@ -470,15 +498,16 @@ def download_plot(n_clicks, active_tab, data, reference, fmt):
     State("n_cp", "value"),
     prevent_initial_call=True,
 )
-def run_blade(n_clicks, nozzle_data, metal_angle_in, metal_angle_out, r_trailing,
+def run_blade(n_clicks, nozzle_data, method, metal_angle_in, metal_angle_out, r_trailing,
               leading_edge_x, leading_edge_y, inlet_opening_ratio, n_cp):
     if not nozzle_data:
         return None, html.Div("Run Phase 1 Compute first -- no nozzle wall to build a blade from.",
                                 style={"color": "#b00020"})
 
     wall = nozzle_data["wall_final"]
+    parametrize_fn = BLADE_PARAM_FUNCS[method or "full"]
     try:
-        blade = parametrize_stator_blade(
+        blade = parametrize_fn(
             wall["x"], wall["y"],
             metal_angle_in=metal_angle_in, metal_angle_out=metal_angle_out,
             r_trailing=r_trailing, leading_edge_x=leading_edge_x, leading_edge_y=leading_edge_y,
@@ -488,7 +517,8 @@ def run_blade(n_clicks, nozzle_data, metal_angle_in, metal_angle_out, r_trailing
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"})
 
     status = html.Div([
-        html.Span("Blade parametrized", style={"fontWeight": "600", "color": "#1a7a1a"}),
+        html.Span(f"Blade parametrized ({method or 'full'})",
+                   style={"fontWeight": "600", "color": "#1a7a1a"}),
         html.Div(f"pitch = {blade['pitch']:.2f} mm"),
         html.Div(f"throat opening = {blade['throat_opening']:.2f} mm"),
     ])

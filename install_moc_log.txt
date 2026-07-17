@@ -1,0 +1,22 @@
+Obtaining file:///C:/Users/ancio/OneDrive%20-%20Danmarks%20Tekniske%20Universitet/Documents/python_scripts/method_of_characteristics/moc
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Getting requirements to build editable: started
+  Getting requirements to build editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: moc
+  Building editable for moc (pyproject.toml): started
+  Building editable for moc (pyproject.toml): finished with status 'done'
+  Created wheel for moc: filename=moc-0.1.0-0.editable-py3-none-any.whl size=2736 sha256=9588e4a0ac930087213896cc3972b382fe60c979d2944f3c8f62d2b155d5fba3
+  Stored in directory: C:\Users\ancio\AppData\Local\Temp\pip-ephem-wheel-cache-3fa5npri\wheels\fc\fb\b9\6ced7c42e01e2ecc9318a596a92f208fa64d9ba1cf5bc21401
+Successfully built moc
+Installing collected packages: moc
+  WARNING: The script moc-app.exe is installed in 'C:\Users\ancio\AppData\Local\Programs\Python\Python313\Scripts' which is not on PATH.
+  Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
+Successfully installed moc-0.1.0
+
+[notice] A new release of pip is available: 24.2 -> 26.1.2
+[notice] To update, run: C:\Users\ancio\AppData\Local\Programs\Python\Python313\python.exe -m pip install --upgrade pip

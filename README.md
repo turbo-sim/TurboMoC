@@ -16,7 +16,9 @@ flashing / wet-to-dry inlets** under the Homogeneous Equilibrium Model
 - **`design_nozzle(...)`**: one function, plain arguments in, flat
   JSON-safe dict out.
 - **Stator blade parametrization**: fit a closed B-spline blade profile
-  from the nozzle wall and export to STEP (`moc.geometry`).
+  from the nozzle wall and export to STEP (`moc.geometry`) -- two
+  variants, full (pressure side mirrors the wall) and semi (pressure
+  side is a single arc).
 - **Interactive Dash app** for nozzle design and blade parametrization,
   with `matplotlib`/`plotly` plotting and design comparison.
 

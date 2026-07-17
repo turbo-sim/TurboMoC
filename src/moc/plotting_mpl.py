@@ -351,3 +351,53 @@ def plot_blade(blade_data, ax=None, n_blades=2, show_control_points=True,
     ax.set_aspect("equal")
     ax.legend(loc="best", fontsize=9)
     return fig, ax
+
+
+def plot_rotor_blade(data, ax=None, show_junctions=True,
+                      reference=None, label="Current", reference_label="Reference"):
+    """
+    Pressure/suction surfaces from moc.rotor.design_rotor_vortex_blade
+    (NASA TN D-4421/Goldman & Scullin 1968 vortex-flow method, validated
+    against the report's own worked example -- see vortex_blade.py's
+    module docstring), each plotted in ITS OWN local frame (own vortex
+    center at the origin) -- the two surfaces are NOT stitched into a
+    single closed blade contour here (that needs the leading/trailing-edge
+    treatment TN D-4421 covers separately, plus a rounding radius, neither
+    implemented yet); `data["pitch"]`/`data["chord"]` give the NATURAL
+    (not guessed) blade-to-blade spacing and the lower surface's own
+    inlet-to-outlet chord length, derived directly from the geometry.
+
+    show_junctions marks the transition-arc/circular-arc boundary on each
+    surface (small circle) -- purely informational; with the corrected
+    (real marching-based) construction these should NOT show a visible
+    kink. reference=<second data dict> overlays a second design
+    (dashed/lighter).
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 6))
+    else:
+        fig = ax.figure
+
+    def _draw(d, ls, alpha, lbl):
+        for surf_key, color in (("pressure", COLOR_PRESSURE), ("suction", COLOR_MACH)):
+            surf = d[surf_key]
+            ax.plot(surf["x"], surf["y"], ls, color=color, lw=2, alpha=alpha,
+                     label=f"{lbl} {surf_key}" if lbl else surf_key.capitalize())
+            if show_junctions:
+                n = len(surf["x"])
+                n_pts = d.get("num_points") or n // 3  # fallback if not echoed back
+                for idx in (n_pts - 1, n - n_pts):
+                    if 0 <= idx < n:
+                        ax.plot(surf["x"][idx], surf["y"][idx], "o", mfc="none",
+                                mec=color, mew=1.3, ms=7, alpha=alpha, zorder=10)
+
+    if reference is not None:
+        _draw(reference, "--", 0.5, reference_label)
+    _draw(data, "-", 1.0, label if reference is not None else "")
+
+    units = data.get("units", "r*")
+    ax.set_xlabel(f"x ({units})")
+    ax.set_ylabel(f"y ({units})")
+    ax.set_aspect("equal")
+    ax.legend(loc="best", fontsize=9)
+    return fig, ax
