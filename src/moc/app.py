@@ -432,6 +432,64 @@ rotor_plots = html.Div(
     style={"flex": "1", "padding": "16px"},
 )
 
+# --------------------------------------------------------------------------
+# Phase 4: combined stator + rotor cascade view (consumes Phase 2's and
+# Phase 3's stores -- doesn't recompute anything, just lays both rows of
+# blades out together). Stator is in mm (Phase 2's own units); rotor is in
+# r* by default (nondimensional) -- rotor_scale converts r* -> mm so the
+# two rows can share one plot, and rotor_x/y_offset position the rotor row
+# relative to the stator row (axial gap + any vertical stagger). rotor_shift
+# is a fraction of the ROTOR's own pitch -- sliding it sweeps one rotor
+# blade past the stator passage, the simplest way to look at the relative
+# (unsteady) stator/rotor position without an actual time-accurate solve.
+# --------------------------------------------------------------------------
+cascade_controls = html.Div(
+    [
+        html.H4("Stator + rotor cascade"),
+        html.Div(
+            "Lays out Phase 2's stator row and Phase 3's rotor row "
+            "together. Compute both first. Purely geometric overlay -- "
+            "no flow coupling -- meant for checking blade counts/pitch "
+            "and sweeping the relative rotor position by eye.",
+            style={"fontSize": "11px", "color": "#888", "marginBottom": "10px"},
+        ),
+        _field("Number of stator blades", "n_stator_blades", 4, step=1, min=1),
+        _field("Number of rotor blades", "n_rotor_blades", 4, step=1, min=1),
+
+        html.H4("Rotor placement", style={"marginTop": "16px"}),
+        html.Div(
+            "Stator blades are drawn exactly as in Phase 2 (its own pitch "
+            "convention, along x). The rotor's own pitch convention is "
+            "along y instead (Phase 3/TN D-4421's GSTAR) -- that's not "
+            "changed here. x offset moves the WHOLE rotor row downstream "
+            "of the stator (positive = further downstream); y offset "
+            "shifts it vertically to line it up with a stator passage.",
+            style={"fontSize": "11px", "color": "#888", "marginBottom": "8px"},
+        ),
+        _field("Rotor scale (mm per r*)", "rotor_scale_mm", 50.0),
+        _field("Rotor x offset (mm, downstream gap)", "rotor_x_offset", 15.0),
+        _field("Rotor y offset (mm)", "rotor_y_offset", 0.0),
+
+        html.H4("Relative position", style={"marginTop": "16px"}),
+        html.Div("Slide the rotor row by a fraction of its own pitch:",
+                  style={"fontSize": "12px", "marginBottom": "4px"}),
+        dcc.Slider(id="rotor_shift", min=0, max=1, step=0.01, value=0,
+                    marks={0: "0", 0.25: "0.25", 0.5: "0.5", 0.75: "0.75", 1: "1"},
+                    tooltip={"placement": "bottom", "always_visible": False}),
+
+        html.Div(id="cascade-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+    ],
+    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+           "overflowY": "auto"},
+)
+
+cascade_plots = html.Div(
+    [
+        dcc.Graph(id="fig-cascade", config={"displaylogo": False}, style={"height": "650px"}),
+    ],
+    style={"flex": "1", "padding": "16px"},
+)
+
 app.layout = html.Div(
     [
         html.H2("MOC Nozzle & Stator Design", style={"padding": "16px 16px 0 16px"}),
@@ -445,6 +503,8 @@ app.layout = html.Div(
                          children=html.Div([blade_controls, blade_plots], style={"display": "flex"})),
                 dcc.Tab(label="Phase 3: Rotor blade (vortex-flow)", value="phase3",
                          children=html.Div([rotor_controls, rotor_plots], style={"display": "flex"})),
+                dcc.Tab(label="Phase 4: Stator + rotor cascade", value="phase4",
+                         children=html.Div([cascade_controls, cascade_plots], style={"display": "flex"})),
             ],
         ),
         dcc.Store(id="result-store"),
@@ -879,6 +939,104 @@ def download_rotor_plot(n_clicks, data, reference, display_options, fmt):
     plt.close(fig)
     buf.seek(0)
     return dcc.send_bytes(buf.read(), f"rotor_vortex_blade.{fmt}")
+
+
+# --------------------------------------------------------------------------
+# Phase 4 callback: combined stator + rotor cascade view
+# --------------------------------------------------------------------------
+@app.callback(
+    Output("fig-cascade", "figure"),
+    Output("cascade-status-message", "children"),
+    Input("blade-store", "data"),
+    Input("blade-edited-store", "data"),
+    Input("rotor-store", "data"),
+    Input("n_stator_blades", "value"),
+    Input("n_rotor_blades", "value"),
+    Input("rotor_scale_mm", "value"),
+    Input("rotor_x_offset", "value"),
+    Input("rotor_y_offset", "value"),
+    Input("rotor_shift", "value"),
+)
+def update_cascade_plot(base_blade, edited_blade, rotor_data, n_stator, n_rotor,
+                         rotor_scale, rotor_x_offset, rotor_y_offset, rotor_shift):
+    stator = _effective_blade(base_blade, edited_blade)
+    if not stator or not rotor_data:
+        missing = []
+        if not stator:
+            missing.append("stator blade (Phase 2)")
+        if not rotor_data:
+            missing.append("rotor blade (Phase 3)")
+        return go.Figure(), html.Div(
+            f"Compute the {' and '.join(missing)} first.", style={"color": "#b00020"})
+
+    n_stator = int(n_stator or 1)
+    n_rotor = int(n_rotor or 1)
+    scale = float(rotor_scale or 1.0)
+    x_off = float(rotor_x_offset or 0.0)
+    y_off = float(rotor_y_offset or 0.0)
+    shift = float(rotor_shift or 0.0)
+
+    # Stator: drawn exactly as Phase 2 does (moc.plotly.plot_blade), so its
+    # own pitch direction/orientation convention is respected automatically
+    # rather than re-guessed here -- same figure this callback then adds
+    # the rotor's traces onto, so both share one set of axes (same mm
+    # scale by construction, no separate scale-matching needed). plot_blade
+    # itself only draws outlines (no fill), so a translucent fill is added
+    # here on top, per-copy, in a color distinct from the rotor's.
+    fig = moc.plotly.plot_blade(stator, n_blades=n_stator,
+                                  show_control_points=False, show_cp_labels=False)
+    stator_pitch = stator["pitch"]
+    scurve = stator["blade_curve"]
+    for i in range(n_stator):
+        dx = i * stator_pitch
+        fig.add_trace(go.Scatter(
+            x=[v + dx for v in scurve["x"]], y=scurve["y"], mode="lines", fill="toself",
+            line=dict(color="#2b6cb0", width=0), fillcolor="#2b6cb0", opacity=0.30,
+            name="Stator", showlegend=(i == 0), hoverinfo="skip",
+        ))
+
+    # Rotor: rotated 90 deg clockwise as a rigid body -- (x,y) -> (y,-x) in
+    # its own local (unscaled, r*) frame -- before scaling/offsetting, so
+    # the blade's own chord direction (originally along local x) reads
+    # along the plot's y after rotation, and what was its pitch direction
+    # (local y, TN D-4421's GSTAR) now stacks copies along the plot's x
+    # instead. x_off moves the whole row downstream of the stator; y_off/
+    # rotor_shift line an individual rotor blade up against a stator
+    # passage. Distinct color/fill from the stator's.
+    rotor_pitch_mm = rotor_data["pitch"] * scale
+    rblade = rotor_data["blade"]
+    rx0 = [v * scale + x_off for v in rblade["y"]]
+    ry0 = [-v * scale + y_off for v in rblade["x"]]
+    for j in range(n_rotor):
+        dx = (j + shift) * rotor_pitch_mm
+        fig.add_trace(go.Scatter(
+            x=[v + dx for v in rx0], y=ry0, mode="lines", fill="toself",
+            line=dict(color="black", width=1.5),
+            fillcolor="#c0392b", opacity=0.35,
+            name="Rotor", showlegend=(j == 0),
+        ))
+
+    # plot_blade already pinned numeric xaxis/yaxis ranges to the stator-
+    # only extent -- recompute over ALL traces (stator + rotor) now that
+    # the rotor row has been added, so it isn't clipped.
+    all_x = [x for tr in fig.data for x in tr.x]
+    all_y = [y for tr in fig.data for y in tr.y]
+    x_min, x_max = min(all_x), max(all_x)
+    y_min, y_max = min(all_y), max(all_y)
+    x_pad = 0.05 * (x_max - x_min if x_max > x_min else 1.0)
+    y_pad = 0.05 * (y_max - y_min if y_max > y_min else 1.0)
+    fig.update_layout(
+        xaxis=dict(title_text="x (mm)", range=[x_min - x_pad, x_max + x_pad]),
+        yaxis=dict(title_text="y (mm)", range=[y_min - y_pad, y_max + y_pad],
+                    scaleanchor="x", scaleratio=1),
+        height=650,
+    )
+    status = html.Div(
+        f"stator pitch = {stator['pitch']:.2f} mm, rotor pitch = {rotor_pitch_mm:.2f} mm "
+        f"(scale {scale:.2f} mm/r*)",
+        style={"color": "#1a7a1a"},
+    )
+    return fig, status
 
 
 def main():
