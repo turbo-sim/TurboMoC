@@ -26,6 +26,7 @@ ax2.set_ylabel(f"y ({data['units']})")
 ax2.set_aspect("equal")
 ax2.set_title("Rotor vortex blade (Goldman & Scullin 1968, TN D-4421)")
 plt.show()
+
 out_dir = Path(__file__).parent / "output" / "plots"
 out_dir.mkdir(parents=True, exist_ok=True)
 fig.savefig(out_dir / "rotor_vortex_surfaces.png", dpi=140)
