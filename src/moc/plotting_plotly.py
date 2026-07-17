@@ -31,7 +31,7 @@ COLOR_CP_FACE = "#f89441"  # plasma orange -- blade control-point marker fill
 __all__ = [
     "plot_nozzle_contour", "plot_characteristics_mesh",
     "plot_axis_properties", "plot_wall_properties", "plot_ts_diagram",
-    "plot_blade",
+    "plot_blade", "plot_rotor_vortex_blade",
 ]
 
 
@@ -407,6 +407,68 @@ def plot_blade(blade_data, n_blades=2, show_control_points=True, show_cp_labels=
         xaxis_title="x (mm)", yaxis_title="y (mm)",
         xaxis=dict(range=[x_min - x_pad, x_max + x_pad]),
         yaxis=dict(range=[y_min - y_pad, y_max + y_pad], scaleanchor="x", scaleratio=1),
+        height=550,
+    )
+    return _apply_journal_style(fig)
+
+
+COLOR_BLADE_FILL = "#8c8c8c"
+
+
+def plot_rotor_vortex_blade(data, show_surfaces=True, show_mach_lines=False,
+                              reference=None, label="Current", reference_label="Reference"):
+    """Vortex-flow rotor blade (moc.rotor.design_rotor_vortex_blade,
+    NASA TN D-4421/Goldman & Scullin 1968) -- see
+    notes/rotor_vortex_blade.md for what `pressure`, `suction`, `blade`,
+    and the Mach-line segments actually are; NOT the same construction as
+    plot_blade (Phase 2's nozzle-derived stator blade) even though both
+    return a `pitch`.
+
+    show_surfaces overlays the raw pressure/suction transition-arc +
+    circular-arc curves (thin, semi-transparent) on top of the filled
+    blade polygon -- useful for sanity-checking the closure against the
+    surfaces it was built from. show_mach_lines overlays the recorded
+    characteristic segments from the marching recursion (thin, faint).
+    """
+    fig = go.Figure()
+
+    def _draw(d, dash, opacity, lbl):
+        blade = d["blade"]
+        fig.add_trace(go.Scatter(
+            x=blade["x"], y=blade["y"], mode="lines", fill="toself",
+            line=dict(color="black", width=1.5, dash=dash),
+            fillcolor=COLOR_BLADE_FILL, opacity=0.55 * opacity if dash == "solid" else 0.25 * opacity,
+            name=lbl or "Blade", showlegend=bool(lbl),
+        ))
+        if show_surfaces:
+            for surf_key, color in (("pressure", COLOR_PRESSURE), ("suction", COLOR_MACH)):
+                surf = d[surf_key]
+                fig.add_trace(go.Scatter(
+                    x=surf["x"], y=surf["y"], mode="lines",
+                    line=dict(color=color, width=1.5, dash=dash), opacity=0.7 * opacity,
+                    name=f"{lbl + ' ' if lbl else ''}{surf_key}", showlegend=True,
+                ))
+        if show_mach_lines:
+            for surf_key in ("pressure", "suction"):
+                surf = d[surf_key]
+                xs, ys = [], []
+                for x0, y0, x1, y1 in surf["mach_lines_inlet"] + surf["mach_lines_outlet"]:
+                    xs.extend([x0, x1, None])
+                    ys.extend([y0, y1, None])
+                fig.add_trace(go.Scatter(
+                    x=xs, y=ys, mode="lines",
+                    line=dict(color="#999999", width=0.5), opacity=0.6 * opacity,
+                    showlegend=False, hoverinfo="skip",
+                ))
+
+    if reference is not None:
+        _draw(reference, "dash", 0.6, reference_label)
+    _draw(data, "solid", 1.0, label if reference is not None else "")
+
+    units = data.get("units", "r*")
+    fig.update_layout(
+        xaxis_title=f"x ({units})", yaxis_title=f"y ({units})",
+        yaxis=dict(scaleanchor="x", scaleratio=1),
         height=550,
     )
     return _apply_journal_style(fig)

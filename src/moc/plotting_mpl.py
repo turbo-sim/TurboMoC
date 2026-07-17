@@ -42,7 +42,7 @@ COLOR_CP_FACE = "#f89441"  # plasma orange -- blade control-point marker fill
 __all__ = [
     "plot_nozzle_contour", "plot_characteristics_mesh",
     "plot_axis_properties", "plot_wall_properties", "plot_ts_diagram",
-    "plot_blade",
+    "plot_blade", "plot_rotor_blade", "plot_rotor_vortex_blade",
 ]
 
 
@@ -394,6 +394,51 @@ def plot_rotor_blade(data, ax=None, show_junctions=True,
     if reference is not None:
         _draw(reference, "--", 0.5, reference_label)
     _draw(data, "-", 1.0, label if reference is not None else "")
+
+    units = data.get("units", "r*")
+    ax.set_xlabel(f"x ({units})")
+    ax.set_ylabel(f"y ({units})")
+    ax.set_aspect("equal")
+    ax.legend(loc="best", fontsize=9)
+    return fig, ax
+
+
+COLOR_BLADE_FILL = "0.55"
+
+
+def plot_rotor_vortex_blade(data, ax=None, show_surfaces=True, show_mach_lines=False,
+                              reference=None, label="Current", reference_label="Reference"):
+    """Filled vortex-flow rotor blade (moc.rotor.design_rotor_vortex_blade's
+    "blade" key) -- see notes/rotor_vortex_blade.md for what this closure
+    actually is (pressure joined to suction shifted by +pitch, closed by
+    tangent segments at beta_inlet/beta_outlet -- NOT pressure+suction of
+    the same instance closed directly). show_surfaces overlays the raw
+    pressure/suction curves; show_mach_lines overlays the recorded
+    characteristic segments from the transition-arc marching.
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 6))
+    else:
+        fig = ax.figure
+
+    def _draw(d, alpha, lbl):
+        blade = d["blade"]
+        ax.fill(blade["x"], blade["y"], color=COLOR_BLADE_FILL, edgecolor="0.15",
+                 lw=1.5, alpha=0.85 * alpha, label=lbl or "Blade")
+        if show_surfaces:
+            for surf_key, color in (("pressure", COLOR_PRESSURE), ("suction", COLOR_MACH)):
+                surf = d[surf_key]
+                ax.plot(surf["x"], surf["y"], color=color, lw=1.2, alpha=0.7 * alpha,
+                         label=f"{lbl + ' ' if lbl else ''}{surf_key}")
+        if show_mach_lines:
+            for surf_key in ("pressure", "suction"):
+                surf = d[surf_key]
+                for x0, y0, x1, y1 in surf["mach_lines_inlet"] + surf["mach_lines_outlet"]:
+                    ax.plot([x0, x1], [y0, y1], color="0.6", lw=0.4, alpha=0.6 * alpha)
+
+    if reference is not None:
+        _draw(reference, 0.5, reference_label)
+    _draw(data, 1.0, label if reference is not None else "")
 
     units = data.get("units", "r*")
     ax.set_xlabel(f"x ({units})")

@@ -49,6 +49,7 @@ from moc.geometry import (
     parametrize_stator_blade,
     parametrize_stator_blade_semi,
 )
+from moc.rotor import design_rotor_vortex_blade
 
 BLADE_PARAM_FUNCS = {
     "full": parametrize_stator_blade,
@@ -340,6 +341,97 @@ blade_plots = html.Div(
     style={"flex": "1", "padding": "16px"},
 )
 
+# --------------------------------------------------------------------------
+# Phase 3: rotor blade design by the vortex-flow method (standalone --
+# doesn't consume Phase 1's output, has its own fluid/inlet state)
+# --------------------------------------------------------------------------
+ROTOR_DEFAULTS = dict(
+    P0_rel=5e5, T0_rel=400.0,
+    M_inlet=1.5, M_outlet=1.5, M_lower=1.05, M_upper=2.0,
+    beta_inlet=65.0, beta_outlet=-65.0, num_points=60,
+)
+
+rotor_controls = html.Div(
+    [
+        html.H4("Rotor blade (vortex-flow method)"),
+        html.Div(
+            "Supersonic impulse/reaction rotor blade by the vortex-flow "
+            "method (Goldman & Scullin 1968, NASA TN D-4421) -- see "
+            "notes/rotor_vortex_blade.md for the method and what the "
+            "pressure/suction/blade curves actually are. Standalone from "
+            "Phase 1/2 -- own fluid and inlet state.",
+            style={"fontSize": "11px", "color": "#888", "marginBottom": "10px"},
+        ),
+        dcc.Dropdown(id="rotor_fluid_name", options=FLUIDS, value=DEFAULT_FLUID, clearable=False),
+        html.Br(),
+        _field("P0 (Pa)", "rotor_P0", ROTOR_DEFAULTS["P0_rel"]),
+        _field("T0 (K)", "rotor_T0", ROTOR_DEFAULTS["T0_rel"]),
+
+        html.H4("Mach numbers", style={"marginTop": "16px"}),
+        _field("M inlet (uniform flow)", "rotor_M_inlet", ROTOR_DEFAULTS["M_inlet"]),
+        _field("M outlet (uniform flow)", "rotor_M_outlet", ROTOR_DEFAULTS["M_outlet"]),
+        _field("M lower (pressure-side arc)", "rotor_M_lower", ROTOR_DEFAULTS["M_lower"]),
+        _field("M upper (suction-side arc)", "rotor_M_upper", ROTOR_DEFAULTS["M_upper"]),
+
+        html.H4("Flow angles", style={"marginTop": "16px"}),
+        _field("beta inlet (deg)", "rotor_beta_inlet", ROTOR_DEFAULTS["beta_inlet"]),
+        _field("beta outlet (deg)", "rotor_beta_outlet", ROTOR_DEFAULTS["beta_outlet"]),
+
+        html.H4("Marching resolution", style={"marginTop": "16px"}),
+        _field("Points per transition arc", "rotor_num_points", ROTOR_DEFAULTS["num_points"],
+               step=1, min=10),
+
+        html.Button("Compute rotor blade", id="compute-rotor-btn", n_clicks=0,
+                     style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                            "fontWeight": "600"}),
+        html.Div(id="rotor-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+
+        html.H4("Display", style={"marginTop": "16px"}),
+        dcc.Checklist(
+            id="rotor-display-options",
+            options=[
+                {"label": " Show pressure/suction surfaces", "value": "surfaces"},
+                {"label": " Show characteristic (Mach) lines", "value": "mach_lines"},
+            ],
+            value=["surfaces"],
+            labelStyle={"display": "block", "fontSize": "13px"},
+        ),
+
+        html.H4("Compare", style={"marginTop": "16px"}),
+        html.Div([
+            html.Button("Pin as reference", id="pin-rotor-btn", n_clicks=0,
+                         style={"width": "48%", "padding": "6px", "marginRight": "4%"}),
+            html.Button("Clear reference", id="clear-rotor-ref-btn", n_clicks=0,
+                         style={"width": "48%", "padding": "6px"}),
+        ], style={"display": "flex"}),
+        html.Div(id="rotor-reference-status", style={"marginTop": "6px", "fontSize": "13px"}),
+    ],
+    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+           "overflowY": "auto"},
+)
+
+rotor_plots = html.Div(
+    [
+        html.Div(
+            [
+                html.Label("Save format:", style={"fontSize": "13px", "marginRight": "6px"}),
+                dcc.Dropdown(
+                    id="rotor-save-format",
+                    options=[{"label": fmt.upper(), "value": fmt} for fmt in ("png", "svg", "pdf")],
+                    value="png", clearable=False,
+                    style={"width": "100px", "display": "inline-block", "verticalAlign": "middle"},
+                ),
+                html.Button("Download this plot", id="rotor-download-btn", n_clicks=0,
+                             style={"marginLeft": "12px", "padding": "6px 12px"}),
+                dcc.Download(id="download-rotor-plot"),
+            ],
+            style={"display": "flex", "alignItems": "center", "marginBottom": "8px"},
+        ),
+        dcc.Graph(id="fig-rotor-blade", config={"displaylogo": False}, style={"height": "550px"}),
+    ],
+    style={"flex": "1", "padding": "16px"},
+)
+
 app.layout = html.Div(
     [
         html.H2("MOC Nozzle & Stator Design", style={"padding": "16px 16px 0 16px"}),
@@ -351,6 +443,8 @@ app.layout = html.Div(
                          children=html.Div([controls, plots], style={"display": "flex"})),
                 dcc.Tab(label="Phase 2: Stator blade", value="phase2",
                          children=html.Div([blade_controls, blade_plots], style={"display": "flex"})),
+                dcc.Tab(label="Phase 3: Rotor blade (vortex-flow)", value="phase3",
+                         children=html.Div([rotor_controls, rotor_plots], style={"display": "flex"})),
             ],
         ),
         dcc.Store(id="result-store"),
@@ -358,6 +452,8 @@ app.layout = html.Div(
         dcc.Store(id="blade-store"),
         dcc.Store(id="blade-edited-store"),
         dcc.Store(id="blade-reference-store"),
+        dcc.Store(id="rotor-store"),
+        dcc.Store(id="rotor-reference-store"),
     ],
     style={"fontFamily": "Helvetica, Arial, sans-serif"},
 )
@@ -680,6 +776,109 @@ def download_step(n_clicks, base_blade, edited_blade, kind, extrude_length):
 
     fname = "stator_blade_solid.step" if kind == "solid" else "stator_blade_face.step"
     return dcc.send_bytes(content, fname), html.Div("STEP file ready.", style={"color": "#1a7a1a"})
+
+
+# --------------------------------------------------------------------------
+# Phase 3 callbacks: rotor blade (vortex-flow method)
+# --------------------------------------------------------------------------
+@app.callback(
+    Output("rotor-store", "data"),
+    Output("rotor-status-message", "children"),
+    Input("compute-rotor-btn", "n_clicks"),
+    State("rotor_fluid_name", "value"),
+    State("rotor_P0", "value"),
+    State("rotor_T0", "value"),
+    State("rotor_M_inlet", "value"),
+    State("rotor_M_outlet", "value"),
+    State("rotor_M_lower", "value"),
+    State("rotor_M_upper", "value"),
+    State("rotor_beta_inlet", "value"),
+    State("rotor_beta_outlet", "value"),
+    State("rotor_num_points", "value"),
+    prevent_initial_call=True,
+)
+def run_rotor(n_clicks, fluid_name, P0, T0, M_inlet, M_outlet, M_lower, M_upper,
+              beta_inlet, beta_outlet, num_points):
+    try:
+        data = design_rotor_vortex_blade(
+            fluid_name=fluid_name, P0_rel=P0, T0_rel=T0,
+            M_inlet=M_inlet, M_outlet=M_outlet, M_lower=M_lower, M_upper=M_upper,
+            beta_inlet=beta_inlet, beta_outlet=beta_outlet,
+            backend="HEOS", num_points=int(num_points),
+        )
+    except Exception as e:
+        return None, html.Div(f"Error: {e}", style={"color": "#b00020"})
+
+    status = html.Div([
+        html.Span("Blade computed", style={"fontWeight": "600", "color": "#1a7a1a"}),
+        html.Div(f"pitch = {data['pitch']:.4f} {data['units']}"),
+        html.Div(f"chord = {data['chord']:.4f} {data['units']}"),
+        html.Div(f"solidity = {data['solidity']:.4f}"),
+        html.Div(f"beta_inlet/outlet = {data['beta_inlet']:.2f} / {data['beta_outlet']:.2f} deg"),
+    ])
+    return data, status
+
+
+@app.callback(
+    Output("rotor-reference-store", "data"),
+    Output("rotor-reference-status", "children"),
+    Input("pin-rotor-btn", "n_clicks"),
+    Input("clear-rotor-ref-btn", "n_clicks"),
+    State("rotor-store", "data"),
+    prevent_initial_call=True,
+)
+def manage_rotor_reference(pin_clicks, clear_clicks, current_data):
+    if ctx.triggered_id == "clear-rotor-ref-btn":
+        return None, ""
+    if ctx.triggered_id == "pin-rotor-btn":
+        if not current_data:
+            return dash.no_update, html.Div(
+                "Nothing to pin yet -- compute a rotor blade first.", style={"color": "#b00020"})
+        label = f"{current_data['fluid_name']}, pitch={current_data['pitch']:.3f}"
+        return current_data, html.Div(f"Reference pinned: {label}", style={"color": "#1a7a1a"})
+    return dash.no_update, dash.no_update
+
+
+@app.callback(
+    Output("fig-rotor-blade", "figure"),
+    Input("rotor-store", "data"),
+    Input("rotor-reference-store", "data"),
+    Input("rotor-display-options", "value"),
+)
+def update_rotor_plot(data, reference, display_options):
+    if not data:
+        return go.Figure()
+    ref = reference if reference else None
+    opts = display_options or []
+    return moc.plotly.plot_rotor_vortex_blade(
+        data, show_surfaces=("surfaces" in opts), show_mach_lines=("mach_lines" in opts),
+        reference=ref,
+    )
+
+
+@app.callback(
+    Output("download-rotor-plot", "data"),
+    Input("rotor-download-btn", "n_clicks"),
+    State("rotor-store", "data"),
+    State("rotor-reference-store", "data"),
+    State("rotor-display-options", "value"),
+    State("rotor-save-format", "value"),
+    prevent_initial_call=True,
+)
+def download_rotor_plot(n_clicks, data, reference, display_options, fmt):
+    if not data:
+        return dash.no_update
+    ref = reference if reference else None
+    opts = display_options or []
+    fig, _ax = moc.mpl.plot_rotor_vortex_blade(
+        data, show_surfaces=("surfaces" in opts), show_mach_lines=("mach_lines" in opts),
+        reference=ref,
+    )
+    buf = io.BytesIO()
+    fig.savefig(buf, format=fmt, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return dcc.send_bytes(buf.read(), f"rotor_vortex_blade.{fmt}")
 
 
 def main():
