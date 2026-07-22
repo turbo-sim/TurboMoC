@@ -58,6 +58,50 @@ each surface.
     arc  (lower)   (M_lower = const)   arc  (lower)
 ```
 
+## Pipeline overview
+
+```mermaid
+flowchart TD
+    A["<b>Input</b><br/>fluid, P0, T0<br/>M_inlet, M_outlet, M_lower, M_upper<br/>beta_inlet"]
+    B["Solve beta_outlet<br/><i>mass-flux continuity</i><br/>ρ·V·cos(β) = const (Eq. 9, real-gas)"]
+    C["Build real-gas Prandtl-Meyer table<br/>R*(ν) = a*/V(ν), μ(ν) = asin(1/M)"]
+    D1["March lower<br/>inlet transition arc"]
+    D2["March lower<br/>outlet transition arc"]
+    D3["March upper<br/>inlet transition arc"]
+    D4["March upper<br/>outlet transition arc"]
+    E["Lower &amp; upper circular arcs<br/>R*_wall, [alpha_inlet, alpha_outlet] span"]
+    F["Rotate &amp; assemble<br/>pressure / suction surfaces"]
+    G["Geometrical parameters<br/>pitch g* (GSTAR), chord c* (CSTAR), solidity"]
+    H["Close blade<br/>pressure + suction shifted by pitch,<br/>tangent straight segments"]
+    I["Round LE / TE<br/>with arc of circle<br/><i>(planned, not yet implemented)</i>"]
+    J["Scale by r_star<br/>dimensionless → physical profile"]
+    K["<b>Output</b><br/>X, Y, pitch, chord, solidity, beta_outlet"]
+
+    A --> B --> C
+    C --> D1 --> E
+    C --> D2 --> E
+    C --> D3 --> E
+    C --> D4 --> E
+    E --> F --> G --> H --> I --> J --> K
+
+    classDef io fill:#3b5bab,stroke:#1f2f5c,color:#ffffff,stroke-width:1.5px;
+    classDef thermo fill:#7c5cbf,stroke:#4a3575,color:#ffffff,stroke-width:1.5px;
+    classDef march fill:#e08a3c,stroke:#8a4f16,color:#1a1a1a,stroke-width:1.5px;
+    classDef geom fill:#3f9b6b,stroke:#215c3f,color:#ffffff,stroke-width:1.5px;
+    classDef planned fill:#e0e0e0,stroke:#9a9a9a,color:#333333,stroke-width:1.5px,stroke-dasharray: 4 3;
+
+    class A,K io;
+    class B,C thermo;
+    class D1,D2,D3,D4,E,F march;
+    class G,H,J geom;
+    class I planned;
+```
+
+Color key: **blue** = input/output, **purple** = thermodynamic setup (fluid
+table, continuity), **orange** = characteristics marching (the genuinely
+iterative part), **green** = geometry assembly/derived quantities, **grey
+dashed** = designed but not yet implemented (LE/TE rounding — see below).
+
 ## The two pieces of geometry, and which one is "just an arc"
 
 **Circular arc (middle of each surface):** closed-form. Once the wall

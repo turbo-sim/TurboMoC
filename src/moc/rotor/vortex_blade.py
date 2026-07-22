@@ -36,11 +36,16 @@ GSTAR discussion below) and the two extensions are parallel, so they never
 meet. This is the ordinary cascade far-field picture: THIS blade's suction
 surface runs parallel, upstream and downstream, to the NEXT (pitch-shifted)
 blade's pressure surface -- together they bound one flow passage. The solid
-single-blade cross-section (pressure and suction of the SAME blade, closed
-by leading/trailing-edge material) is a separate, still-unresolved question
--- TN D-4421 mentions closing segments (BE, GJ in its Fig. 1) and rounded
-LE/TE but gives no formula for their size, and this module does not
-fabricate one.
+single-blade cross-section (`blade` in the returned dict) closes pressure
+to suction+pitch with a rounded leading/trailing edge: the upper wall is
+shifted a bit further than +pitch (by `translate`, solved so the
+trailing-edge fillet's radius hits a target pitch/le_te_ratio), then each
+end is closed by a straight tangent segment plus a circular arc (built as
+a semicircle on that segment's own diameter -- see `_close_blade_le_te`).
+TN D-4421 itself only mentions closing segments (BE, GJ in its Fig. 1) and
+rounded LE/TE without giving a formula for their size; this module's
+choice (pitch/le_te_ratio, default 25) is this project's own, not TN
+D-4421's.
 
 History (why this replaced several earlier, unsuccessful attempts in this
 module): Paniagua (2014)'s own Eq. 17 (x*=-R*sin(phi), y*=R*cos(phi)) looks
@@ -137,6 +142,125 @@ def _solve_beta_outlet(manager, V_inlet, V_outlet, beta_inlet_rad):
             f"M_inlet/M_outlet/beta_inlet are too inconsistent with each other."
         )
     return -np.arccos(np.clip(cos_beta_outlet, -1.0, 1.0))
+
+
+def _line_intersect(P1, d1, P2, d2):
+    """Intersection of line P1+t*d1 with line P2+s*d2."""
+    A = np.array([[d1[0], -d2[0]], [d1[1], -d2[1]]])
+    b = np.array([P2[0] - P1[0], P2[1] - P1[1]])
+    t, _s = np.linalg.solve(A, b)
+    return np.array(P1) + t * np.array(d1)
+
+
+def _arc_from_diameter(L, T, interior_ref, num_points=40):
+    """
+    LE/TE closure arc: a semicircle with L and T as the two ends of a
+    DIAMETER (center = midpoint(L,T), radius = |L-T|/2). Tangent to the
+    lower wall's own tangent line at L and to the upper wall's tangent
+    line at T automatically, with no separate slope/projection step --
+    provided T itself was already built as the intersection of the upper
+    wall's own tangent line with the normal to the lower wall through L
+    (see the LE/TE construction in design_rotor_vortex_blade). This is
+    the exactly-determined case of "circle tangent to one point, tangent
+    to a second line": 3 constraints on a circle's 3 DOF (center x,y,
+    radius), unlike "circle through two points AND tangent at both"
+    which is 4 constraints on 3 DOF and has no solution in general.
+
+    Sweep direction is chosen via the sign of a cross product against
+    interior_ref (a point inside the passage) so the arc bulges away from
+    the passage -- this is what makes the LE and TE arcs come out with
+    opposite (CW/CCW) handedness automatically. A raw distance comparison
+    between the two candidate centers is NOT used here: since the two
+    candidate centers are only 2R apart, their distances to a far
+    interior_ref are nearly equal and the comparison is numerically
+    unreliable.
+    """
+    L = np.asarray(L, dtype=float)
+    T = np.asarray(T, dtype=float)
+    center = 0.5 * (L + T)
+    R = np.linalg.norm(T - L) / 2.0
+    ang1 = np.arctan2(L[1] - center[1], L[0] - center[0])
+    to_center = center - np.asarray(interior_ref, dtype=float)
+    radial = L - center
+    cross_z = to_center[0] * radial[1] - to_center[1] * radial[0]
+    sign = -1.0 if cross_z >= 0 else 1.0
+    angles = ang1 + sign * np.linspace(0, np.pi, num_points)
+    return center[0] + R * np.cos(angles), center[1] + R * np.sin(angles)
+
+
+def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
+                        le_te_ratio, num_points):
+    """
+    Close the pressure (`lower`) and suction+pitch (`upper`) open walls
+    into a finite solid blade with rounded leading/trailing edges, using
+    the validated line-first-then-arc construction (see _arc_from_diameter).
+
+    The upper wall is shifted a bit further than the bare `+pitch` used to
+    build `upper` itself -- by `translate`, beyond pitch -- so a circular
+    arc can be tangent to both walls' own tangent lines at the corners.
+    `translate` is not a free guess: it is the unique value that makes the
+    trailing-edge arc's radius equal a target r_TE = pitch/le_te_ratio
+    (a ratio, so this works whether or not the geometry has been
+    dimensionalized yet). The leading-edge radius then falls out as
+    whatever that SAME translate produces at the other end -- it is a
+    consequence, not an independently chosen target, and will differ from
+    r_TE whenever beta_inlet != beta_outlet (a reacting blade).
+
+    Returns (closed_x, closed_y, diagnostics) where diagnostics has
+    translate/le_radius/te_radius.
+    """
+    lower_x = np.asarray(lower["x"], dtype=float)
+    lower_y = np.asarray(lower["y"], dtype=float)
+    upper_x = np.asarray(upper["x"], dtype=float)
+    upper_y = np.asarray(upper["y"], dtype=float)
+
+    tan_bi = np.tan(beta_inlet_rad)
+    tan_bo = np.tan(beta_outlet_rad)
+
+    r_TE_target = pitch / le_te_ratio
+
+    u_TE_unit = np.array([1.0, tan_bo])
+    u_TE_unit /= np.linalg.norm(u_TE_unit)
+    n_TE_unit = np.array([-u_TE_unit[1], u_TE_unit[0]])
+    L1_check = np.array([lower_x[-1], lower_y[-1]])
+    U1_notranslate = np.array([upper_x[-1], upper_y[-1]])
+    D_TE_base = np.dot(U1_notranslate - L1_check, n_TE_unit)
+    translate = (2.0 * r_TE_target - D_TE_base) / n_TE_unit[1]
+
+    L0 = np.array([lower_x[0], lower_y[0]])
+    L1 = np.array([lower_x[-1], lower_y[-1]])
+    U0 = np.array([upper_x[0], upper_y[0] + translate])
+    U1 = np.array([upper_x[-1], upper_y[-1] + translate])
+
+    u_LE, n_LE = np.array([1.0, tan_bi]), np.array([-tan_bi, 1.0])
+    u_TE, n_TE = np.array([1.0, tan_bo]), np.array([-tan_bo, 1.0])
+
+    T_LE = _line_intersect(U0, u_LE, L0, n_LE)
+    T_TE = _line_intersect(U1, u_TE, L1, n_TE)
+
+    interior_ref = np.array([
+        0.0,
+        0.5 * (lower_y[len(lower_y) // 2] + upper_y[len(upper_y) // 2] + translate),
+    ])
+    le_x, le_y = _arc_from_diameter(L0, T_LE, interior_ref, num_points=num_points)
+    te_x, te_y = _arc_from_diameter(L1, T_TE, interior_ref, num_points=num_points)
+    le_radius = float(0.5 * np.linalg.norm(T_LE - L0))
+    te_radius = float(0.5 * np.linalg.norm(T_TE - L1))
+
+    upper_rev_x = upper_x[::-1]
+    upper_rev_y = (upper_y + translate)[::-1]
+    le_arc_rev_x = np.asarray(le_x)[::-1]
+    le_arc_rev_y = np.asarray(le_y)[::-1]
+
+    closed_x = np.concatenate([
+        lower_x, np.asarray(te_x)[1:], [U1[0]], upper_rev_x[1:], [T_LE[0]], le_arc_rev_x[1:],
+    ])
+    closed_y = np.concatenate([
+        lower_y, np.asarray(te_y)[1:], [U1[1]], upper_rev_y[1:], [T_LE[1]], le_arc_rev_y[1:],
+    ])
+
+    diagnostics = {"translate": float(translate), "le_radius": le_radius, "te_radius": te_radius}
+    return closed_x, closed_y, diagnostics
 
 
 def _V_of_M(manager, M_target):
@@ -350,6 +474,7 @@ def design_rotor_vortex_blade(
     Q0_rel=float("nan"),
     r_star=None,
     num_points=60,
+    le_te_ratio=25.0,
 ):
     """
     Design a supersonic rotor blade section by the vortex-flow method,
@@ -394,6 +519,14 @@ def design_rotor_vortex_blade(
     num_points : int
         Points per transition arc (endpoints included) -- a fine-grained
         stand-in for TN D-4421's explicit Delta-nu marching.
+    le_te_ratio : float
+        Target pitch/r_TE ratio used to size the rounded leading/trailing
+        edges that close the solid blade (default 25). The upper wall's
+        extra shift beyond `pitch` is solved so the trailing-edge arc's
+        radius hits pitch/le_te_ratio exactly; the leading-edge radius is
+        then whatever that same shift produces at the other end (equal to
+        the TE radius only for the pure-impulse, beta_inlet==beta_outlet
+        case) -- see `_close_blade_le_te`'s docstring.
 
     Returns
     -------
@@ -484,29 +617,44 @@ def design_rotor_vortex_blade(
     suction_packed["extension_inlet"] = (x0i * scale, y0i * scale, x1i * scale, y1i * scale)
     suction_packed["extension_outlet"] = (x0o * scale, y0o * scale, x1o * scale, y1o * scale)
 
-    # Blade wall: pressure (this blade, full) joined to suction SHIFTED BY
-    # +pitch (the neighboring blade's suction, one pitch over) by direct
-    # concatenation. This is NOT an arbitrary diagonal: by the same algebra
-    # as the pitch/GSTAR derivation above, pressure's own tangent
-    # continuation at each corner (slope tan_bi/tan_bo, exactly its transition
-    # arc's far-end tangent) lands EXACTLY on suction-shifted-by-pitch's
-    # corresponding corner --
-    #   y_last_i2 = pressure.y_inlet_far - tan_bi*(pressure.x_inlet_far - suction.x_inlet_far)
-    #             = suction.y_inlet_far + pitch   (substitute pitch's own definition)
-    # so the straight segment closing pressure to shifted-suction IS the
-    # tangent line, not a guess -- this is the picture confirmed against
-    # (pressure this-blade / suction adjacent-blade+pitch): the passage lives
-    # between suction (unshifted) and pressure shifted by -pitch (where the
-    # transition-arc characteristics are); this pressure/shifted-suction pair
-    # is the solid wall on the OTHER side of pressure.
-    suction_shifted_y = suction["y"] + pitch
-    blade_x = np.concatenate([pressure["x"], suction["x"][::-1]]) * scale
-    blade_y = np.concatenate([pressure["y"], suction_shifted_y[::-1]]) * scale
+    # Lower/upper walls of the blade as separate OPEN curves (not merged
+    # into the closed "blade" polygon above) -- lower is just `pressure`
+    # again; upper is `suction` shifted by +pitch (the curve the blade
+    # closure actually uses), which isn't otherwise exposed on its own
+    # (the plain "suction" key is the UNshifted surface). Handy for
+    # scripts that want to translate/compare the two walls independently
+    # rather than only the pre-closed polygon.
+    blade_lower = {"x": pressure_packed["x"], "y": pressure_packed["y"]}
+    blade_upper = {
+        "x": suction_packed["x"],
+        "y": [y + pitch * scale for y in suction_packed["y"]],
+    }
+
+    # Solid single-blade cross-section, LE/TE closed by circular-arc
+    # fillets: lower wall (pressure) -> TE arc -> TE straight stub ->
+    # upper wall (suction+pitch, reversed) -> LE straight stub -> LE arc
+    # (reversed) -> back to the lower wall's own start. See
+    # `_close_blade_le_te`/`_arc_from_diameter` for the construction
+    # (line built first via plain 2-line intersection, then the arc is a
+    # semicircle on that line as its diameter -- exactly-determined, no
+    # circle-through-two-tangent-points overconstraint).
+    blade_x, blade_y, le_te_diag = _close_blade_le_te(
+        blade_lower, blade_upper, pitch * scale, beta_inlet_rad, beta_outlet_rad,
+        le_te_ratio=le_te_ratio, num_points=num_points,
+    )
 
     return {
         "pressure": pressure_packed,
         "suction": suction_packed,
-        "blade": {"x": blade_x.tolist(), "y": blade_y.tolist(), "closure": "pressure_to_suction_plus_pitch_tangent"},
+        "blade_lower": blade_lower,
+        "blade_upper": blade_upper,
+        "blade": {
+            "x": blade_x.tolist(), "y": blade_y.tolist(),
+            "closure": "circular_arc_le_te_fillet",
+            "le_radius": le_te_diag["le_radius"],
+            "te_radius": le_te_diag["te_radius"],
+            "translate": le_te_diag["translate"],
+        },
         "fluid_name": fluid_name,
         "M_inlet": float(M_inlet), "M_outlet": float(M_outlet),
         "M_lower": float(M_lower), "M_upper": float(M_upper),
