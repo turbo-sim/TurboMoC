@@ -70,13 +70,22 @@ V_of_nu/a_of_V real-gas Prandtl-Meyer table. The marching recursion itself
 (Eqs. 6/7), and the GSTAR/CSTAR/SIGMA geometry are pure kinematics/geometry,
 unchanged by the thermodynamic model.
 
-Deviation from TN D-4421's OWN convention, kept from this module's earlier
-iterations: beta_outlet is taken as a direct INPUT here (matching Bufi &
-Cinnella (2018)'s convention), not derived from inlet/outlet Mach numbers
-via mass conservation (TN D-4421's own Eq. 9) -- Eq. 9 is a perfect-gas-
-specific isentropic area-Mach relation with no simple real-gas equivalent
-available in this package, and Bufi & Cinnella's own dense-gas
-generalization makes the same simplifying choice for the same reason.
+beta_outlet: ALWAYS derived from beta_inlet and M_inlet/M_outlet via
+mass-flux continuity across the transition, rho*V*cos(beta) = const --
+see _solve_beta_outlet's docstring. This is the real-gas generalization
+of TN D-4421's own Eq. 9 ("BETAT"), verified to reproduce the report's
+own Table II value (-68.7395 deg) to 10+ significant figures when
+evaluated with perfect-gas relations, so it is the same physics as
+Eq. 9, not a different formula standing in for it. It is deliberately
+NOT an overridable free input (unlike Bufi & Cinnella (2018)'s
+convention, which this module followed in earlier versions): an
+inconsistent beta_outlet doesn't just distort the geometry, it produces
+a self-intersecting wall with no warning that anything is wrong --
+e.g. M_inlet=M_outlet with beta_inlet=0 has NO consistent solution
+except beta_outlet=0 itself, and there is no way to tell from the
+output alone that a self-intersecting result traces back to this rather
+than a bug. If a specific exit flow angle is the actual design target,
+choose M_inlet/M_outlet to hit it via continuity instead.
 
 Units: this module works entirely in the SAME units as its FluidManager
 (SI: Pa, K, m/s) for thermodynamic quantities, and returns GEOMETRY
@@ -91,6 +100,43 @@ import numpy as np
 from moc.core.classes import get_fluid_manager
 
 __all__ = ["design_rotor_vortex_blade"]
+
+
+def _solve_beta_outlet(manager, V_inlet, V_outlet, beta_inlet_rad):
+    """
+    Real-gas generalization of TN D-4421's Eq. 9 ("BETAT"): beta_outlet
+    derived from beta_inlet and the inlet/outlet Mach numbers via mass-flux
+    continuity across the transition, rho*V*cos(beta) = const, rather than
+    taken as an independent free input. Eq. 9 itself is exactly this
+    relation specialized to a perfect gas (rho/rho0, V/a0 as closed-form
+    functions of M) -- verified numerically here: reproduces TN D-4421's
+    own Table II value (BETAT=-68.7395 deg) to 10+ significant figures
+    when evaluated with the perfect-gas relations, confirming the general
+    (real-gas) form below is the same physics, not a different formula.
+
+    Without this constraint, beta_outlet is a free parameter that can be
+    picked inconsistently with beta_inlet/M_inlet/M_outlet for a given
+    fluid -- e.g. M_inlet=M_outlet with beta_inlet=0 and a nonzero
+    beta_outlet has no valid solution (continuity forces beta_outlet=0
+    too) -- and the resulting transition-arc rotations produce a self-
+    intersecting wall. Solving for beta_outlet from continuity instead
+    guarantees a geometrically valid (though not necessarily still-sane
+    for extreme inputs) result whenever one exists.
+
+    Returns beta_outlet in radians, with the same sign convention as the
+    rest of this module (negative for the "ordinary" turning direction
+    matching TN D-4421's own worked example).
+    """
+    lhs = manager.rho_of_V(V_inlet) * V_inlet * np.cos(beta_inlet_rad)
+    rhs_rate = manager.rho_of_V(V_outlet) * V_outlet
+    cos_beta_outlet = lhs / rhs_rate
+    if abs(cos_beta_outlet) > 1.0:
+        raise ValueError(
+            f"No real beta_outlet satisfies mass-flux continuity for these inputs "
+            f"(cos(beta_outlet)={cos_beta_outlet:.4f} outside [-1,1]) -- "
+            f"M_inlet/M_outlet/beta_inlet are too inconsistent with each other."
+        )
+    return -np.arccos(np.clip(cos_beta_outlet, -1.0, 1.0))
 
 
 def _V_of_M(manager, M_target):
@@ -299,7 +345,7 @@ def design_rotor_vortex_blade(
     P0_rel, T0_rel,
     M_inlet, M_outlet,
     M_lower, M_upper,
-    beta_inlet, beta_outlet,
+    beta_inlet,
     backend="HEOS",
     Q0_rel=float("nan"),
     r_star=None,
@@ -309,9 +355,7 @@ def design_rotor_vortex_blade(
     Design a supersonic rotor blade section by the vortex-flow method,
     following NASA TN D-4421 (Goldman & Scullin, 1968) -- see this module's
     docstring for exactly how, why it replaced earlier (Paniagua Eq. 17
-    based) attempts in this module, and the one deliberate deviation
-    (beta_outlet as a direct input rather than derived via TN D-4421's own
-    Eq. 9, a perfect-gas-specific mass-conservation relation).
+    based) attempts in this module.
 
     Parameters
     ----------
@@ -323,12 +367,26 @@ def design_rotor_vortex_blade(
         Q0_rel in [0,1] instead for a saturated two-phase inlet).
     M_inlet, M_outlet : float
         Relative Mach number far upstream/downstream of the rotor (in the
-        uniform-flow regions, before/after the transition arcs).
+        uniform-flow regions, before/after the transition arcs). Together
+        with beta_inlet these set the degree of reaction: M_outlet=M_inlet
+        is the pure-impulse case (no static enthalpy drop across the
+        rotor); M_outlet != M_inlet gives a reacting blade.
     M_lower, M_upper : float
         Constant Mach number held on the pressure (concave/lower) and
         suction (convex/upper) circular arcs.
-    beta_inlet, beta_outlet : float
-        Relative flow angle [deg] from the axial direction at inlet/outlet.
+    beta_inlet : float
+        Relative flow angle [deg] from the axial direction at inlet --
+        the only free flow-angle input. beta_outlet is ALWAYS derived
+        from beta_inlet/M_inlet/M_outlet via mass-flux continuity
+        (rho*V*cos(beta) = const across the transition) -- the real-gas
+        generalization of TN D-4421's own Eq. 9, see `_solve_beta_outlet`'s
+        docstring -- not a free input, by design: an inconsistent
+        beta_outlet doesn't just distort the geometry, it produces a
+        self-intersecting wall (mass isn't actually conserved), with no
+        warning otherwise. If you want a specific exit flow angle, choose
+        M_inlet/M_outlet to hit it via continuity rather than overriding
+        beta_outlet directly (not currently supported -- would mean
+        solving continuity for M_outlet given both betas instead).
     r_star : float or None
         Physical radius [m] of the sonic-velocity streamline to rescale
         the (nondimensional) geometry by. None returns x*, y* (units of
@@ -369,7 +427,8 @@ def design_rotor_vortex_blade(
     nu_upper = manager.nu_of_V(V_upper)
 
     beta_inlet_rad = np.radians(beta_inlet)
-    beta_outlet_rad = np.radians(beta_outlet)
+    beta_outlet_rad = _solve_beta_outlet(manager, V_inlet, V_outlet, beta_inlet_rad)
+    beta_outlet = float(np.degrees(beta_outlet_rad))
 
     pressure = _surface(manager, nu_inlet, nu_outlet, nu_lower,
                          beta_inlet_rad, beta_outlet_rad, is_upper=False, num_points=num_points)

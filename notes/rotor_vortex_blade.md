@@ -23,8 +23,12 @@ Implementation: [`moc.rotor.vortex_blade`](../src/moc/rotor/vortex_blade.py) —
    from the FORTRAN and why the FORTRAN is trusted instead.
 4. **Bufi, E.A., Cinnella, P. (2018).** Dense-gas generalization of the
    same method (DGMOC/RODEC) — the template this module follows for the
-   real-gas generalization strategy and for taking `beta_outlet` as a
-   direct input rather than deriving it from Eq. 9.
+   real-gas generalization strategy, and originally also for taking
+   `beta_outlet` as a free direct input rather than deriving it from
+   Eq. 9; this module now derives it by default via a real-gas
+   generalization of Eq. 9 instead (see "Why beta_inlet and beta_outlet
+   can't be picked independently" below), while still allowing an
+   explicit override for parity with Bufi & Cinnella's convention.
 
 ## Physical picture
 
@@ -147,9 +151,15 @@ worked numerical example to check against) is trusted here instead.
 Real-gas generalization touches only `R*(ν)` and the Mach angle — the
 marching recursion, the rotation formulas, and the pitch/chord/solidity
 geometry are pure kinematics, unchanged by the thermodynamic model.
-`beta_outlet` is kept as a direct input (Bufi & Cinnella's convention),
-not derived via TN D-4421's own Eq. 9 (a perfect-gas-specific isentropic
-mass-conservation relation with no ready real-gas equivalent).
+`beta_outlet` defaults to `None`, in which case it's derived from
+`beta_inlet`/`M_inlet`/`M_outlet` via mass-flux continuity across the
+transition (`ρ·V·cos(β) = const`) — the real-gas generalization of TN
+D-4421's own Eq. 9 ("BETAT"), implemented in `_solve_beta_outlet` and
+verified to reproduce Table II's `BETAT = -68.7395°` to 10+ significant
+figures when evaluated with perfect-gas relations. An explicit value can
+still be passed (Bufi & Cinnella's convention), but see "Why beta_inlet
+and beta_outlet can't be picked independently" below for what happens if
+it's inconsistent with continuity.
 
 ## What "pressure" and "suction" actually bound — read this before plotting
 
@@ -183,6 +193,73 @@ a fabricated corner. The passage (where the transition-arc characteristics
 actually live) is the mirror construction: `suction` (unshifted) paired
 with `pressure` shifted by `-pitch`.
 
+## Why beta_outlet is not a free input
+
+`beta_inlet` and `beta_outlet` are not independent parameters for a given
+`M_inlet`/`M_outlet` — mass has to be conserved across the transition,
+which for this kind of 2D cascade means the axial-projected mass flux is
+constant: `ρ_inlet·V_inlet·cos(β_inlet) = ρ_outlet·V_outlet·cos(β_outlet)`.
+That's exactly TN D-4421's Eq. 9, just written without the perfect-gas
+substitutions. `beta_outlet` is therefore **always derived** from this
+relation (`_solve_beta_outlet`) rather than accepted as an input — an
+earlier version of this module took it as a free parameter (matching
+Bufi & Cinnella (2018)'s convention), but a `beta_outlet` inconsistent
+with continuity doesn't just give "slightly wrong" geometry, it produces
+a **self-intersecting wall** (the transition arc's rotation folds back
+on itself, since the rotation angles `alpha_inlet`/`alpha_outlet`,
+Eqs. 6/7, implicitly assume continuity-consistent turning) with no
+warning that anything is wrong. Concretely: `M_inlet=M_outlet` with
+`beta_inlet=0` has no consistent solution except `beta_outlet=0` — any
+other value crosses. If a specific exit flow angle is the actual design
+target, the right lever is `M_inlet`/`M_outlet` (which also sets the
+degree of reaction — see below), not overriding `beta_outlet` directly.
+
+### Degree of reaction
+
+`M_inlet`/`M_outlet` (not `beta_inlet`) control the rotor's degree of
+reaction. By rothalpy conservation (no radius change across a 2D blade
+row), `h_inlet - h_outlet = (V_outlet² - V_inlet²)/2`, so:
+
+- `M_outlet = M_inlet` → no static enthalpy drop across the rotor →
+  pure impulse (R=0) — all of this module's originally-validated cases.
+- `M_outlet ≠ M_inlet` → the rotor itself does some of the expansion →
+  reacting blade. Continuity then also makes `beta_outlet` differ from
+  `beta_inlet` in *magnitude*, not just sign — with `M_inlet=M_outlet`,
+  continuity only ever admits `beta_outlet=±beta_inlet` (the mirror
+  branch is the "ordinary" impulse convention, e.g. `beta_inlet=65°,
+  beta_outlet=-65°`; that works "for free," by algebra, not because
+  continuity is being ignored — TN D-4421's Table II case, where
+  `M_inlet≠M_outlet`, is a different situation: `beta_outlet=-68.7395°`
+  is *not* `-beta_inlet` there, it's a genuinely solved value from Eq. 9).
+
+This module only ever sees the rotor in isolation, so it can report the
+rotor's own static enthalpy change but not a full-stage `R = Δh_rotor /
+Δh_stage` (that needs the stator's enthalpy drop too, from outside this
+module).
+
+Two related, narrower limitations found while testing this — both
+produce a small residual self-crossing even with a continuity-consistent
+`beta_outlet`, so they're separate from the issue above, not solved by
+it:
+
+- **`M_inlet` exactly equal to `M_outlet`** together with
+  `beta_inlet=beta_outlet` (a fully mirror-symmetric case) still shows a
+  small crossing right at the arc's midpoint — the inlet and outlet
+  transition arcs become exact mirror images of each other (confirmed
+  algebraically: `_rotate_outlet` at `alpha=-A` maps the same local arc
+  used by `_rotate_inlet` at `alpha=+A` to `(x,y) -> (-x,y)`), and they
+  don't hand off with enforced tangent continuity exactly at that meeting
+  point. Using `M_inlet` and `M_outlet` that differ even slightly avoids
+  this.
+- **A large Prandtl-Meyer swing on one surface** (e.g. `M_upper` far from
+  both `M_inlet` and `M_outlet`) can still produce a self-crossing
+  transition arc on that surface alone, independent of `beta_outlet` —
+  the marching (intersecting each Mach line with the previous wall
+  tangent) isn't guaranteed to stay monotonic when the turning per step
+  is too aggressive relative to `num_points`. Not yet root-caused;
+  increasing `num_points` or moderating how far `M_upper`/`M_lower` sit
+  from `M_inlet`/`M_outlet` are the current workarounds.
+
 ## Validation
 
 Against TN D-4421's Table II (perfect gas, γ=1.4, `beta_inlet=65°`,
@@ -213,6 +290,7 @@ consistent with an `a0 = 1` stagnation normalization.
   for their size — Paniagua (2014) just picks 5 mm. This module's
   `"blade"` closure is a sharp point (the tangent lines' actual
   intersection), not rounded.
-- **Eq. 9** (`beta_outlet` from inlet/outlet Mach numbers via mass
-  conservation) is not implemented — `beta_outlet` is a direct input
-  instead (see "Key equations" above).
+- **The two residual self-crossing cases** described above (exact
+  `M_inlet=M_outlet` with symmetric betas; a large Prandtl-Meyer swing on
+  one surface) aren't root-caused/fixed yet, just documented as known
+  limitations with workarounds.

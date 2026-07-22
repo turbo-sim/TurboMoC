@@ -323,10 +323,11 @@ class FluidManager:
         raw_fluid = self.raw_fluid
         V_list = [V_star]
         a_list = [self.a_star]
+        rho_list = [self.critical_state["rho"]]
         for p in p_vec[1:]:
             try:
                 st = raw_fluid.get_state(jxp.PSmass_INPUTS, float(p), float(self.s0))
-                h, a = float(st["h"]), float(st["a"])
+                h, a, rho = float(st["h"]), float(st["a"]), float(st["rho"])
                 if not np.isfinite(h) or not np.isfinite(a) or a <= 0:
                     break
                 V = float(np.sqrt(2 * max(0.0, self.h0 - h)))
@@ -334,11 +335,13 @@ class FluidManager:
                     break
                 V_list.append(V)
                 a_list.append(a)
+                rho_list.append(rho)
             except Exception:
                 break
 
         V_arr = np.array(V_list)
         a_arr = np.array(a_list)
+        rho_arr = np.array(rho_list)
         integrand = np.sqrt(np.clip(1.0 / a_arr**2 - 1.0 / V_arr**2, 0.0, None))
         nu_arr = np.zeros_like(V_arr)
         for i in range(1, len(V_arr)):
@@ -347,6 +350,7 @@ class FluidManager:
         self._nu_V_table = V_arr
         self._nu_nu_table = nu_arr
         self._nu_a_table = a_arr
+        self._nu_rho_table = rho_arr
 
         # Cubic splines replace linear np.interp for all three lookups, so
         # values *between* table nodes are no longer piecewise-linear
@@ -357,6 +361,7 @@ class FluidManager:
         # those before building the nu -> V inverse spline.
         self._spline_nu_of_V = CubicSpline(V_arr, nu_arr)
         self._spline_a_of_V = CubicSpline(V_arr, a_arr)
+        self._spline_rho_of_V = CubicSpline(V_arr, rho_arr)
         nu_unique, idx_unique = np.unique(nu_arr, return_index=True)
         self._spline_V_of_nu = CubicSpline(nu_unique, V_arr[idx_unique])
         self._nu_max = float(nu_arr[-1])
@@ -370,6 +375,11 @@ class FluidManager:
         """Speed of sound at velocity V along the same s=s0 isentrope used for nu_of_V (cheap table lookup, no fluid call)."""
         V = float(np.clip(float(V), self._nu_V_table[0], self._nu_V_table[-1]))
         return float(self._spline_a_of_V(V))
+
+    def rho_of_V(self, V):
+        """Density at velocity V along the same s=s0 isentrope used for nu_of_V (cheap table lookup, no fluid call)."""
+        V = float(np.clip(float(V), self._nu_V_table[0], self._nu_V_table[-1]))
+        return float(self._spline_rho_of_V(V))
 
     def V_of_nu(self, nu_val):
         """Inverse of nu_of_V: velocity at a given real-gas Prandtl-Meyer angle (radians)."""

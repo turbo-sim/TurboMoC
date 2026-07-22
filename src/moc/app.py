@@ -348,7 +348,7 @@ blade_plots = html.Div(
 ROTOR_DEFAULTS = dict(
     P0_rel=5e5, T0_rel=400.0,
     M_inlet=1.5, M_outlet=1.5, M_lower=1.05, M_upper=2.0,
-    beta_inlet=65.0, beta_outlet=-65.0, num_points=60,
+    beta_inlet=65.0, num_points=60,
 )
 
 rotor_controls = html.Div(
@@ -375,7 +375,14 @@ rotor_controls = html.Div(
 
         html.H4("Flow angles", style={"marginTop": "16px"}),
         _field("beta inlet (deg)", "rotor_beta_inlet", ROTOR_DEFAULTS["beta_inlet"]),
-        _field("beta outlet (deg)", "rotor_beta_outlet", ROTOR_DEFAULTS["beta_outlet"]),
+        html.Div(
+            "beta outlet is always derived from beta_inlet and "
+            "M_inlet/M_outlet via mass-flux continuity (rho*V*cos(beta) "
+            "= const) -- not a free input, since an inconsistent value "
+            "produces a self-intersecting wall with no warning. To "
+            "target a specific exit angle, adjust M_inlet/M_outlet.",
+            style={"fontSize": "11px", "color": "#888", "marginTop": "4px"},
+        ),
 
         html.H4("Marching resolution", style={"marginTop": "16px"}),
         _field("Points per transition arc", "rotor_num_points", ROTOR_DEFAULTS["num_points"],
@@ -853,17 +860,16 @@ def download_step(n_clicks, base_blade, edited_blade, kind, extrude_length):
     State("rotor_M_lower", "value"),
     State("rotor_M_upper", "value"),
     State("rotor_beta_inlet", "value"),
-    State("rotor_beta_outlet", "value"),
     State("rotor_num_points", "value"),
     prevent_initial_call=True,
 )
 def run_rotor(n_clicks, fluid_name, P0, T0, M_inlet, M_outlet, M_lower, M_upper,
-              beta_inlet, beta_outlet, num_points):
+              beta_inlet, num_points):
     try:
         data = design_rotor_vortex_blade(
             fluid_name=fluid_name, P0_rel=P0, T0_rel=T0,
             M_inlet=M_inlet, M_outlet=M_outlet, M_lower=M_lower, M_upper=M_upper,
-            beta_inlet=beta_inlet, beta_outlet=beta_outlet,
+            beta_inlet=beta_inlet,
             backend="HEOS", num_points=int(num_points),
         )
     except Exception as e:
