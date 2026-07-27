@@ -98,7 +98,9 @@ FLUIDS = list_supported_fluids()
 DEFAULT_FLUID = "Nitrogen" if "Nitrogen" in FLUIDS else FLUIDS[0]
 
 DEFAULTS = dict(
-    P0=20e5, T0=113.0, Q0=0.5, p_back=2e5,
+    # P0/p_back are in bar (UI + save/load convention) -- converted to Pa
+    # only at the design_nozzle() call boundary in run_design.
+    P0=20.0, T0=113.0, Q0=0.5, p_back=2.0,
     y_t=0.01, n=15, rho_t=0.2, rho_d=0.1,
 )
 
@@ -107,12 +109,22 @@ DEFAULTS = dict(
 # Layout
 # --------------------------------------------------------------------------
 def _field(label, id, value, **kwargs):
+    """Label and input side by side (not label-on-top-of-a-full-width-box
+    that's mostly empty) -- the input only needs to be wide enough for a
+    handful of digits. label is rendered with MathJax (dcc.Markdown(
+    mathjax=True)), so labels are given as LaTeX (e.g. r"$M_{\text{in}}$")
+    rather than plain text -- a proper subscripted symbol everywhere
+    instead of a spelled-out variable name."""
     return html.Div(
         [
-            html.Label(label, style={"fontSize": "13px", "fontWeight": "600", "display": "block"}),
-            dcc.Input(id=id, value=value, type="number", style={"width": "100%"}, **kwargs),
+            dcc.Markdown(label, mathjax=True,
+                          style={"fontSize": "13px", "fontWeight": "600",
+                                  "flex": "1 1 auto", "marginRight": "8px"}),
+            dcc.Input(id=id, value=value, type="number",
+                       style={"width": "90px", "flex": "0 0 auto"}, **kwargs),
         ],
-        style={"marginBottom": "10px"},
+        style={"display": "flex", "alignItems": "center",
+               "justifyContent": "space-between", "marginBottom": "8px"},
     )
 
 
@@ -158,7 +170,7 @@ controls = html.Div(
         ),
         dcc.Download(id="download-nozzle-json"),
 
-        html.H4("Fluid & inlet"),
+        html.H4("Fluid"),
         dcc.Dropdown(id="fluid_name", options=FLUIDS, value=DEFAULT_FLUID, clearable=False),
         html.Br(),
         dcc.RadioItems(
@@ -170,13 +182,13 @@ controls = html.Div(
             value="T0",
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
-        _field("P0 (Pa)", "P0", DEFAULTS["P0"]),
-        html.Div(_field("T0 (K)", "T0", DEFAULTS["T0"]), id="T0_container"),
-        html.Div(_field("Q0 (-)", "Q0", DEFAULTS["Q0"], min=0, max=1),
+        _field(r"$P_0$ (bar)", "P0", DEFAULTS["P0"]),
+        html.Div(_field(r"$T_0$ (K)", "T0", DEFAULTS["T0"]), id="T0_container"),
+        html.Div(_field(r"$Q_0$ (-)", "Q0", DEFAULTS["Q0"], min=0, max=1),
                  id="Q0_container", style={"display": "none"}),
 
         html.H4("Design target"),
-        _field("Back pressure p_back (Pa)", "p_back", DEFAULTS["p_back"]),
+        _field(r"$p_{\text{back}}$ (bar)", "p_back", DEFAULTS["p_back"]),
 
         html.H4("Solver"),
         dcc.RadioItems(
@@ -189,25 +201,22 @@ controls = html.Div(
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
 
-        html.H4("Throat (Stage 1) initialization"),
+        html.H4("Sonic line"),
         dcc.RadioItems(
             id="stage1_mode",
             options=[
-                {"label": " Flat front (general default -- flashing, "
-                          "single-phase, two-phase-dome inlets)", "value": "flat"},
-                {"label": " True Sauer sonic line (only valid where the "
-                          "isentrope crosses M=1 smoothly, no flashing jump)",
-                 "value": "sauer"},
+                {"label": " Linear", "value": "flat"},
+                {"label": " Parabolic (Sauer line)", "value": "sauer"},
             ],
             value="flat",
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
 
         html.H4("Geometry"),
-        _field("Throat half-height y_t (m)", "y_t", DEFAULTS["y_t"]),
-        _field("Throat curvature rho_t", "rho_t", DEFAULTS["rho_t"]),
-        _field("Divergent curvature rho_d", "rho_d", DEFAULTS["rho_d"]),
-        _field("Front resolution n", "n", DEFAULTS["n"], step=1, min=5),
+        _field(r"$y_t$ (m)", "y_t", DEFAULTS["y_t"]),
+        _field(r"$\rho_t$", "rho_t", DEFAULTS["rho_t"]),
+        _field(r"$\rho_d$", "rho_d", DEFAULTS["rho_d"]),
+        _field(r"$n$", "n", DEFAULTS["n"], step=1, min=5),
 
         html.Button("Compute", id="compute-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px",
@@ -234,12 +243,19 @@ plots = html.Div(
     [
         html.Div(
             [
-                html.Label("Save format:", style={"fontSize": "13px", "marginRight": "6px"}),
+                html.Label("Download:", style={"fontSize": "13px", "marginRight": "6px"}),
+                dcc.Dropdown(
+                    id="plot-select",
+                    options=[{"label": TAB_LABELS[key], "value": key} for key in TAB_LABELS],
+                    value="contour", clearable=False,
+                    style={"width": "180px", "display": "inline-block", "verticalAlign": "middle"},
+                ),
                 dcc.Dropdown(
                     id="save-format",
                     options=[{"label": fmt.upper(), "value": fmt} for fmt in ("png", "svg", "pdf")],
                     value="png", clearable=False,
-                    style={"width": "100px", "display": "inline-block", "verticalAlign": "middle"},
+                    style={"width": "100px", "display": "inline-block", "verticalAlign": "middle",
+                           "marginLeft": "8px"},
                 ),
                 html.Button("Download this plot", id="download-btn", n_clicks=0,
                              style={"marginLeft": "12px", "padding": "6px 12px"}),
@@ -247,14 +263,23 @@ plots = html.Div(
             ],
             style={"display": "flex", "alignItems": "center", "marginBottom": "8px"},
         ),
-        dcc.Tabs(
-            id="plot-tabs",
-            value="contour",
-            children=[
-                dcc.Tab(label=TAB_LABELS[key], value=key,
-                         children=dcc.Graph(id=f"fig-{key}", config={"displaylogo": False}))
+        # All five views in one panel (not one-at-a-time tabs) -- a 2-column
+        # grid so the whole nozzle design (geometry, mesh, and both property
+        # distributions) reads at a glance without clicking through tabs.
+        html.Div(
+            [
+                html.Div(
+                    [
+                        html.Div(TAB_LABELS[key], style={"fontWeight": "600", "fontSize": "13px",
+                                                            "marginBottom": "4px"}),
+                        dcc.Graph(id=f"fig-{key}", config={"displaylogo": False},
+                                   style={"height": "320px"}),
+                    ],
+                    style={"border": "1px solid #ddd", "borderRadius": "4px", "padding": "8px"},
+                )
                 for key in TAB_LABELS
             ],
+            style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "12px"},
         ),
     ],
     style={"flex": "1", "padding": "16px"},
@@ -280,14 +305,14 @@ blade_controls = html.Div(
             value="full",
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
-        _field("Metal angle in (deg)", "metal_angle_in", BLADE_DEFAULTS["metal_angle_in"]),
-        _field("Metal angle out (deg)", "metal_angle_out", BLADE_DEFAULTS["metal_angle_out"]),
-        _field("Trailing edge radius (mm)", "r_trailing", BLADE_DEFAULTS["r_trailing"]),
-        _field("Leading edge x (mm)", "leading_edge_x", BLADE_DEFAULTS["leading_edge_x"]),
-        _field("Leading edge y (mm)", "leading_edge_y", BLADE_DEFAULTS["leading_edge_y"]),
-        _field("Inlet opening ratio (pitch / inlet opening)", "inlet_opening_ratio",
+        _field(r"$\beta_{\text{metal,in}}$ (deg)", "metal_angle_in", BLADE_DEFAULTS["metal_angle_in"]),
+        _field(r"$\beta_{\text{metal,out}}$ (deg)", "metal_angle_out", BLADE_DEFAULTS["metal_angle_out"]),
+        _field(r"$r_{\text{TE}}$ (mm)", "r_trailing", BLADE_DEFAULTS["r_trailing"]),
+        _field(r"$x_{\text{LE}}$ (mm)", "leading_edge_x", BLADE_DEFAULTS["leading_edge_x"]),
+        _field(r"$y_{\text{LE}}$ (mm)", "leading_edge_y", BLADE_DEFAULTS["leading_edge_y"]),
+        _field(r"$s / o_1$ (pitch / inlet opening)", "inlet_opening_ratio",
                BLADE_DEFAULTS["inlet_opening_ratio"]),
-        _field("B-spline control points", "n_cp", BLADE_DEFAULTS["n_cp"], step=1, min=6),
+        _field(r"$n_{cp}$ (B-spline control points)", "n_cp", BLADE_DEFAULTS["n_cp"], step=1, min=6),
 
         html.Button("Compute blade", id="compute-blade-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px",
@@ -295,12 +320,12 @@ blade_controls = html.Div(
         html.Div(id="blade-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
 
         html.H4("Cascade view", style={"marginTop": "16px"}),
-        _field("Number of blades to plot", "n_blades_plot", 2, step=1, min=1),
+        _field(r"$N_{\text{blades}}$ (to plot)", "n_blades_plot", 2, step=1, min=1),
 
         html.H4("Edit control points", style={"marginTop": "16px"}),
         dcc.Dropdown(id="cp_index", options=[], value=None, clearable=False,
                       placeholder="Control point index"),
-        _field("Move distance (mm, +/-)", "nudge_distance", 1.0),
+        _field(r"$\Delta n$ (mm, +/-)", "nudge_distance", 1.0),
         html.Div([
             html.Button("Nudge along normal", id="nudge-cp-btn", n_clicks=0,
                          style={"width": "68%", "padding": "6px", "marginRight": "4%"}),
@@ -328,7 +353,7 @@ blade_controls = html.Div(
             value="solid",
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
-        _field("Extrude length (mm)", "extrude_length", 1.0),
+        _field(r"$L_{\text{extrude}}$ (mm)", "extrude_length", 1.0),
         html.Button("Download STEP", id="download-step-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px"}),
         dcc.Download(id="download-step"),
@@ -375,21 +400,21 @@ rotor_controls = html.Div(
         html.H4("Rotor blade (vortex-flow method)"),
         dcc.Dropdown(id="rotor_fluid_name", options=FLUIDS, value=DEFAULT_FLUID, clearable=False),
         html.Br(),
-        _field("P0 (Pa)", "rotor_P0", ROTOR_DEFAULTS["P0_rel"]),
-        _field("T0 (K)", "rotor_T0", ROTOR_DEFAULTS["T0_rel"]),
+        _field(r"$P_0$ (Pa)", "rotor_P0", ROTOR_DEFAULTS["P0_rel"]),
+        _field(r"$T_0$ (K)", "rotor_T0", ROTOR_DEFAULTS["T0_rel"]),
 
         html.H4("Mach numbers", style={"marginTop": "16px"}),
-        _field("M inlet (uniform flow)", "rotor_M_inlet", ROTOR_DEFAULTS["M_inlet"]),
-        _field("M outlet (uniform flow)", "rotor_M_outlet", ROTOR_DEFAULTS["M_outlet"]),
-        _field("M lower (pressure-side arc)", "rotor_M_lower", ROTOR_DEFAULTS["M_lower"]),
-        _field("M upper (suction-side arc)", "rotor_M_upper", ROTOR_DEFAULTS["M_upper"]),
+        _field(r"$M_{\text{in}}$ (uniform flow)", "rotor_M_inlet", ROTOR_DEFAULTS["M_inlet"]),
+        _field(r"$M_{\text{out}}$ (uniform flow)", "rotor_M_outlet", ROTOR_DEFAULTS["M_outlet"]),
+        _field(r"$M_{\text{lower}}$ (pressure-side arc)", "rotor_M_lower", ROTOR_DEFAULTS["M_lower"]),
+        _field(r"$M_{\text{upper}}$ (suction-side arc)", "rotor_M_upper", ROTOR_DEFAULTS["M_upper"]),
 
         html.H4("Flow angles", style={"marginTop": "16px"}),
-        _field("beta inlet (deg)", "rotor_beta_inlet", ROTOR_DEFAULTS["beta_inlet"]),
+        _field(r"$\beta_{\text{in}}$ (deg)", "rotor_beta_inlet", ROTOR_DEFAULTS["beta_inlet"]),
 
         html.H4("Marching resolution", style={"marginTop": "16px"}),
-        _field("Points per transition arc", "rotor_num_points", ROTOR_DEFAULTS["num_points"],
-               step=1, min=10),
+        _field(r"$n_{\text{points}}$ (per transition arc)", "rotor_num_points",
+               ROTOR_DEFAULTS["num_points"], step=1, min=10),
 
         html.Button("Compute rotor blade", id="compute-rotor-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px",
@@ -480,16 +505,17 @@ def _flare_controls(prefix, scale_input_id=None, gap_input_id=None):
     single-sourced, not editable twice with no guarantee the two numbers
     agree."""
     rotor_fields = [
-        _field("r_hub_in", f"{prefix}_rotor_r_hub_in", 145.0),
-        _field("r_hub_out", f"{prefix}_rotor_r_hub_out", 148.0),
-        _field("r_tip_in", f"{prefix}_rotor_r_tip_in", 188.0),
-        _field("r_tip_out", f"{prefix}_rotor_r_tip_out", 185.0),
+        _field(r"$r_{\text{hub,in}}$", f"{prefix}_rotor_r_hub_in", 145.0),
+        _field(r"$r_{\text{hub,out}}$", f"{prefix}_rotor_r_hub_out", 148.0),
+        _field(r"$r_{\text{tip,in}}$", f"{prefix}_rotor_r_tip_in", 188.0),
+        _field(r"$r_{\text{tip,out}}$", f"{prefix}_rotor_r_tip_out", 185.0),
     ]
     if scale_input_id is None:
-        rotor_fields.append(_field("Rotor scale (mm per r*)", f"{prefix}_flare_rotor_scale", 50.0))
+        rotor_fields.append(_field(r"$s_{\text{rotor}}$ (mm per r*)",
+                                     f"{prefix}_flare_rotor_scale", 50.0))
     extra_fields = []
     if gap_input_id is None:
-        extra_fields.append(_field("Axial gap (mm)", f"{prefix}_flare_gap", 5.0))
+        extra_fields.append(_field(r"$\Delta z_{\text{gap}}$ (mm)", f"{prefix}_flare_gap", 5.0))
 
     return html.Div(
         [
@@ -503,10 +529,10 @@ def _flare_controls(prefix, scale_input_id=None, gap_input_id=None):
                 id=f"{prefix}_flare_fields",
                 children=[
                     html.H4("Stator radii (mm)", style={"marginTop": "12px"}),
-                    _field("r_hub_in", f"{prefix}_stator_r_hub_in", 140.0),
-                    _field("r_hub_out", f"{prefix}_stator_r_hub_out", 145.0),
-                    _field("r_tip_in", f"{prefix}_stator_r_tip_in", 190.0),
-                    _field("r_tip_out", f"{prefix}_stator_r_tip_out", 188.0),
+                    _field(r"$r_{\text{hub,in}}$", f"{prefix}_stator_r_hub_in", 140.0),
+                    _field(r"$r_{\text{hub,out}}$", f"{prefix}_stator_r_hub_out", 145.0),
+                    _field(r"$r_{\text{tip,in}}$", f"{prefix}_stator_r_tip_in", 190.0),
+                    _field(r"$r_{\text{tip,out}}$", f"{prefix}_stator_r_tip_out", 188.0),
 
                     html.H4("Rotor radii (mm)", style={"marginTop": "12px"}),
                     *rotor_fields,
@@ -534,12 +560,12 @@ def _flare_plot(prefix, height="380px"):
 cascade_controls = html.Div(
     [
         html.H4("Stator + rotor cascade"),
-        _field("Number of stator blades", "n_stator_blades", 4, step=1, min=1),
-        _field("Number of rotor blades", "n_rotor_blades", 4, step=1, min=1),
+        _field(r"$N_{\text{stator}}$", "n_stator_blades", 4, step=1, min=1),
+        _field(r"$N_{\text{rotor}}$", "n_rotor_blades", 4, step=1, min=1),
 
         html.H4("Rotor placement", style={"marginTop": "16px"}),
-        _field("Rotor scale (mm per r*)", "rotor_scale_mm", 50.0),
-        _field("Axial gap (mm, stator TE to rotor LE clearance)", "rotor_axial_gap", 5.0),
+        _field(r"$s_{\text{rotor}}$ (mm per r*)", "rotor_scale_mm", 50.0),
+        _field(r"$\Delta z_{\text{gap}}$ (mm, stator TE to rotor LE)", "rotor_axial_gap", 5.0),
         dcc.RadioItems(
             id="rotor_downstream_direction",
             options=[
@@ -549,7 +575,7 @@ cascade_controls = html.Div(
             value="below",
             labelStyle={"display": "inline-block", "marginRight": "12px", "fontSize": "13px"},
         ),
-        _field("Rotor lateral offset (mm, X)", "rotor_lateral_offset", 0.0),
+        _field(r"$\Delta x_{\text{rotor}}$ (mm)", "rotor_lateral_offset", 0.0),
 
         html.H4("Relative position", style={"marginTop": "16px"}),
         html.Div("Slide the rotor row by a fraction of its own pitch:",
@@ -600,26 +626,26 @@ radial_controls = html.Div(
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
         html.Div(id="radial-rotor-scale-container", children=[
-            _field("Rotor scale (mm per r*, if Phase 3 is nondimensional)",
+            _field(r"$s_{\text{rotor}}$ (mm per r*, if Phase 3 is nondim.)",
                    "radial_rotor_scale", 50.0),
         ], style={"display": "none"}),
 
         html.Div(id="radial-single-radii-container", children=[
-            _field("Inner radius r1 (mm)", "radial_r1", 140.0),
-            _field("Outer radius r2 (mm)", "radial_r2", 190.0),
+            _field(r"$r_1$ (mm)", "radial_r1", 140.0),
+            _field(r"$r_2$ (mm)", "radial_r2", 190.0),
         ]),
-        _field("Number of blades", "radial_n_blades", 12, step=1, min=1),
-        _field("Angular offset theta0 (deg)", "radial_theta0", 0.0),
+        _field(r"$N_{\text{blades}}$", "radial_n_blades", 12, step=1, min=1),
+        _field(r"$\theta_0$ (deg)", "radial_theta0", 0.0),
 
         html.Div(id="radial-both-container", children=[
             html.H4("Coupled stator + rotor radii", style={"marginTop": "16px"}),
-            _field("Stator inner radius r_stator_in (mm)", "radial_r_stator_in", 140.0),
-            _field("Interface radius r_interface (mm)", "radial_r_interface", 165.0),
-            _field("Row gap (mm)", "radial_gap", 2.0, min=0),
-            _field("Rotor outer radius r_rotor_out (mm)", "radial_r_rotor_out", 190.0),
+            _field(r"$r_{\text{stator,in}}$ (mm)", "radial_r_stator_in", 140.0),
+            _field(r"$r_{\text{interface}}$ (mm)", "radial_r_interface", 165.0),
+            _field(r"$\Delta r_{\text{gap}}$ (mm)", "radial_gap", 2.0, min=0),
+            _field(r"$r_{\text{rotor,out}}$ (mm)", "radial_r_rotor_out", 190.0),
             html.H4("Rotor (2nd row)", style={"marginTop": "16px"}),
-            _field("Number of rotor blades", "radial_n_blades_rotor", 12, step=1, min=1),
-            _field("Rotor angular offset theta0 (deg)", "radial_theta0_rotor", 0.0),
+            _field(r"$N_{\text{rotor}}$", "radial_n_blades_rotor", 12, step=1, min=1),
+            _field(r"$\theta_{0,\text{rotor}}$ (deg)", "radial_theta0_rotor", 0.0),
         ], style={"display": "none"}),
 
         html.Button("Compute radial wrap", id="compute-radial-btn", n_clicks=0,
@@ -740,10 +766,10 @@ def run_design(set_progress, n_clicks, fluid_name, inlet_mode, P0, T0, Q0, p_bac
     try:
         data = design_nozzle(
             fluid_name=fluid_name,
-            P0=P0,
+            P0=float(P0) * 1e5,  # bar (UI/save convention) -> Pa
             T0=T0 if inlet_mode == "T0" else None,
             Q0=(Q0 if inlet_mode == "Q0" else float("nan")),
-            p_back=p_back,
+            p_back=float(p_back) * 1e5,  # bar -> Pa
             solver=solver,
             use_true_sauer_line=(stage1_mode == "sauer"),
             y_t=y_t, rho_t=rho_t, rho_d=rho_d, n=int(n),
@@ -886,7 +912,7 @@ def update_plots(data, reference):
 @app.callback(
     Output("download-plot", "data"),
     Input("download-btn", "n_clicks"),
-    State("plot-tabs", "value"),
+    State("plot-select", "value"),
     State("result-store", "data"),
     State("reference-store", "data"),
     State("save-format", "value"),
