@@ -10,9 +10,9 @@ from moc.rotor.vortex_blade import _arc_from_diameter, _line_intersect
 data = design_rotor_vortex_blade(
     fluid_name="air",
     P0_rel=5e5, T0_rel=400.0,
-    M_inlet=1.6, M_outlet=1.6,
+    M_inlet=1.6, M_outlet=1.2,
     M_lower=1.1, M_upper=2.0,
-    beta_inlet=50.0,
+    beta_inlet=5.0,
     backend="HEOS",
     num_points=60,
 )

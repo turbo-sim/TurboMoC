@@ -42,7 +42,8 @@ COLOR_CP_FACE = "#f89441"  # plasma orange -- blade control-point marker fill
 __all__ = [
     "plot_nozzle_contour", "plot_characteristics_mesh",
     "plot_axis_properties", "plot_wall_properties", "plot_ts_diagram",
-    "plot_blade", "plot_rotor_blade", "plot_rotor_vortex_blade",
+    "plot_blade", "plot_rotor_blade", "plot_rotor_vortex_blade", "plot_radial_cascade",
+    "plot_meridional_view",
 ]
 
 
@@ -444,5 +445,99 @@ def plot_rotor_vortex_blade(data, ax=None, show_surfaces=True, show_mach_lines=F
     ax.set_xlabel(f"x ({units})")
     ax.set_ylabel(f"y ({units})")
     ax.set_aspect("equal")
+    ax.legend(loc="best", fontsize=9)
+    return fig, ax
+
+
+COLOR_RADIAL_STATOR = "#7e03a8"  # plasma colormap, ~25% stop (purple)
+COLOR_RADIAL_ROTOR = "#f89441"  # plasma colormap, ~75% stop (orange)
+
+
+def _draw_radial_set_mpl(ax, blades, trailing_edges, line_color, fillcolor, name):
+    """One source's (stator's or rotor's) blade copies onto an existing
+    annular-cascade axes. fillcolor=None draws outline-only (single-source
+    mode); a fillcolor draws a translucent fill (combined mode), same
+    convention as Phase 4's stator/rotor cascade overlay."""
+    for i, (blade, te) in enumerate(zip(blades, trailing_edges)):
+        if fillcolor:
+            ax.fill(blade["x"], blade["y"], color=fillcolor, edgecolor=line_color,
+                     lw=1.2, alpha=0.35, label=name if i == 0 else None)
+        else:
+            ax.plot(blade["x"], blade["y"], color=line_color, lw=1.2, alpha=0.85,
+                     label=name if i == 0 else None)
+        if te["x"]:
+            ax.plot(te["x"], te["y"], color=COLOR_C_PLUS, lw=1.0, alpha=0.85)
+
+
+def plot_radial_cascade(radial_data, ax=None, show_radius_circles=True):
+    """Full annular cascade view of moc.geometry.wrap_blade_radial(...) /
+    wrap_rotor_blade_radial(...) results: every blade copy plus its
+    trailing edge, laid out around the annulus, with the r1/r2 bounding
+    circles as a visual reference. Also accepts a "combined" dict
+    (radial_data["mode"]=="combined", with "stator"/"rotor" sub-dicts) to
+    overlay the two rows, same as plotting_plotly's version."""
+    import numpy as np
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 7))
+    else:
+        fig = ax.figure
+
+    combined = radial_data.get("mode") == "combined"
+    if combined:
+        stator, rotor = radial_data["stator"], radial_data["rotor"]
+        _draw_radial_set_mpl(ax, stator["blades"], stator["trailing_edges"],
+                              COLOR_RADIAL_STATOR, COLOR_RADIAL_STATOR, "Stator")
+        _draw_radial_set_mpl(ax, rotor["blades"], rotor["trailing_edges"],
+                              "black", COLOR_RADIAL_ROTOR, "Rotor")
+        n_label = f"stator={stator['n_blades']}, rotor={rotor['n_blades']}"
+    else:
+        _draw_radial_set_mpl(ax, radial_data["blades"], radial_data["trailing_edges"],
+                              COLOR_WALL, None, "Blade")
+        n_label = str(radial_data["n_blades"])
+
+    r1, r2 = radial_data["r1"], radial_data["r2"]
+    if show_radius_circles:
+        t = np.linspace(0, 2 * np.pi, 200)
+        circles = [(r1, "r1")]
+        if combined:
+            circles.append((radial_data["r_stator_out"], "r_interface (stator out)"))
+            circles.append((radial_data["r_rotor_in"], "r_rotor_in"))
+        circles.append((r2, "r2"))
+        for r, lbl in circles:
+            ax.plot(r * np.cos(t), r * np.sin(t), ":", color="0.6", lw=1, label=lbl)
+
+    units = radial_data.get("units", "mm")
+    ax.set_xlabel(f"x ({units})")
+    ax.set_ylabel(f"y ({units})")
+    ax.set_aspect("equal")
+    ax.set_title(f"Radial cascade ({n_label} blades, r1={r1:.2f}, r2={r2:.2f} {units})")
+    ax.legend(loc="best", fontsize=9)
+    return fig, ax
+
+
+def plot_meridional_view(meridional_data, ax=None, units="mm"):
+    """Meridional (axial-radial, x-r) sketch of a stator + rotor stage
+    from moc.geometry.build_meridional_view(...): hub/tip lines for each
+    row (straight, per the shared-axial-station flare convention -- see
+    that function's docstring), with the passage between them filled."""
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 5))
+    else:
+        fig = ax.figure
+
+    def _draw_row(row, color, name):
+        x, hub, tip = row["x"], row["hub"], row["tip"]
+        ax.fill(x + x[::-1], hub + tip[::-1], color=color, alpha=0.25, label=name)
+        ax.plot(x, hub, "-o", color=color, lw=2, ms=4)
+        ax.plot(x, tip, "--o", color=color, lw=2, ms=4)
+
+    _draw_row(meridional_data["stator"], COLOR_RADIAL_STATOR, "Stator")
+    _draw_row(meridional_data["rotor"], COLOR_RADIAL_ROTOR, "Rotor")
+
+    ax.set_xlabel(f"x ({units})")
+    ax.set_ylabel(f"r ({units})")
+    ax.set_aspect("equal")
+    ax.set_title(f"Meridional view (gap = {meridional_data['gap']:.2f} {units})")
     ax.legend(loc="best", fontsize=9)
     return fig, ax

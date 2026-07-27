@@ -23,7 +23,7 @@ from .spline_tool import BSplineTool
 
 __all__ = [
     "parametrize_stator_blade", "parametrize_stator_blade_semi",
-    "export_blade_step", "move_control_point_along_normal",
+    "export_blade_step", "export_flared_blade_step", "move_control_point_along_normal",
 ]
 
 
@@ -595,3 +595,92 @@ def export_blade_step(blade_data, face_path, solid_path=None, extrude_length=1.0
     if solid_path is not None:
         blade_solid = cq.Workplane("XY").add(blade_face).extrude(extrude_length)
         cq.exporters.export(blade_solid, str(solid_path))
+
+
+def _closed_wire_2d(cq, curve_xy, te_xy=None):
+    """Closed wire from 2D (x,y) point lists -- TE as a sharp polyline plus
+    the rest as a smooth spline (curve_xy) when te_xy is given (stator
+    convention: parametrize_stator_blade's blade_curve/trailing_edge kept
+    separate), or a single smooth closed spline through curve_xy alone
+    (rotor convention: design_rotor_vortex_blade's "blade" is already one
+    closed, LE/TE-rounded contour)."""
+    if te_xy:
+        wp = (
+            cq.Workplane("XY")
+            .moveTo(*curve_xy[-1])
+            .polyline(te_xy)
+            .spline(curve_xy[:-1])
+            .close()
+        )
+    else:
+        wp = cq.Workplane("XY").moveTo(*curve_xy[0]).spline(curve_xy[1:]).close()
+    return wp.val()
+
+
+def export_flared_blade_step(blade_data, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
+                              face_path, solid_path=None, source="stator"):
+    """
+    Export a FLARED 3D blade solid: lofts between a hub-radius copy of the
+    2D blade profile (at Z=0) and a tip-radius copy (at Z=blade_height)
+    whose pitchwise (tangential) extent is scaled by r_tip_mean/r_hub_mean
+    -- pitch = 2*pi*r/Z_blades at constant blade count, so this is the
+    physically-correct scaling for "same blade count, wider pitch at
+    larger radius", not an arbitrary stretch.
+
+    See moc.geometry.meridional's module docstring for why this needs no
+    separate axial (chordwise) shift between hub and tip: flare is
+    assumed to share the same axial stations for hub/tip (Anderson et
+    al.'s own convention), so it shows up as radius change (the
+    meridional view, build_meridional_view) and this pitch scaling here
+    -- the two share the SAME hub/tip radii inputs, not independently
+    guessed ones.
+
+    Parameters
+    ----------
+    blade_data : dict
+        A stator blade dict (parametrize_stator_blade/_semi's output,
+        needs "blade_curve"/"trailing_edge") or a rotor blade dict
+        (design_rotor_vortex_blade's output, needs "blade") -- pick which
+        via `source`.
+    r_hub_in, r_hub_out, r_tip_in, r_tip_out : float
+        Hub/tip radii at this row's own inlet/outlet (same length units
+        as blade_data, typically mm) -- blade_height and the pitch-scale
+        factor are both derived from these, not separate inputs.
+    source : str
+        "stator" or "rotor" -- which blade_data shape to expect.
+
+    Requires cadquery (not a core moc dependency -- import kept local so
+    the rest of moc.geometry works without it installed).
+    """
+    import cadquery as cq
+
+    if source == "stator":
+        curve = blade_data["blade_curve"]
+        te = blade_data["trailing_edge"]
+        curve_xy = list(zip(curve["x"], curve["y"]))
+        te_xy = list(zip(te["x"], te["y"]))
+    elif source == "rotor":
+        blade = blade_data["blade"]
+        curve_xy = list(zip(blade["x"], blade["y"]))
+        te_xy = None
+    else:
+        raise ValueError(f"source must be 'stator' or 'rotor', got {source!r}")
+
+    hub_wire = _closed_wire_2d(cq, curve_xy, te_xy)
+    hub_face = cq.Face.makeFromWires(hub_wire)
+    cq.exporters.export(hub_face, str(face_path))
+    if solid_path is None:
+        return
+
+    r_hub_mean = 0.5 * (r_hub_in + r_hub_out)
+    r_tip_mean = 0.5 * (r_tip_in + r_tip_out)
+    pitch_scale = r_tip_mean / r_hub_mean
+    blade_height = r_tip_mean - r_hub_mean
+
+    curve_xy_tip = [(x * pitch_scale, y) for x, y in curve_xy]
+    te_xy_tip = [(x * pitch_scale, y) for x, y in te_xy] if te_xy else None
+    tip_wire_flat = _closed_wire_2d(cq, curve_xy_tip, te_xy_tip)
+    tip_wire = tip_wire_flat.translate((0, 0, blade_height))
+
+    loft_solid = cq.Solid.makeLoft([hub_wire, tip_wire])
+    cq.exporters.export(loft_solid, str(solid_path))

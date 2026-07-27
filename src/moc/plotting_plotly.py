@@ -31,7 +31,8 @@ COLOR_CP_FACE = "#f89441"  # plasma orange -- blade control-point marker fill
 __all__ = [
     "plot_nozzle_contour", "plot_characteristics_mesh",
     "plot_axis_properties", "plot_wall_properties", "plot_ts_diagram",
-    "plot_blade", "plot_rotor_vortex_blade",
+    "plot_blade", "plot_rotor_vortex_blade", "plot_radial_cascade",
+    "plot_meridional_view",
 ]
 
 
@@ -472,3 +473,178 @@ def plot_rotor_vortex_blade(data, show_surfaces=True, show_mach_lines=False,
         height=550,
     )
     return _apply_journal_style(fig)
+
+
+COLOR_RADIAL_STATOR = "#7e03a8"  # plasma colormap, ~25% stop (purple)
+COLOR_RADIAL_ROTOR = "#f89441"  # plasma colormap, ~75% stop (orange)
+
+
+def _draw_radial_set(fig, blades, trailing_edges, line_color, fillcolor, name):
+    """One source's (stator's or rotor's) blade copies onto an existing
+    annular-cascade figure. fillcolor=None draws outline-only (single-
+    source mode); a fillcolor draws a translucent fill (combined mode, so
+    the two sources read apart at a glance -- same convention as Phase
+    4's stator/rotor cascade overlay)."""
+    for i, (blade, te) in enumerate(zip(blades, trailing_edges)):
+        fig.add_trace(go.Scatter(
+            x=blade["x"], y=blade["y"], mode="lines",
+            fill="toself" if fillcolor else None,
+            line=dict(color=line_color, width=1.5 if fillcolor is None else 1.2),
+            fillcolor=fillcolor, opacity=0.85 if fillcolor is None else 0.35,
+            name=name, showlegend=(i == 0),
+        ))
+        if te["x"]:
+            fig.add_trace(go.Scatter(
+                x=te["x"], y=te["y"], mode="lines",
+                line=dict(color=COLOR_C_PLUS, width=1.2), opacity=0.85,
+                showlegend=False,
+            ))
+
+
+def plot_radial_cascade(radial_data, show_radius_circles=True, clip_quadrant=True):
+    """Full annular cascade view of moc.geometry.wrap_blade_radial(...) /
+    wrap_rotor_blade_radial(...) results: every blade copy plus its
+    trailing edge, laid out around the annulus, with the r1/r2 bounding
+    circles as a visual reference. Also accepts a "combined" dict
+    (radial_data["mode"]=="combined", with "stator"/"rotor" sub-dicts, as
+    built by moc.app's Phase 5 "Both" source) to overlay the two rows the
+    same way Phase 4 overlays the unrolled cascade."""
+    fig = go.Figure()
+    combined = radial_data.get("mode") == "combined"
+
+    if combined:
+        stator, rotor = radial_data["stator"], radial_data["rotor"]
+        _draw_radial_set(fig, stator["blades"], stator["trailing_edges"],
+                          COLOR_RADIAL_STATOR, COLOR_RADIAL_STATOR, "Stator")
+        _draw_radial_set(fig, rotor["blades"], rotor["trailing_edges"],
+                          "black", COLOR_RADIAL_ROTOR, "Rotor")
+        n_label = f"stator={stator['n_blades']}, rotor={rotor['n_blades']}"
+    else:
+        _draw_radial_set(fig, radial_data["blades"], radial_data["trailing_edges"],
+                          COLOR_WALL, None, "Blade")
+        n_label = str(radial_data["n_blades"])
+
+    r1, r2 = radial_data["r1"], radial_data["r2"]
+    if show_radius_circles:
+        import numpy as np
+        t = np.linspace(0, 2 * np.pi, 200)
+        circles = [(r1, "r1")]
+        if combined:
+            # The interface/gap-start radii too, so the row-to-row gap
+            # band is visible as the space between two of these circles
+            # (r_stator_out and r_rotor_in coincide when gap=0).
+            circles.append((radial_data["r_stator_out"], "r_interface (stator out)"))
+            circles.append((radial_data["r_rotor_in"], "r_rotor_in"))
+        circles.append((r2, "r2"))
+        for r, lbl in circles:
+            fig.add_trace(go.Scatter(
+                x=r * np.cos(t), y=r * np.sin(t), mode="lines",
+                line=dict(color="#999999", width=1, dash="dot"),
+                name=lbl, showlegend=False, hoverinfo="skip",
+            ))
+
+    units = radial_data.get("units", "mm")
+    axis_kwargs = {}
+    if clip_quadrant:
+        # Full annulus is drawn (all blade copies + full r1/r2 circles),
+        # but the view is windowed to quadrant I (x, y >= 0) -- a single
+        # blade passage says as much as the full ring without the wrap-
+        # around clutter.
+        r_pad = 1.05 * r2
+        axis_kwargs = dict(range=[0, r_pad])
+
+    # _apply_journal_style sets its own generic margin -- must run before
+    # the layout below, not after, or it clobbers these values (see
+    # plot_meridional_view's own note on the same issue).
+    _apply_journal_style(fig)
+    fig.update_layout(
+        showlegend=False,
+        xaxis=dict(title_text=f"x ({units})", **axis_kwargs),
+        yaxis=dict(title_text=f"y ({units})", scaleanchor="x", scaleratio=1, **axis_kwargs),
+        height=380,
+        margin=dict(l=50, r=20, t=20, b=40),
+    )
+    return fig
+
+
+def plot_meridional_view(meridional_data, units="mm", z_range=None):
+    """Meridional (axial-radial) sketch of a stator + rotor stage from
+    moc.geometry.build_meridional_view(...): hub/tip lines for each row
+    (straight, per the shared-axial-station flare convention -- see that
+    function's docstring), with the passage between them filled.
+
+    Coordinate convention (shared with the cascade view in app.py's
+    update_cascade_plot): z = axial/flow direction, r = radius. Drawn
+    rotated 90 deg from the raw (x=axial, y=radius) data -- r horizontal,
+    z vertical -- by swapping which raw coordinate feeds which axis (same
+    "rotate, then re-zero so it reads forward from 0" treatment as the
+    cascade plot's own _rotate_traces_display, rather than a literal
+    matrix rotation that would also flip the flow-reading direction)."""
+    fig = go.Figure()
+
+    def _draw_row(row, color, name):
+        z, hub, tip = row["x"], row["hub"], row["tip"]
+        poly_z, poly_r = z + z[::-1], hub + tip[::-1]
+        fig.add_trace(go.Scatter(
+            x=poly_r, y=poly_z, mode="lines", fill="toself",
+            line=dict(color=color, width=0), fillcolor=color, opacity=0.25,
+            name=name, showlegend=True, hoverinfo="skip",
+        ))
+        fig.add_trace(go.Scatter(
+            x=hub, y=z, mode="lines+markers", line=dict(color=color, width=2),
+            marker=dict(size=5), showlegend=False,
+        ))
+        fig.add_trace(go.Scatter(
+            x=tip, y=z, mode="lines+markers", line=dict(color=color, width=2, dash="dash"),
+            marker=dict(size=5), showlegend=False,
+        ))
+
+    _draw_row(meridional_data["stator"], COLOR_RADIAL_STATOR, "Stator")
+    _draw_row(meridional_data["rotor"], COLOR_RADIAL_ROTOR, "Rotor")
+
+    # A further 180 deg turn on top of the 90 deg already applied above
+    # ((x, y) -> (-x, -y) on the r-horizontal/z-vertical layout drawn so
+    # far) -- then re-zero both axes so the plot starts at 0 rather than
+    # showing whitespace back to an arbitrary (now-negative) origin.
+    for tr in fig.data:
+        tr.x = [-xx for xx in tr.x]
+        tr.y = [-yy for yy in tr.y]
+    r_shift = -min(x for tr in fig.data for x in tr.x)
+    z_shift = -min(y for tr in fig.data for y in tr.y)
+    for tr in fig.data:
+        tr.x = [xx + r_shift for xx in tr.x]
+        tr.y = [yy + z_shift for yy in tr.y]
+
+    yaxis = dict(title_text=f"z [{units}]")
+    if z_range is not None:
+        # Pinned to the cascade plot's own (already zero-based) z range --
+        # see app.py's cascade-zrange-store -- so the two figures share
+        # the same z=0 reference and the same mm-per-pixel vertical scale
+        # (same range + same container height = same scale) instead of
+        # each autoscaling to its own data and drifting apart.
+        yaxis["range"] = z_range
+        yaxis["autorange"] = False
+        # Fixed dtick (not autotick), matching the cascade plot's own
+        # fixed z dtick, so gridlines land on the same values in both
+        # figures rather than each picking its own step for the range.
+        yaxis["dtick"] = 50
+
+    # _apply_journal_style sets its OWN generic margin -- must run before
+    # the margin/height below, not after, otherwise it clobbers the exact
+    # values matched to the cascade plot's own margin and breaks the
+    # pixel-for-pixel alignment those two figures rely on.
+    _apply_journal_style(fig)
+    fig.update_layout(
+        showlegend=False,
+        # No scaleanchor/scaleratio lock here (unlike the cascade plot) --
+        # this view's r-span and z-span can differ a lot in magnitude, and
+        # forcing a true 1:1 aspect would shrink the plotted area far below
+        # its container (letterboxing), leaving it visibly shorter than
+        # the cascade figure it sits beside. Autoscaling both axes to the
+        # container instead keeps it the same height as its neighbor.
+        xaxis=dict(title_text=f"r [{units}]"),
+        yaxis=yaxis,
+        height=380,
+        margin=dict(l=50, r=20, t=20, b=40),
+    )
+    return fig
