@@ -6,6 +6,7 @@ from .blade import (
     parametrize_stator_blade_semi,
 )
 from .meridional import build_meridional_view
+from .passage import extract_axial_passage_2d, extract_radial_passage_2d
 from .radial import (
     apply_conformal_mapping,
     rotate_radial_points,
@@ -21,4 +22,6 @@ __all__ = [
     "apply_conformal_mapping", "rotate_radial_points",
     "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial",
     "build_meridional_view",
+    "extract_axial_passage_2d",
+    "extract_radial_passage_2d",
 ]
