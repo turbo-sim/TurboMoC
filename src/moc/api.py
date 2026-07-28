@@ -67,6 +67,7 @@ def design_nozzle(
     backend: str = "HEOS",
     show_plot: bool = False,
     progress_callback=None,
+    auto_nudge_q0: bool = True,
 ) -> dict:
     """
     Runs a full MOC nozzle design (all solver stages) and returns one flat,
@@ -96,6 +97,21 @@ def design_nozzle(
     calling both for the same (fluid_name, P0, T0, Q0) only builds the
     fluid table once.
 
+    auto_nudge_q0: when use_true_sauer_line=True and Q0 is exactly 0.0
+    (saturated liquid), the classical parabolic Sauer construction can
+    leave Stage 2's characteristics march pinned in the ill-conditioned
+    M~1 zone for far too many steps (observed for cyclopentane at
+    P0=2.513 bar, Q0=0.0: the front loses y-monotonicity and Stage 3
+    exhausts every wall-intersection candidate). Starting even slightly
+    inside the two-phase dome avoids this (Q0=0.02 converged cleanly for
+    that same case; Q0=0.001/0.005 did not). When True (default) and
+    that combination is hit and the plain Q0=0.0 attempt doesn't
+    converge, this retries with Q0 in (0.005, 0.01, 0.02, 0.05, 0.1),
+    keeping the first one that converges (or the last, best-effort
+    attempt if none do) -- the returned dict's "Q0" and "q0_nudged_from"
+    report what was actually used. Has no effect for any other
+    combination of use_true_sauer_line/Q0.
+
     Returns
     -------
     dict with keys:
@@ -115,62 +131,75 @@ def design_nozzle(
     t0 = time.time()
 
     fluid = jxp.Fluid(fluid_name)
-    state_0 = _inlet_state(fluid, P0, T0, Q0)
-    T0_resolved = float(state_0.T)
 
-    design_Noz_Mach = Noz_Mach
-    if p_back is not None:
-        state_out = fluid.get_state(jxp.PSmass_INPUTS, p_back, state_0.s)
-        v_out = float(np.sqrt(abs(2 * (state_0.h - state_out.h))))
-        design_Noz_Mach = float(v_out / state_out.a)
+    q0_is_zero = Q0 is not None and not (isinstance(Q0, float) and np.isnan(Q0)) and float(Q0) == 0.0
+    q0_candidates = [Q0]
+    if use_true_sauer_line and auto_nudge_q0 and q0_is_zero:
+        q0_candidates += [0.005, 0.01, 0.02, 0.05, 0.1]
 
-    fm = get_fluid_manager(fluid_name, backend, P0=P0, T0=T0_resolved, Q0=Q0)
+    last_exc = None
+    for attempt_i, q0_try in enumerate(q0_candidates):
+        state_0 = _inlet_state(fluid, P0, T0, q0_try)
+        T0_resolved = float(state_0.T)
 
-    tau = np.linspace(0, tau_max, int(tau_max / tau_step) + 1)
-    base_config = dict(
-        y_t=y_t, n=n, rho_t=rho_t, P0=float(P0), Q0=float(Q0), T0=T0_resolved,
-        tau=tau, rho_d=rho_d, Noz_Mach=design_Noz_Mach, P_back=p_back,
-        fluid_name=fluid_name, delta_flow=delta_flow, n_reflex=float("nan"),
-    )
-
-    try:
-        if solver == "conventional":
-            s = ConventionalSolver(base_config, show_plot=show_plot, fluid_manager=fm)
-            s.run_stage_1_sauer(use_true_sauer_line=use_true_sauer_line, progress_callback=progress_callback)
-            s.run_stage_2_ivp(progress_callback=progress_callback)
-            s.run_stage_3_kernel(progress_callback=progress_callback)
-            s.run_stage_4_reflex(progress_callback=progress_callback)
-        else:
+        design_Noz_Mach = Noz_Mach
+        if p_back is not None:
             state_out = fluid.get_state(jxp.PSmass_INPUTS, p_back, state_0.s)
             v_out = float(np.sqrt(abs(2 * (state_0.h - state_out.h))))
-            nu_f = fm.nu_of_V(v_out)
-            theta_star_deg = float(np.degrees(0.5 * nu_f))
+            design_Noz_Mach = float(v_out / state_out.a)
 
-            mln_config = dict(base_config)
-            mln_config["tau_mln"] = np.linspace(0, theta_star_deg, n_tau_mln)
-            mln_config["flashing"] = not use_true_sauer_line
-            s = MOCSolverMLN(mln_config, show_plot=show_plot, fluid_manager=fm)
-            s.run_stage_1_sauer(progress_callback=progress_callback)
-            # sauer_direct, not ivp_march, for BOTH branches: for flashing,
-            # it collapses the flat front to just the corner point, matching
-            # the reference algorithm exactly (Zebbiche & Youbi 2007 Fig.
-            # 3a: ray 1 is corner -> axis directly, zero interior points --
-            # see MOCSolverMLN.run_stage_2_sauer_direct's docstring). Marching
-            # first would feed Stage 3 a multi-point front instead, breaking
-            # that property without changing the converged exit condition --
-            # this is what method_of_characteristics/moc_min_length's own
-            # validated generate_laes_cases.py does.
-            s.run_stage_2_sauer_direct(progress_callback=progress_callback)
-            s.run_stage_3_kernel_mln(progress_callback=progress_callback)
-            s.run_stage_4_reflex(progress_callback=progress_callback)
-    except Exception as e:
-        raise NozzleDesignError(f"MOC solve failed for solver={solver!r}: {e}") from e
+        fm = get_fluid_manager(fluid_name, backend, P0=P0, T0=T0_resolved, Q0=q0_try)
 
-    exit_M = float(s.axis_points_vec[-1].M) if s.axis_points_vec else float("nan")
-    converged = bool(np.isfinite(exit_M) and abs(exit_M - design_Noz_Mach) / max(design_Noz_Mach, 1e-9) < 0.05)
+        tau = np.linspace(0, tau_max, int(tau_max / tau_step) + 1)
+        base_config = dict(
+            y_t=y_t, n=n, rho_t=rho_t, P0=float(P0), Q0=float(q0_try), T0=T0_resolved,
+            tau=tau, rho_d=rho_d, Noz_Mach=design_Noz_Mach, P_back=p_back,
+            fluid_name=fluid_name, delta_flow=delta_flow, n_reflex=float("nan"),
+        )
+
+        try:
+            if solver == "conventional":
+                s = ConventionalSolver(base_config, show_plot=show_plot, fluid_manager=fm)
+                s.run_stage_1_sauer(use_true_sauer_line=use_true_sauer_line, progress_callback=progress_callback)
+                s.run_stage_2_ivp(progress_callback=progress_callback)
+                s.run_stage_3_kernel(progress_callback=progress_callback)
+                s.run_stage_4_reflex(progress_callback=progress_callback)
+            else:
+                state_out = fluid.get_state(jxp.PSmass_INPUTS, p_back, state_0.s)
+                v_out = float(np.sqrt(abs(2 * (state_0.h - state_out.h))))
+                nu_f = fm.nu_of_V(v_out)
+                theta_star_deg = float(np.degrees(0.5 * nu_f))
+
+                mln_config = dict(base_config)
+                mln_config["tau_mln"] = np.linspace(0, theta_star_deg, n_tau_mln)
+                mln_config["flashing"] = not use_true_sauer_line
+                s = MOCSolverMLN(mln_config, show_plot=show_plot, fluid_manager=fm)
+                s.run_stage_1_sauer(progress_callback=progress_callback)
+                # sauer_direct, not ivp_march, for BOTH branches: for flashing,
+                # it collapses the flat front to just the corner point, matching
+                # the reference algorithm exactly (Zebbiche & Youbi 2007 Fig.
+                # 3a: ray 1 is corner -> axis directly, zero interior points --
+                # see MOCSolverMLN.run_stage_2_sauer_direct's docstring). Marching
+                # first would feed Stage 3 a multi-point front instead, breaking
+                # that property without changing the converged exit condition --
+                # this is what method_of_characteristics/moc_min_length's own
+                # validated generate_laes_cases.py does.
+                s.run_stage_2_sauer_direct(progress_callback=progress_callback)
+                s.run_stage_3_kernel_mln(progress_callback=progress_callback)
+                s.run_stage_4_reflex(progress_callback=progress_callback)
+        except Exception as e:
+            last_exc = e
+            if attempt_i == len(q0_candidates) - 1:
+                raise NozzleDesignError(f"MOC solve failed for solver={solver!r}: {e}") from e
+            continue
+
+        exit_M = float(s.axis_points_vec[-1].M) if s.axis_points_vec else float("nan")
+        converged = bool(np.isfinite(exit_M) and abs(exit_M - design_Noz_Mach) / max(design_Noz_Mach, 1e-9) < 0.05)
+        if converged or attempt_i == len(q0_candidates) - 1:
+            break
 
     data = s.build_result_data(extra_meta=dict(
-        solver=solver, P0=float(P0), T0=T0_resolved, Q0=float(Q0),
+        solver=solver, P0=float(P0), T0=T0_resolved, Q0=float(q0_try),
         p_back=p_back, design_Noz_Mach=design_Noz_Mach,
         y_t=y_t, n=n, rho_t=rho_t, rho_d=rho_d, delta_flow=delta_flow,
     ))
@@ -180,6 +209,8 @@ def design_nozzle(
     data["converged"] = converged
     data["exit_M"] = exit_M
     data["runtime_s"] = time.time() - t0
+    if q0_try != Q0:
+        data["q0_nudged_from"] = float(Q0)
     # Stagnation/total state (s0, T0) -- the isentrope's actual starting
     # point, needed for a T-s diagram alongside the axis-array's own first/
     # last points (~sonic/MoC-start, exit). Not derivable from `axis` alone:

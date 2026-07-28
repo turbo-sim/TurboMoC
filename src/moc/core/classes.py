@@ -1189,6 +1189,91 @@ def rotation_around_center(y_t, ang, rho_d):
     return x_rot[0], x_rot[1]
 
 
+def build_convergent_inlet(y_t, rho_d, L_conv, n_points=30):
+    """
+    Purely geometric (no MOC/flow physics) upstream extension of the wall,
+    from the inlet plane (x=-L_conv) back to the throat (x=0, y=y_t) --
+    an "S-curve" convergent contour made of two tangent circular arcs of
+    EQUAL radius rho_d, meeting at a single inflection point where
+    concavity flips (a reversed-curvature/ogive convergent inlet, the
+    same construction long-radius flow nozzles use).
+
+    Arc 1 (throat -> inflection) is literally the SAME circle as the
+    kernel region's own throat rounding (moc.core.classes.
+    rotation_around_center, center (0, rho_d+y_t), same radius rho_d) --
+    continued backward (negative angle) instead of forward, so the wall
+    is curvature-continuous across the throat, not just position/slope-
+    continuous.
+
+    Arc 2 (inflection -> inlet) is arc 1's own point reflection through
+    the inflection point P1 (Q -> 2*P1 - Q for every point Q on arc 1).
+    A point reflection through a point ON a curve preserves the tangent
+    LINE there while flipping curvature sign -- exactly "changes
+    concavity" -- and, since the throat point itself (ang=0) has zero
+    slope by the throat's own left-right symmetry, its reflection (the
+    inlet-plane end point) also has EXACTLY zero slope: the wall meets
+    the inlet duct already parallel to the axis, not just "almost"
+    parallel, with no separate solve needed for where that happens.
+
+    Splitting L_conv exactly in half between the two arcs is what makes
+    arc 2's radius come out equal to arc1's (rho_d) automatically --
+    algebraically, R2 = L2/sin(phi1) = L2/(L1/rho_d) = rho_d when
+    L1 == L2 -- rather than requiring a free second radius.
+
+    Parameters
+    ----------
+    y_t : float
+        Throat half-height (m).
+    rho_d : float
+        Throat/kernel radius of curvature (m) -- same value already used
+        for the divergent side's own throat rounding (rotation_around_
+        center's rho_d).
+    L_conv : float
+        Total axial length of the convergent inlet section (m), split
+        evenly between the two arcs (L1 = L2 = L_conv/2). Must satisfy
+        L_conv/2 < rho_d (arc 1 cannot reach further upstream than its
+        own quarter-circle) -- raises ValueError otherwise.
+    n_points : int
+        Number of points per arc (2*n_points total, excluding the
+        duplicated throat point).
+
+    Returns
+    -------
+    dict
+        {"x", "y"}, ordered from the inlet plane (x=-L_conv) to just
+        before the throat (x=0 itself is NOT included, so this can be
+        directly prepended to a wall array that already starts there).
+    """
+    L1 = 0.5 * float(L_conv)
+    if not (0.0 < L1 < rho_d):
+        raise ValueError(
+            f"L_conv/2={L1:.6g} must be strictly between 0 and rho_d={rho_d:.6g} "
+            "-- the same-radius throat arc cannot reach further upstream than a "
+            "quarter circle; reduce L_conv or increase rho_d."
+        )
+    phi1 = float(np.arcsin(L1 / rho_d))
+
+    ang = np.linspace(-phi1, 0.0, n_points + 1)
+    x1c = rho_d * np.sin(ang)
+    y1c = y_t + rho_d * (1.0 - np.cos(ang))
+
+    # x1c/y1c are ordered junction (ang=-phi1) -> throat (ang=0).
+    x1_junction, y1_junction = x1c[0], y1c[0]
+    x2c = 2.0 * x1_junction - x1c
+    y2c = 2.0 * y1_junction - y1c
+    # x2c/y2c (arc 1's point reflection through the junction) are then
+    # ordered junction -> inlet end (x2c[0]==junction, x2c[-1]==-L_conv).
+
+    # Inlet -> throat order: arc 2 reversed (inlet end -> junction), then
+    # arc 1's interior points (junction excluded, already the last point
+    # of the arc-2 half; throat excluded, the caller's own wall array
+    # already starts there).
+    x = np.concatenate([x2c[::-1], x1c[1:-1]])
+    y = np.concatenate([y2c[::-1], y1c[1:-1]])
+
+    return {"x": x.tolist(), "y": y.tolist()}
+
+
 # -----------------------------------------------------------------------------#
 # --- JAX-COMPATIBLE SUPPORTING FUNCTIONS (Must be defined here or imported) ---
 # -----------------------------------------------------------------------------#

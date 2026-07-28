@@ -84,6 +84,21 @@ def plot_nozzle_contour(data, mirror=True, show_sauer=True, show_kernel=True,
                                       line=dict(color=COLOR_WALL, width=2, dash=dash),
                                       opacity=opacity, showlegend=False))
 
+        # Convergent inlet (see moc.core.classes.build_convergent_inlet):
+        # geometry only, computed live in app.py and stashed onto a COPY
+        # of `data` under this key -- not part of wall_final itself so
+        # the wall-property plots (which need p/M/rho/T per point) are
+        # unaffected.
+        conv = d.get("convergent_wall")
+        if conv and conv.get("x"):
+            fig.add_trace(go.Scatter(x=conv["x"], y=conv["y"], mode="lines",
+                                      line=dict(color=COLOR_WALL, width=2, dash=dash),
+                                      opacity=opacity, showlegend=False))
+            if mirror:
+                fig.add_trace(go.Scatter(x=conv["x"], y=_mirror(conv["y"]), mode="lines",
+                                          line=dict(color=COLOR_WALL, width=2, dash=dash),
+                                          opacity=opacity, showlegend=False))
+
         if show_sauer and d.get("sauer", {}).get("x"):
             sauer = d["sauer"]
             fig.add_trace(go.Scatter(x=sauer["x"], y=sauer["y"], mode="markers",

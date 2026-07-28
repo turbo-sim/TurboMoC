@@ -49,6 +49,7 @@ import jaxprop as jxp
 
 import moc
 from moc import design_nozzle, list_supported_fluids, make_progress_reporter, NozzleDesignError
+from moc.core.classes import build_convergent_inlet
 from moc.geometry import (
     build_meridional_view,
     move_control_point_along_normal,
@@ -218,6 +219,23 @@ controls = html.Div(
         _field(r"$\rho_d$", "rho_d", DEFAULTS["rho_d"]),
         _field(r"$n$", "n", DEFAULTS["n"], step=1, min=5),
 
+        html.H4("Convergent inlet (geometry only)", style={"marginTop": "16px"}),
+        html.Div(
+            "Purely geometric upstream extension of the wall, not part of "
+            "the MOC solve: a reversed-curvature (S-curve) contour made of "
+            "two equal-radius (rho_d) tangent circular arcs, split evenly "
+            "over the given length, so the wall reaches the inlet plane "
+            "exactly parallel to the axis.",
+            style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
+        ),
+        dcc.Checklist(
+            id="conv_inlet_enable",
+            options=[{"label": " Add convergent inlet", "value": "on"}],
+            value=[],
+            labelStyle={"display": "block", "fontSize": "13px"},
+        ),
+        _field(r"$L_{\text{conv}}$ (m)", "conv_inlet_length", 0.5 * DEFAULTS["rho_d"]),
+
         html.Button("Compute", id="compute-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px",
                             "fontWeight": "600"}),
@@ -260,6 +278,9 @@ plots = html.Div(
                 html.Button("Download this plot", id="download-btn", n_clicks=0,
                              style={"marginLeft": "12px", "padding": "6px 12px"}),
                 dcc.Download(id="download-plot"),
+                html.Button("Download wall CSV", id="download-wall-csv-btn", n_clicks=0,
+                             style={"marginLeft": "12px", "padding": "6px 12px"}),
+                dcc.Download(id="download-wall-csv"),
             ],
             style={"display": "flex", "alignItems": "center", "marginBottom": "8px"},
         ),
@@ -842,13 +863,21 @@ def run_design(set_progress, n_clicks, fluid_name, inlet_mode, P0, T0, Q0, p_bac
         set_progress(("0%", ""))
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"})
 
-    status = html.Div([
+    status_children = [
         html.Span("Converged" if data["converged"] else "Did not fully converge",
                    style={"fontWeight": "600",
                           "color": "#1a7a1a" if data["converged"] else "#b00020"}),
         html.Div(f"exit M = {data['exit_M']:.4f}  (design {data['design_Noz_Mach']:.4f})"),
         html.Div(f"runtime = {data['runtime_s']:.1f} s"),
-    ])
+    ]
+    if "q0_nudged_from" in data:
+        status_children.append(html.Div(
+            f"Note: true Sauer line stalled at Q0={data['q0_nudged_from']:.3g} "
+            f"(near-M=1 marching instability) -- auto-nudged to "
+            f"Q0={data['meta']['Q0']:.3g} to converge.",
+            style={"color": "#b06a00", "marginTop": "4px"},
+        ))
+    status = html.Div(status_children)
     return data, status
 
 
@@ -959,16 +988,40 @@ def manage_reference(pin_clicks, clear_clicks, current_data):
     return dash.no_update, dash.no_update
 
 
+def _with_convergent_wall(data, enable_vals, L_conv):
+    """Copy of `data` with a "convergent_wall" key added if the Phase-1
+    convergent-inlet toggle is on -- see moc.core.classes.
+    build_convergent_inlet. Geometry only, computed live/reactively (no
+    MOC re-solve), so this is cheap to call from every plot/export
+    callback rather than persisting it in result-store."""
+    if not data or not enable_vals or "on" not in enable_vals:
+        return data
+    meta = data.get("meta", {})
+    y_t, rho_d = meta.get("y_t"), meta.get("rho_d")
+    if y_t is None or rho_d is None or not L_conv:
+        return data
+    try:
+        conv = build_convergent_inlet(float(y_t), float(rho_d), float(L_conv))
+    except ValueError:
+        return data
+    out = dict(data)
+    out["convergent_wall"] = conv
+    return out
+
+
 @app.callback(
     [Output(f"fig-{key}", "figure") for key in TAB_LABELS],
     Input("result-store", "data"),
     Input("reference-store", "data"),
+    Input("conv_inlet_enable", "value"),
+    Input("conv_inlet_length", "value"),
 )
-def update_plots(data, reference):
+def update_plots(data, reference, conv_enable, conv_length):
     if not data:
         empty = go.Figure()
         return [empty] * len(TAB_LABELS)
     ref = reference if reference else None
+    data = _with_convergent_wall(data, conv_enable, conv_length)
     return [plot_fn(data, reference=ref) for plot_fn in PLOT_FUNCS_PLOTLY.values()]
 
 
@@ -979,12 +1032,15 @@ def update_plots(data, reference):
     State("result-store", "data"),
     State("reference-store", "data"),
     State("save-format", "value"),
+    State("conv_inlet_enable", "value"),
+    State("conv_inlet_length", "value"),
     prevent_initial_call=True,
 )
-def download_plot(n_clicks, active_tab, data, reference, fmt):
+def download_plot(n_clicks, active_tab, data, reference, fmt, conv_enable, conv_length):
     if not data:
         return dash.no_update
     ref = reference if reference else None
+    data = _with_convergent_wall(data, conv_enable, conv_length)
     plot_fn, name = PLOT_FUNCS_MPL[active_tab]
     fig, _ax = plot_fn(data, reference=ref)
     buf = io.BytesIO()
@@ -992,6 +1048,27 @@ def download_plot(n_clicks, active_tab, data, reference, fmt):
     plt.close(fig)
     buf.seek(0)
     return dcc.send_bytes(buf.read(), f"{name}.{fmt}")
+
+
+@app.callback(
+    Output("download-wall-csv", "data"),
+    Input("download-wall-csv-btn", "n_clicks"),
+    State("result-store", "data"),
+    State("conv_inlet_enable", "value"),
+    State("conv_inlet_length", "value"),
+    prevent_initial_call=True,
+)
+def download_wall_csv(n_clicks, data, conv_enable, conv_length):
+    if not data:
+        return dash.no_update
+    data = _with_convergent_wall(data, conv_enable, conv_length)
+    wall = data["wall_final"]
+    lines = ["x,y"]
+    conv = data.get("convergent_wall")
+    if conv and conv.get("x"):
+        lines.extend(f"{x},{y}" for x, y in zip(conv["x"], conv["y"]))
+    lines.extend(f"{x},{y}" for x, y in zip(wall["x"], wall["y"]))
+    return dcc.send_string("\n".join(lines), "nozzle_wall.csv")
 
 
 @app.callback(

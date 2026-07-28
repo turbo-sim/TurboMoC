@@ -69,6 +69,12 @@ def plot_nozzle_contour(data, ax=None, mirror=True, show_sauer=True, show_kernel
         if mirror:
             ax.plot(wall["x"], _mirror(wall["y"]), ls, color=COLOR_WALL, lw=1.5, alpha=alpha)
 
+        conv = d.get("convergent_wall")
+        if conv and conv.get("x"):
+            ax.plot(conv["x"], conv["y"], ls, color=COLOR_WALL, lw=1.5, alpha=alpha)
+            if mirror:
+                ax.plot(conv["x"], _mirror(conv["y"]), ls, color=COLOR_WALL, lw=1.5, alpha=alpha)
+
         if show_sauer and d.get("sauer", {}).get("x"):
             sauer = d["sauer"]
             ax.plot(sauer["x"], sauer["y"], "o", color=COLOR_C_PLUS, ms=3, alpha=alpha)
