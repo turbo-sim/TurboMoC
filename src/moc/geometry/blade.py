@@ -179,8 +179,6 @@ def parametrize_stator_blade(
     metal_angle_in=0.0,
     metal_angle_out=70.0,
     r_trailing=0.5,
-    leading_edge_x=0.0,
-    leading_edge_y=0.0,
     inlet_opening_ratio=1.8,
     n_cp=30,
     num_baseline_points=500,
@@ -203,10 +201,6 @@ def parametrize_stator_blade(
         at the throat (matching the divergent-section wall angle).
     r_trailing : float
         Trailing-edge circle radius [mm].
-    leading_edge_x, leading_edge_y : float
-        Camberline integration start point [mm]. (leading_edge_y is
-        unused by the ported algorithm, kept for interface symmetry with
-        the original script's globals.)
     inlet_opening_ratio : float
         pitch / inlet_opening (throat pitch to passage-inlet-opening ratio),
         sets how far upstream the pressure-side Hermite spline reaches.
@@ -245,9 +239,7 @@ def parametrize_stator_blade(
 
     # --- Camberline: integrate a linear metal-angle blend from inlet to throat.
     def beta(x):
-        return metal_angle_in + (metal_angle_out - metal_angle_in) * (
-            x - leading_edge_x
-        ) / axial_chord_convergent
+        return metal_angle_in + (metal_angle_out - metal_angle_in) * x / axial_chord_convergent
 
     def camberline_slope(x, y):
         return np.tan(np.deg2rad(beta(x)))
@@ -260,7 +252,7 @@ def parametrize_stator_blade(
 
     sol = solve_ivp(
         camberline_slope,
-        [leading_edge_x, leading_edge_x + 1000.0],
+        [0.0, 1000.0],
         [0.0],
         events=target_angle_event,
         rtol=1e-8,
@@ -363,8 +355,6 @@ def parametrize_stator_blade_semi(
     metal_angle_in=0.0,
     metal_angle_out=70.0,
     r_trailing=0.5,
-    leading_edge_x=0.0,
-    leading_edge_y=0.0,
     inlet_opening_ratio=2.5,
     n_cp=30,
     num_baseline_points=500,
@@ -404,9 +394,7 @@ def parametrize_stator_blade_semi(
 
     # --- Camberline: integrate a linear metal-angle blend from inlet to throat.
     def beta(x):
-        return metal_angle_in + (metal_angle_out - metal_angle_in) * (
-            x - leading_edge_x
-        ) / axial_chord_convergent
+        return metal_angle_in + (metal_angle_out - metal_angle_in) * x / axial_chord_convergent
 
     def camberline_slope(x, y):
         return np.tan(np.deg2rad(beta(x)))
@@ -419,7 +407,7 @@ def parametrize_stator_blade_semi(
 
     sol = solve_ivp(
         camberline_slope,
-        [leading_edge_x, leading_edge_x + 1000.0],
+        [0.0, 1000.0],
         [0.0],
         events=target_angle_event,
         rtol=1e-8,

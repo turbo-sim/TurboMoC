@@ -311,7 +311,7 @@ plots = html.Div(
 # --------------------------------------------------------------------------
 BLADE_DEFAULTS = dict(
     metal_angle_in=0.0, metal_angle_out=70.0, r_trailing=0.5,
-    leading_edge_x=0.0, leading_edge_y=0.0, inlet_opening_ratio=1.8, n_cp=30,
+    inlet_opening_ratio=1.5, n_cp=30,
 )
 
 blade_controls = html.Div(
@@ -329,8 +329,6 @@ blade_controls = html.Div(
         _field(r"$\beta_{\text{metal,in}}$ (deg)", "metal_angle_in", BLADE_DEFAULTS["metal_angle_in"]),
         _field(r"$\beta_{\text{metal,out}}$ (deg)", "metal_angle_out", BLADE_DEFAULTS["metal_angle_out"]),
         _field(r"$r_{\text{TE}}$ (mm)", "r_trailing", BLADE_DEFAULTS["r_trailing"]),
-        _field(r"$x_{\text{LE}}$ (mm)", "leading_edge_x", BLADE_DEFAULTS["leading_edge_x"]),
-        _field(r"$y_{\text{LE}}$ (mm)", "leading_edge_y", BLADE_DEFAULTS["leading_edge_y"]),
         _field(r"$s / o_1$ (pitch / inlet opening)", "inlet_opening_ratio",
                BLADE_DEFAULTS["inlet_opening_ratio"]),
         _field(r"$n_{cp}$ (B-spline control points)", "n_cp", BLADE_DEFAULTS["n_cp"], step=1, min=6),
@@ -401,7 +399,14 @@ blade_plots = html.Div(
             ],
             style={"display": "flex", "alignItems": "center", "marginBottom": "8px"},
         ),
-        dcc.Graph(id="fig-blade", config={"displaylogo": False}, style={"height": "550px"}),
+        html.Div(
+            [
+                dcc.Graph(id="fig-blade", config={"displaylogo": False},
+                           style={"height": "550px", "flex": "2"}),
+                html.Div(id="blade-info-table", style={"flex": "1", "paddingTop": "16px"}),
+            ],
+            style={"display": "flex", "flexDirection": "row", "gap": "12px", "alignItems": "flex-start"},
+        ),
     ],
     style={"flex": "1", "padding": "16px"},
 )
@@ -1074,23 +1079,22 @@ def download_wall_csv(n_clicks, data, conv_enable, conv_length):
 @app.callback(
     Output("blade-store", "data"),
     Output("blade-status-message", "children"),
+    Output("blade-info-table", "children"),
     Input("compute-blade-btn", "n_clicks"),
     State("result-store", "data"),
     State("blade-method", "value"),
     State("metal_angle_in", "value"),
     State("metal_angle_out", "value"),
     State("r_trailing", "value"),
-    State("leading_edge_x", "value"),
-    State("leading_edge_y", "value"),
     State("inlet_opening_ratio", "value"),
     State("n_cp", "value"),
     prevent_initial_call=True,
 )
 def run_blade(n_clicks, nozzle_data, method, metal_angle_in, metal_angle_out, r_trailing,
-              leading_edge_x, leading_edge_y, inlet_opening_ratio, n_cp):
+              inlet_opening_ratio, n_cp):
     if not nozzle_data:
         return None, html.Div("Run Phase 1 Compute first -- no nozzle wall to build a blade from.",
-                                style={"color": "#b00020"})
+                                style={"color": "#b00020"}), None
 
     wall = nozzle_data["wall_final"]
     parametrize_fn = BLADE_PARAM_FUNCS[method or "full"]
@@ -1098,17 +1102,30 @@ def run_blade(n_clicks, nozzle_data, method, metal_angle_in, metal_angle_out, r_
         blade = parametrize_fn(
             wall["x"], wall["y"],
             metal_angle_in=metal_angle_in, metal_angle_out=metal_angle_out,
-            r_trailing=r_trailing, leading_edge_x=leading_edge_x, leading_edge_y=leading_edge_y,
+            r_trailing=r_trailing,
             inlet_opening_ratio=inlet_opening_ratio, n_cp=int(n_cp),
         )
     except Exception as e:
-        return None, html.Div(f"Error: {e}", style={"color": "#b00020"})
+        return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
 
     status = html.Div([
         html.Span(f"Blade parametrized ({method or 'full'})",
                    style={"fontWeight": "600", "color": "#1a7a1a"}),
     ])
-    return blade, status
+    table_data = [
+        {"Quantity": "Pitch", "Value": f"{blade['pitch']:.4f}", "Unit": blade["units"]},
+        {"Quantity": "Throat opening", "Value": f"{blade['throat_opening']:.4f}", "Unit": blade["units"]},
+        {"Quantity": "Inlet opening", "Value": f"{blade['inlet_opening']:.4f}", "Unit": blade["units"]},
+        {"Quantity": "Axial chord (convergent)", "Value": f"{blade['axial_chord_convergent']:.4f}",
+         "Unit": blade["units"]},
+        {"Quantity": "Axial chord (divergent)", "Value": f"{blade['axial_chord_divergent']:.4f}",
+         "Unit": blade["units"]},
+        {"Quantity": "Metal angle in", "Value": f"{blade['metal_angle_in']:.2f}", "Unit": "deg"},
+        {"Quantity": "Metal angle out", "Value": f"{blade['metal_angle_out']:.2f}", "Unit": "deg"},
+        {"Quantity": "TE radius", "Value": f"{blade['r_trailing']:.4f}", "Unit": blade["units"]},
+        {"Quantity": "s / o_1", "Value": f"{inlet_opening_ratio:.4f}", "Unit": "-"},
+    ]
+    return blade, status, make_table(table_data, ["Quantity", "Value", "Unit"])
 
 
 def _effective_blade(base_blade, edited_blade):
@@ -1552,7 +1569,7 @@ def update_cascade_plot(base_blade, edited_blade, rotor_data, n_stator, n_rotor,
         fig.add_trace(go.Scatter(
             x=band_x + [band_x[0]], y=band_y + [band_y[0]],
             mode="lines", fill="toself",
-            line=dict(color="#2ecc71", width=1.5, dash="dot"),
+            line=dict(color="black", width=1.5, dash="dot"),
             fillcolor="#2ecc71", opacity=0.25,
             name="Stator passage", showlegend=False, hoverinfo="skip",
         ))
@@ -1711,7 +1728,7 @@ def update_cascade_plot(base_blade, edited_blade, rotor_data, n_stator, n_rotor,
         fig.add_trace(go.Scatter(
             x=band_xr + [band_xr[0]], y=band_yr + [band_yr[0]],
             mode="lines", fill="toself",
-            line=dict(color="#2ecc71", width=1.5, dash="dot"),
+            line=dict(color="black", width=1.5, dash="dot"),
             fillcolor="#2ecc71", opacity=0.25,
             name="Rotor passage", showlegend=False, hoverinfo="skip",
         ))
@@ -2216,7 +2233,7 @@ def _add_radial_passage_trace(fig, blade_data, pitch, r1, r2, source,
     fig.add_trace(go.Scatter(
         x=bm["x"] + [bm["x"][0]], y=bm["y"] + [bm["y"][0]],
         mode="lines", fill="toself",
-        line=dict(color=color, width=1.5, dash="dot"),
+        line=dict(color="black", width=1.5, dash="dot"),
         fillcolor=color, opacity=0.25,
         name=name, showlegend=False, hoverinfo="skip",
     ))
@@ -2347,6 +2364,21 @@ def download_radial_plot(n_clicks, radial_data, fmt):
 # Both the meridional sketch and the exported solid read the SAME hub/tip
 # radii fields for a given prefix, so they can never disagree.
 # --------------------------------------------------------------------------
+def _empty_figure_with_message(message):
+    """A blank go.Figure() with a centered annotation instead of a truly
+    empty plot -- the meridional view has three different reasons to come
+    back empty (Flare not enabled, a prerequisite phase not computed yet,
+    or a bad radius/gap value raising inside build_meridional_view) that
+    were all previously indistinguishable from each other (and from a
+    real bug) as a blank dcc.Graph with zero feedback."""
+    fig = go.Figure()
+    fig.add_annotation(text=message, xref="paper", yref="paper", x=0.5, y=0.5,
+                        showarrow=False, font=dict(size=13, color="#666"))
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
+    return fig
+
+
 def _stator_axial_chord(stator_blade):
     """Stator's own chordwise (flow-direction) extent -- blade_curve's y,
     per parametrize_stator_blade's own rotation convention (see moc/
@@ -2393,10 +2425,15 @@ def _register_flare_callbacks(prefix, scale_input_id=None, gap_input_id=None):
                       r_hub_in, r_hub_out, r_tip_in, r_tip_out,
                       rotor_scale, gap, z_range=None):
         if not enable_vals or "on" not in enable_vals:
-            return go.Figure()
+            return _empty_figure_with_message("Enable \"Flare\" above to see the meridional view.")
         stator = _effective_blade(base_blade, edited_blade)
         if not stator or not rotor_data:
-            return go.Figure()
+            missing = []
+            if not stator:
+                missing.append("a stator blade (Phase 2)")
+            if not rotor_data:
+                missing.append("a rotor blade (Phase 3)")
+            return _empty_figure_with_message(f"Compute {' and '.join(missing)} first.")
         try:
             stator_chord = _stator_axial_chord(stator)
             rotor_chord = rotor_data["chord"] * float(rotor_scale or 1.0)
@@ -2405,8 +2442,8 @@ def _register_flare_callbacks(prefix, scale_input_id=None, gap_input_id=None):
                 rotor_chord, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
                 gap or 0.0,
             )
-        except (TypeError, ValueError):
-            return go.Figure()
+        except (TypeError, ValueError) as e:
+            return _empty_figure_with_message(f"Error: {e}")
         return moc.plotly.plot_meridional_view(meridional, z_range=z_range)
 
     @app.callback(
