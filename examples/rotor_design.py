@@ -1,7 +1,11 @@
+import os
 from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+outdir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+os.makedirs(outdir, exist_ok=True)
 
 import moc.plotting_mpl as mpl
 from moc.rotor import design_rotor_vortex_blade
@@ -12,30 +16,34 @@ data = design_rotor_vortex_blade(
     P0_rel=5e5, T0_rel=400.0,
     M_inlet=1.6, M_outlet=1.2,
     M_lower=1.1, M_upper=2.0,
-    beta_inlet=5.0,
+    beta_inlet=5,
     backend="HEOS",
     num_points=60,
 )
+
+# # Impulse rotor blade example 
+# data = design_rotor_vortex_blade(
+#     fluid_name="air",
+#     P0_rel=5e5, T0_rel=400.0,
+#     M_inlet=1.4, M_outlet=1.4,
+#     M_lower=1.1, M_upper=2.0,
+#     beta_inlet=70,
+#     backend="HEOS",
+#     num_points=60,
+# )
+
 print(f"pitch={data['pitch']:.4f}  chord={data['chord']:.4f}  solidity={data['solidity']:.4f}  "
       f"beta_outlet={data['beta_outlet']:.4f}")
 
-# fig, ax = mpl.plot_rotor_blade(data)
-
-# The LE/TE-rounded solid blade is now built inside design_rotor_vortex_blade
-# itself (see moc/rotor/vortex_blade.py's _close_blade_le_te) -- this script
-# just plots the result and, in Fig 3 below, re-derives the same
-# intermediate line-first-then-arc construction (dashed) purely for
-# visualization, using the module's own _line_intersect/_arc_from_diameter.
 b = data["blade"]
-fig2, ax2 = plt.subplots(figsize=(7, 6))
+fig2, ax2 = plt.subplots(figsize=(6, 5))
 ax2.fill(b["x"], b["y"], color="0.55", edgecolor="0.15", lw=1.5)
 ax2.fill(b["x"], np.array(b["y"]) - data["pitch"], color="0.55", edgecolor="0.15", lw=1.5)
 ax2.set_xlabel(f"x ({data['units']})")
 ax2.set_ylabel(f"y ({data['units']})")
 ax2.set_aspect("equal")
-ax2.set_title("Rotor vortex blade (Goldman & Scullin 1968, TN D-4421)")
+# ax2.set_title("Rotor vortex blade (Goldman & Scullin 1968, TN D-4421)")
 
-# Lower/upper walls stored separately (data["blade_lower"]/["blade_upper"]).
 lower = data["blade_lower"]
 upper = data["blade_upper"]
 
@@ -61,20 +69,18 @@ le_x, le_y = _arc_from_diameter(L0, T_LE, interior_ref)
 te_x, te_y = _arc_from_diameter(L1, T_TE, interior_ref)
 print(f"r_LE = {b['le_radius']:.4f}   r_TE (target = pitch/25) = {b['te_radius']:.4f}")
 
-fig5, ax5 = plt.subplots(figsize=(7, 6))
+fig5, ax5 = plt.subplots(figsize=(6, 5))
 ax5.plot(lower["x"], lower["y"], color="C1", lw=2, label="lower wall")
 ax5.plot(upper["x"], [y + translate for y in upper["y"]], color="C2", lw=2, label="upper wall (translated)")
 ax5.plot([U0[0], T_LE[0]], [U0[1], T_LE[1]], color="gray", lw=1.5, ls="--", label="straight line (built first)")
 ax5.plot([U1[0], T_TE[0]], [U1[1], T_TE[1]], color="gray", lw=1.5, ls="--")
-# reference normals (dashed gray) through the lower wall's own endpoints
+
 for P, n in [(L0, n_LE), (L1, n_TE)]:
     seg = np.array([P - 0.3 * n, P + 0.3 * n])
     ax5.plot(seg[:, 0], seg[:, 1], color="0.6", lw=1, ls="--")
 ax5.plot(le_x, le_y, color="k", lw=2.5, label="LE arc (built from the line's endpoint)")
 ax5.plot(te_x, te_y, color="b", lw=2.5, label="TE arc (built from the line's endpoint)")
 
-# Markers: transition-arc/circular-arc junctions on pressure & suction, and
-# the corners (L0/L1) where the circle-arc closure starts.
 num_pts = data["num_points"]
 n_p = len(data["pressure"]["x"])
 n_s = len(data["suction"]["x"])
@@ -94,40 +100,11 @@ ax5.set_xlabel(f"x ({data['units']})")
 ax5.set_ylabel(f"y ({data['units']})")
 ax5.set_aspect("equal")
 ax5.legend(fontsize=7)
-ax5.set_title("Line first (U0->T_LE), then arc as semicircle on L0->T_LE")
+# ax5.set_title("Line first (U0->T_LE), then arc as semicircle on L0->T_LE")
 
-# "Infinite" LE/TE, i.e. le_te_ratio -> infinity: r_TE target = pitch/le_te_ratio
-# -> 0, so _close_blade_le_te's derived `translate` shrinks to exactly the
-# value that collapses both fillets to zero radius -- the walls then meet
-# directly at a sharp point, the same "sharp closure" this module used
-# before rounding was implemented, now recovered as a limiting case of the
-# SAME construction rather than a separate code path.
-data_sharp = design_rotor_vortex_blade(
-    fluid_name="air",
-    P0_rel=5e5, T0_rel=400.0,
-    M_inlet=1.6, M_outlet=1.3,
-    M_lower=1.1, M_upper=2.0,
-    beta_inlet=50.0,
-    backend="HEOS",
-    num_points=60,
-    le_te_ratio=1e8,
-)
-b_sharp = data_sharp["blade"]
-print(f"[sharp/infinite ratio] r_LE = {b_sharp['le_radius']:.2e}   r_TE = {b_sharp['te_radius']:.2e}")
-
-fig7, ax7 = plt.subplots(figsize=(7, 6))
-ax7.fill(b_sharp["x"], b_sharp["y"], color="0.55", edgecolor="0.15", lw=1.5)
-ax7.set_xlabel(f"x ({data_sharp['units']})")
-ax7.set_ylabel(f"y ({data_sharp['units']})")
-ax7.set_aspect("equal")
-ax7.set_title("Rotor vortex blade with sharp (infinite le_te_ratio) LE/TE")
+fig2.savefig(os.path.join(outdir, "rotor_blade.svg"), bbox_inches="tight")
+fig5.savefig(os.path.join(outdir, "rotor_blade_construction.svg"), bbox_inches="tight")
+print(f"saved figures to {outdir}")
 
 plt.show()
 
-out_dir = Path(__file__).parent / "output" / "plots"
-out_dir.mkdir(parents=True, exist_ok=True)
-# fig.savefig(out_dir / "rotor_vortex_surfaces.png", dpi=140)
-fig2.savefig(out_dir / "rotor_vortex_blade.png", dpi=140)
-fig5.savefig(out_dir / "rotor_vortex_walls_circle_closed.png", dpi=140)
-fig7.savefig(out_dir / "rotor_vortex_blade_sharp_LE_TE.png", dpi=140)
-print(f"saved to {out_dir}")

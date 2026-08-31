@@ -17,6 +17,11 @@ env/
 # Regenerable example outputs (plots, dumped design JSON)
 examples/output/
 
+# 5 Eqs. model
+src/moc/core/nonequilibrium_5eq_fast.py
+src/moc/core/nonequilibrium_5eq.py
+notes/nonequilibrium_5eq_derivation.md
+
 # OS cruft
 .DS_Store
 Thumbs.db
