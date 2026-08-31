@@ -270,15 +270,39 @@ def _property_vs_x(x, p, M, xlabel, p_label, m_label,
     return _apply_journal_style(fig)
 
 
+def _extend_axis_to_exit(data):
+    """axis_points_vec (and hence data['axis']) stops accumulating at the
+    end of Stage 3 (the kernel region) -- Stage 4 (the reflex/turning
+    region) never appends to it, because past the kernel no more
+    expansion waves reach the centerline, so the axis P/M are already at
+    their final (exit) values by then; the classical MOC construction
+    doesn't need to track the axis any further. So the true P/M on the
+    centerline really IS flat from the last kernel point to the nozzle
+    exit -- this is exact physics, not a plotting approximation. Extends
+    axis['x']/['p']/['M'] with one more point at the wall's own exit x,
+    repeating the last axis p/M, so the plot's x-range visually matches
+    plot_wall_properties (which does span the whole nozzle) instead of
+    stopping short at the kernel/turning-region boundary."""
+    axis = data["axis"]
+    exit_x = data["wall_final"]["x"][-1]
+    if not axis["x"] or exit_x <= axis["x"][-1]:
+        return axis["x"], axis["p"], axis["M"]
+    return axis["x"] + [exit_x], axis["p"] + [axis["p"][-1]], axis["M"] + [axis["M"][-1]]
+
+
 def plot_axis_properties(data, reference=None, label="Current", reference_label="Reference"):
     """Pressure (left, orange) + Mach (right, green) vs axial distance
-    along the centerline -- data['axis']. reference=<data dict> overlays a
-    second design's axis properties (dashed)."""
-    axis = data["axis"]
-    ref = reference["axis"] if reference is not None else None
-    return _property_vs_x(axis["x"], axis["p"], axis["M"], "x (m)", "P (bar)", "M (-)",
-                           ref_x=ref["x"] if ref else None, ref_p=ref["p"] if ref else None,
-                           ref_M=ref["M"] if ref else None, label=label, reference_label=reference_label)
+    along the centerline -- data['axis'], extended with a flat line out to
+    the nozzle exit (see _extend_axis_to_exit). reference=<data dict>
+    overlays a second design's axis properties (dashed, same extension)."""
+    x, p, M = _extend_axis_to_exit(data)
+    if reference is not None:
+        ref_x, ref_p, ref_M = _extend_axis_to_exit(reference)
+    else:
+        ref_x = ref_p = ref_M = None
+    return _property_vs_x(x, p, M, "x (m)", "P (bar)", "M (-)",
+                           ref_x=ref_x, ref_p=ref_p,
+                           ref_M=ref_M, label=label, reference_label=reference_label)
 
 
 def plot_wall_properties(data, reference=None, label="Current", reference_label="Reference"):

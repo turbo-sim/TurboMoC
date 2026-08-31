@@ -217,15 +217,32 @@ def _property_vs_x(x, p, M, xlabel, p_label, m_label, ax_p=None,
     return fig, (ax_p, ax_M)
 
 
+def _extend_axis_to_exit(data):
+    """See plotting_plotly._extend_axis_to_exit's docstring: axis_points_
+    vec stops at the end of Stage 3 (the kernel region) since past it no
+    more expansion waves reach the centerline, so the axis P/M are
+    already at their final (exit) values -- the flat continuation to the
+    nozzle exit is exact physics, not an approximation."""
+    axis = data["axis"]
+    exit_x = data["wall_final"]["x"][-1]
+    if not axis["x"] or exit_x <= axis["x"][-1]:
+        return axis["x"], axis["p"], axis["M"]
+    return axis["x"] + [exit_x], axis["p"] + [axis["p"][-1]], axis["M"] + [axis["M"][-1]]
+
+
 def plot_axis_properties(data, ax=None, reference=None, label="Current", reference_label="Reference"):
     """Pressure (left, orange) + Mach (right, green) vs axial distance
-    along the centerline -- data['axis']. reference=<data dict> overlays a
-    second design's axis properties (dashed)."""
-    axis = data["axis"]
-    ref = reference["axis"] if reference is not None else None
-    return _property_vs_x(axis["x"], axis["p"], axis["M"], "x (m)", "P (bar)", "M (-)", ax_p=ax,
-                           ref_x=ref["x"] if ref else None, ref_p=ref["p"] if ref else None,
-                           ref_M=ref["M"] if ref else None, label=label, reference_label=reference_label)
+    along the centerline -- data['axis'], extended with a flat line out to
+    the nozzle exit (see _extend_axis_to_exit). reference=<data dict>
+    overlays a second design's axis properties (dashed, same extension)."""
+    x, p, M = _extend_axis_to_exit(data)
+    if reference is not None:
+        ref_x, ref_p, ref_M = _extend_axis_to_exit(reference)
+    else:
+        ref_x = ref_p = ref_M = None
+    return _property_vs_x(x, p, M, "x (m)", "P (bar)", "M (-)", ax_p=ax,
+                           ref_x=ref_x, ref_p=ref_p,
+                           ref_M=ref_M, label=label, reference_label=reference_label)
 
 
 def plot_wall_properties(data, ax=None, reference=None, label="Current", reference_label="Reference"):

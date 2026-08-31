@@ -102,7 +102,7 @@ DEFAULTS = dict(
     # P0/p_back are in bar (UI + save/load convention) -- converted to Pa
     # only at the design_nozzle() call boundary in run_design.
     P0=20.0, T0=113.0, Q0=0.5, p_back=2.0,
-    y_t=0.01, n=15, rho_t=0.2, rho_d=0.1,
+    y_t=0.01, n=15, rho_d=0.1,
 )
 
 
@@ -215,19 +215,10 @@ controls = html.Div(
 
         html.H4("Geometry"),
         _field(r"$y_t$ (m)", "y_t", DEFAULTS["y_t"]),
-        _field(r"$\rho_t$", "rho_t", DEFAULTS["rho_t"]),
         _field(r"$\rho_d$", "rho_d", DEFAULTS["rho_d"]),
         _field(r"$n$", "n", DEFAULTS["n"], step=1, min=5),
 
         html.H4("Convergent inlet (geometry only)", style={"marginTop": "16px"}),
-        html.Div(
-            "Purely geometric upstream extension of the wall, not part of "
-            "the MOC solve: a reversed-curvature (S-curve) contour made of "
-            "two equal-radius (rho_d) tangent circular arcs, split evenly "
-            "over the given length, so the wall reaches the inlet plane "
-            "exactly parallel to the axis.",
-            style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
-        ),
         dcc.Checklist(
             id="conv_inlet_enable",
             options=[{"label": " Add convergent inlet", "value": "on"}],
@@ -364,13 +355,42 @@ blade_controls = html.Div(
 
         html.H4("CAD export (STEP)", style={"marginTop": "16px"}),
         dcc.RadioItems(
-            id="step-kind",
+            id="step-export-target",
             options=[
-                {"label": " 2D face", "value": "face"},
-                {"label": " 3D solid (extruded)", "value": "solid"},
+                {"label": " Blade solid", "value": "blade"},
+                {"label": " Fluid domain (passage)", "value": "passage"},
             ],
-            value="solid",
+            value="blade",
             labelStyle={"display": "block", "fontSize": "13px"},
+        ),
+        html.Div(
+            id="step-export-blade-fields",
+            children=[
+                dcc.RadioItems(
+                    id="step-kind",
+                    options=[
+                        {"label": " 2D face", "value": "face"},
+                        {"label": " 3D solid (extruded)", "value": "solid"},
+                    ],
+                    value="solid",
+                    labelStyle={"display": "block", "fontSize": "13px"},
+                ),
+            ],
+        ),
+        html.Div(
+            id="step-export-passage-fields",
+            children=[
+                html.Div(
+                    "One blade-to-blade flow channel (pitch band minus the "
+                    "blade solid), for periodic-BC CFD meshing.",
+                    style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
+                ),
+                _field(r"Inlet distance ($\times$ chord)",
+                       "passage_stator_inlet_chords", 1.0, step=0.5, min=0),
+                _field(r"Outlet distance ($\times$ chord)",
+                       "passage_stator_outlet_chords", 6.0, step=0.5, min=0),
+            ],
+            style={"display": "none"},
         ),
         _field(r"$L_{\text{extrude}}$ (mm)", "extrude_length", 1.0),
         html.Button("Download STEP", id="download-step-btn", n_clicks=0,
@@ -627,21 +647,22 @@ cascade_controls = html.Div(
             value=[],
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
-        _field(r"Stator inlet distance ($\times$ chord)",
-               "passage_stator_inlet_chords", 1.0, step=0.5, min=0),
-        _field(r"Stator outlet distance ($\times$ chord)",
-               "passage_stator_outlet_chords", 6.0, step=0.5, min=0),
+        # Stator inlet/outlet-distance fields (passage_stator_inlet_chords /
+        # passage_stator_outlet_chords) now live in Phase 2's CAD export
+        # section (its "Fluid domain (passage)" export target) -- the
+        # preview trace below still reads them by id regardless of which
+        # tab they're rendered under, so moving them doesn't touch this
+        # callback at all, and there's exactly one place to set them for
+        # both the preview and the actual STEP export (never two numbers
+        # that could disagree).
         _field(r"Rotor inlet distance ($\times$ chord)",
                "passage_rotor_inlet_chords", 1.0, step=0.5, min=0),
         _field(r"Rotor outlet distance ($\times$ chord)",
                "passage_rotor_outlet_chords", 6.0, step=0.5, min=0),
         _field(r"Stator passage shift (pitches)", "passage_stator_shift", 0, step=1),
         _field(r"Rotor passage shift (pitches)", "passage_rotor_shift", -4, step=1),
-        html.Button("Download stator passage STEP", id="download-passage-stator-btn",
-                     n_clicks=0, style={"width": "100%", "padding": "6px", "marginBottom": "6px"}),
         html.Button("Download rotor passage STEP", id="download-passage-rotor-btn",
                      n_clicks=0, style={"width": "100%", "padding": "6px"}),
-        dcc.Download(id="download-passage-stator"),
         dcc.Download(id="download-passage-rotor"),
         html.Div(id="passage-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
     ],
@@ -840,7 +861,6 @@ def toggle_inlet_inputs(mode):
     State("solver", "value"),
     State("stage1_mode", "value"),
     State("y_t", "value"),
-    State("rho_t", "value"),
     State("rho_d", "value"),
     State("n", "value"),
     background=True,
@@ -849,9 +869,20 @@ def toggle_inlet_inputs(mode):
     prevent_initial_call=True,
 )
 def run_design(set_progress, n_clicks, fluid_name, inlet_mode, P0, T0, Q0, p_back,
-                solver, stage1_mode, y_t, rho_t, rho_d, n):
+                solver, stage1_mode, y_t, rho_d, n):
     reporter = make_progress_reporter(set_progress)
     set_progress(("0%", "starting..."))
+    # rho_t (the Sauer/parabolic sonic-line's throat radius of curvature,
+    # only meaningful when stage1_mode="sauer") is no longer an
+    # independent field -- derived as rho_d, so the throat's upstream
+    # (Sauer-implied) curvature always matches the downstream kernel
+    # arc's own radius, keeping the wall's curvature continuous through
+    # the throat. NOT y_t + rho_d: that's the y-coordinate of the kernel
+    # arc's CENTER (see rotation_around_center's docstring), a position
+    # on the axis, not a curvature radius -- a circle's radius of
+    # curvature is its own radius rho_d, everywhere on it, regardless of
+    # how far its center sits from the axis.
+    rho_t = float(rho_d or 0.0)
     try:
         data = design_nozzle(
             fluid_name=fluid_name,
@@ -906,13 +937,12 @@ def run_design(set_progress, n_clicks, fluid_name, inlet_mode, P0, T0, Q0, p_bac
     State("solver", "value"),
     State("stage1_mode", "value"),
     State("y_t", "value"),
-    State("rho_t", "value"),
     State("rho_d", "value"),
     State("n", "value"),
     prevent_initial_call=True,
 )
 def save_nozzle_design(n_clicks, result_data, fluid_name, inlet_mode, P0, T0, Q0, p_back,
-                        solver, stage1_mode, y_t, rho_t, rho_d, n):
+                        solver, stage1_mode, y_t, rho_d, n):
     if result_data is None:
         return dash.no_update
 
@@ -920,7 +950,7 @@ def save_nozzle_design(n_clicks, result_data, fluid_name, inlet_mode, P0, T0, Q0
         "inputs": {
             "fluid_name": fluid_name, "inlet_mode": inlet_mode, "P0": P0, "T0": T0, "Q0": Q0,
             "p_back": p_back, "solver": solver, "stage1_mode": stage1_mode,
-            "y_t": y_t, "rho_t": rho_t, "rho_d": rho_d, "n": n,
+            "y_t": y_t, "rho_d": rho_d, "n": n,
         },
         "outputs": result_data,
     }
@@ -954,7 +984,6 @@ def load_nozzle_file(contents):
     Output("solver", "value"),
     Output("stage1_mode", "value"),
     Output("y_t", "value"),
-    Output("rho_t", "value"),
     Output("rho_d", "value"),
     Output("n", "value"),
     Input("loaded-nozzle-store", "data"),
@@ -962,14 +991,14 @@ def load_nozzle_file(contents):
 )
 def apply_loaded_nozzle_design(cfg):
     if not cfg:
-        return (dash.no_update,) * 13
+        return (dash.no_update,) * 12
     inp = cfg.get("inputs", {})
     status = html.Div("Loaded from file (no recompute needed).", style={"color": "#1a7a1a"})
     return (
         cfg.get("outputs"), status,
         inp.get("fluid_name"), inp.get("inlet_mode"), inp.get("P0"), inp.get("T0"), inp.get("Q0"),
         inp.get("p_back"), inp.get("solver"), inp.get("stage1_mode"),
-        inp.get("y_t"), inp.get("rho_t"), inp.get("rho_d"), inp.get("n"),
+        inp.get("y_t"), inp.get("rho_d"), inp.get("n"),
     )
 
 
@@ -1217,14 +1246,34 @@ def manage_blade_reference(pin_clicks, clear_clicks, base_blade, edited_blade):
     Input("blade-reference-store", "data"),
     Input("n_blades_plot", "value"),
     Input("cp_index", "value"),
+    Input("step-export-target", "value"),
+    Input("passage_stator_inlet_chords", "value"),
+    Input("passage_stator_outlet_chords", "value"),
 )
-def update_blade_plot(base_blade, edited_blade, reference, n_blades, cp_index):
+def update_blade_plot(base_blade, edited_blade, reference, n_blades, cp_index,
+                        step_export_target, inlet_chords, outlet_chords):
     blade = _effective_blade(base_blade, edited_blade)
     if not blade:
         return go.Figure()
     ref = reference if reference else None
-    return moc.plotly.plot_blade(blade, n_blades=int(n_blades) if n_blades else 2,
-                                   highlight_cp=cp_index, reference=ref)
+    fig = moc.plotly.plot_blade(blade, n_blades=int(n_blades) if n_blades else 2,
+                                  highlight_cp=cp_index, reference=ref)
+    if step_export_target == "passage":
+        # Preview of the passage this blade's own "Fluid domain (passage)"
+        # STEP export would produce -- same helper (and the same inlet/
+        # outlet-chord fields) as the actual export, so what's shown here
+        # can never disagree with what gets downloaded. mirror=False: this
+        # plot is the blade's own natural (unmirrored) orientation, unlike
+        # Phase 4's cascade view.
+        band_x, band_y = _stator_passage_band_xy(blade, inlet_chords, outlet_chords, mirror=False)
+        fig.add_trace(go.Scatter(
+            x=band_x + [band_x[0]], y=band_y + [band_y[0]],
+            mode="lines", fill="toself",
+            line=dict(color="black", width=1.5, dash="dot"),
+            fillcolor="#2ecc71", opacity=0.25,
+            name="Fluid domain", showlegend=True, hoverinfo="skip",
+        ))
+    return fig
 
 
 @app.callback(
@@ -1251,35 +1300,79 @@ def download_blade_plot(n_clicks, base_blade, edited_blade, reference, fmt, n_bl
 
 
 @app.callback(
+    Output("step-export-blade-fields", "style"),
+    Output("step-export-passage-fields", "style"),
+    Input("step-export-target", "value"),
+)
+def _toggle_step_export_target(target):
+    if target == "passage":
+        return {"display": "none"}, {}
+    return {}, {"display": "none"}
+
+
+@app.callback(
     Output("download-step", "data"),
     Output("blade-step-status", "children"),
     Input("download-step-btn", "n_clicks"),
     State("blade-store", "data"),
     State("blade-edited-store", "data"),
+    State("step-export-target", "value"),
     State("step-kind", "value"),
     State("extrude_length", "value"),
+    State("passage_stator_inlet_chords", "value"),
+    State("passage_stator_outlet_chords", "value"),
     prevent_initial_call=True,
 )
-def download_step(n_clicks, base_blade, edited_blade, kind, extrude_length):
+def download_step(n_clicks, base_blade, edited_blade, target, kind, extrude_length,
+                    inlet_chords, outlet_chords):
     blade = _effective_blade(base_blade, edited_blade)
     if not blade:
         return dash.no_update, html.Div("Compute a blade first.", style={"color": "#b00020"})
-    try:
-        from moc.geometry import export_blade_step
-    except ImportError:
-        return dash.no_update, html.Div(
-            "cadquery is not installed -- STEP export unavailable "
-            "(see environment.yaml / pyproject.toml's 'cad' extra).",
-            style={"color": "#b00020"},
-        )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        face_path = os.path.join(tmpdir, "blade_face.step")
-        solid_path = os.path.join(tmpdir, "blade_solid.step") if kind == "solid" else None
-        export_blade_step(blade, face_path, solid_path, extrude_length=extrude_length or 1.0)
-        target_path = solid_path if kind == "solid" else face_path
-        with open(target_path, "rb") as f:
-            content = f.read()
+    cad_missing = html.Div(
+        "cadquery is not installed -- STEP export unavailable "
+        "(see environment.yaml / pyproject.toml's 'cad' extra).",
+        style={"color": "#b00020"},
+    )
+
+    if target == "passage":
+        extrude_length = float(extrude_length or 0.0)
+        # 0 (or unset) thickness -> face only, matching export_blade_step's
+        # own solid_path=None convention below: a 0-length extrusion isn't
+        # a valid CAD solid, and skipping it is exactly what "just give me
+        # the surface" means anyway, not an error to route around.
+        want_solid = extrude_length > 0.0
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                from moc.geometry import extract_axial_passage_2d
+                face_path = os.path.join(tmpdir, "face.step")
+                solid_path = os.path.join(tmpdir, "solid.step") if want_solid else None
+                extract_axial_passage_2d(
+                    blade, blade["pitch"], face_path, solid_path,
+                    extrude_length=extrude_length, source="stator",
+                    inlet_chords=float(inlet_chords or 1.0),
+                    outlet_chords=float(outlet_chords or 6.0),
+                )
+                target_path = solid_path if want_solid else face_path
+                with open(target_path, "rb") as f:
+                    content = f.read()
+        except ImportError:
+            return dash.no_update, cad_missing
+        fname = "stator_passage_solid.step" if want_solid else "stator_passage_face.step"
+        return dcc.send_bytes(content, fname), html.Div(
+            "Fluid domain STEP ready.", style={"color": "#1a7a1a"})
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from moc.geometry import export_blade_step
+            face_path = os.path.join(tmpdir, "blade_face.step")
+            solid_path = os.path.join(tmpdir, "blade_solid.step") if kind == "solid" else None
+            export_blade_step(blade, face_path, solid_path, extrude_length=extrude_length or 1.0)
+            target_path = solid_path if kind == "solid" else face_path
+            with open(target_path, "rb") as f:
+                content = f.read()
+    except ImportError:
+        return dash.no_update, cad_missing
 
     fname = "stator_blade_solid.step" if kind == "solid" else "stator_blade_face.step"
     return dcc.send_bytes(content, fname), html.Div("STEP file ready.", style={"color": "#1a7a1a"})
@@ -1433,6 +1526,79 @@ def _mirror_pitchwise(blade_data):
     return mirrored
 
 
+def _stator_passage_band_xy(stator, inlet_chords, outlet_chords, mirror=False, pitch_shift=0.0):
+    """Periodic-passage band geometry around `stator` (Phase 2's own blade
+    dict) -- same construction as extract_axial_passage_2d (a pitch-wide
+    domain, vertical near inlet/outlet, staggered in between -- the
+    staggered section is two lines, through the LE at metal_angle_in and
+    through the TE at metal_angle_out, meeting at their own intersection,
+    so the wall passes exactly through the blade's own LE/TE corners and
+    the throat-height centerline runs exactly through the mid-pitch point
+    at the trailing edge). Shared by Phase 2's own blade plot (mirror=
+    False, its natural orientation) and Phase 4's cascade view (mirror=
+    True, to match _mirror_pitchwise's display-only x negation) so both
+    previews and the actual STEP export (extract_axial_passage_2d) can
+    never disagree with each other. pitch_shift: extra offset in units of
+    pitches (positive = toward +x, matching the blade-copy loops' own
+    dx=i*pitch convention) -- purely a display choice, doesn't change the
+    exported geometry."""
+    sgn = -1.0 if mirror else 1.0
+    suction = stator["suction"]
+    p0 = (sgn * suction["x"][0], suction["y"][0])
+    p1 = (sgn * suction["x"][-1], suction["y"][-1])
+    end_slope = (p1[0] - p0[0]) / (p1[1] - p0[1])
+    sign = 1.0 if end_slope >= 0 else -1.0
+    slope_in = sign * abs(np.tan(np.radians(stator["metal_angle_in"])))
+    slope_out = sign * abs(np.tan(np.radians(stator["metal_angle_out"])))
+    s_in = p0[0] - slope_in * p0[1]
+    s_out = p1[0] - slope_out * p1[1]
+    c_kink = (s_out - s_in) / (slope_in - slope_out) if slope_in != slope_out else p0[1]
+
+    curve = stator["blade_curve"]
+    te = stator["trailing_edge"]
+    contour = list(zip([sgn * v for v in curve["x"]], curve["y"])) + list(
+        zip([sgn * v for v in te["x"]], te["y"]))
+    c_vals = [y for _, y in contour]
+    c_span = max(c_vals) - min(c_vals)
+    inlet_chords = float(inlet_chords or 1.0)
+    outlet_chords = float(outlet_chords or 6.0)
+    axial_chord = stator["axial_chord_convergent"] + stator["axial_chord_divergent"]
+    c_hi = max(c_vals) + inlet_chords * axial_chord
+    c_lo = min(c_vals) - outlet_chords * axial_chord
+    c_bend_in = max(max(c_vals) - 0.15 * c_span, c_kink)
+    c_bend_out = min(min(c_vals) + 0.05 * c_span, c_kink)
+
+    def _wall_p(offset, c):
+        c_eff = min(max(c, c_bend_out), c_bend_in)
+        if c_eff >= c_kink:
+            return offset + s_in + slope_in * c_eff
+        return offset + s_out + slope_out * c_eff
+
+    def _corner(offset, c):
+        return _wall_p(offset, c), c
+
+    # Walls at +/- half a pitch, not 0/+pitch -- centers the blade's own
+    # LE/TE line in the middle of the domain (see extract_axial_
+    # passage_2d's matching note).
+    pitch = stator["pitch"]
+    shift_amt = float(pitch_shift or 0) * pitch
+    off_l = -0.5 * pitch + shift_amt
+    off_r = 0.5 * pitch + shift_amt
+    pts = [_corner(off_l, c_hi), _corner(off_r, c_hi)]              # inlet cap
+    pts.append(_corner(off_r, c_bend_in))                           # right wall, vertical
+    if c_bend_in > c_kink > c_bend_out:
+        pts.append(_corner(off_r, c_kink))                          # right wall, inlet-angle
+    pts += [_corner(off_r, c_bend_out), _corner(off_r, c_lo)]       # right wall + cap
+    pts += [_corner(off_l, c_lo), _corner(off_l, c_bend_out)]       # outlet cap + left wall
+    if c_bend_in > c_kink > c_bend_out:
+        pts.append(_corner(off_l, c_kink))                          # left wall, outlet-angle
+    pts.append(_corner(off_l, c_bend_in))                           # left wall, remaining
+
+    band_x = [p[0] for p in pts]
+    band_y = [p[1] for p in pts]
+    return band_x, band_y
+
+
 @app.callback(
     Output("fig-cascade", "figure"),
     Output("cascade-status-message", "children"),
@@ -1498,74 +1664,17 @@ def update_cascade_plot(base_blade, edited_blade, rotor_data, n_stator, n_rotor,
     scurve = stator_display["blade_curve"]
 
     if "stator" in show_passage:
-        # Preview of the SAME construction as extract_axial_passage_2d:
-        # a pitch-wide domain, vertical near inlet/outlet, staggered in
-        # between -- and the staggered section itself is TWO segments: a
-        # line through the (mirrored) leading edge at metal_angle_in, a
-        # line through the (mirrored) trailing edge at metal_angle_out,
-        # meeting at their own intersection -- so the wall passes exactly
-        # through the blade's own LE/TE corners and the throat-height
-        # centerline runs exactly through the mid-pitch point at the
-        # trailing edge (metal_angle_out is the exit flow angle there).
-        # Drawn BEHIND the (opaque) blade fill added right after, so the
-        # blade visually "cuts" the hole out of the band without an
-        # actual boolean op here; the real subtraction only happens in
-        # extract_axial_passage_2d, on download. x negated throughout to
-        # match stator_display's own mirrored (display-only) frame.
-        suction = stator["suction"]
-        p0 = (-suction["x"][0], suction["y"][0])
-        p1 = (-suction["x"][-1], suction["y"][-1])
-        end_slope = (p1[0] - p0[0]) / (p1[1] - p0[1])
-        sign = 1.0 if end_slope >= 0 else -1.0
-        slope_in = sign * abs(np.tan(np.radians(stator["metal_angle_in"])))
-        slope_out = sign * abs(np.tan(np.radians(stator["metal_angle_out"])))
-        s_in = p0[0] - slope_in * p0[1]
-        s_out = p1[0] - slope_out * p1[1]
-        c_kink = (s_out - s_in) / (slope_in - slope_out) if slope_in != slope_out else p0[1]
-
-        contour = list(zip(scurve["x"], scurve["y"])) + list(zip(
-            stator_display["trailing_edge"]["x"], stator_display["trailing_edge"]["y"]))
-        c_vals = [y for _, y in contour]
-        c_span = max(c_vals) - min(c_vals)
-        inlet_chords = float(passage_stator_inlet_chords or 1.0)
-        outlet_chords = float(passage_stator_outlet_chords or 6.0)
-        axial_chord = stator["axial_chord_convergent"] + stator["axial_chord_divergent"]
-        c_hi = max(c_vals) + inlet_chords * axial_chord
-        c_lo = min(c_vals) - outlet_chords * axial_chord
-        c_bend_in = max(max(c_vals) - 0.15 * c_span, c_kink)
-        c_bend_out = min(min(c_vals) + 0.05 * c_span, c_kink)
-
-        def _wall_p(offset, c):
-            c_eff = min(max(c, c_bend_out), c_bend_in)
-            if c_eff >= c_kink:
-                return offset + s_in + slope_in * c_eff
-            return offset + s_out + slope_out * c_eff
-
-        def _corner(offset, c):
-            return _wall_p(offset, c), c
-
-        # Walls at +/- half a pitch, not 0/+pitch -- centers the blade's
-        # own LE/TE line in the MIDDLE of the domain (see
-        # extract_axial_passage_2d's matching note).
-        # Extra shift (in pitches, positive = right, matching the blade-
-        # copy loop's own dx = i*stator_pitch convention below) -- which
-        # blade the domain surrounds is purely a display choice, doesn't
-        # change the exported passage geometry.
-        stator_shift_amt = float(passage_stator_shift or 0) * stator_pitch
-        off_l = -0.5 * stator_pitch + stator_shift_amt
-        off_r = 0.5 * stator_pitch + stator_shift_amt
-        pts = [_corner(off_l, c_hi), _corner(off_r, c_hi)]              # inlet cap
-        pts.append(_corner(off_r, c_bend_in))                           # right wall, vertical
-        if c_bend_in > c_kink > c_bend_out:
-            pts.append(_corner(off_r, c_kink))                          # right wall, inlet-angle
-        pts += [_corner(off_r, c_bend_out), _corner(off_r, c_lo)]       # right wall + cap
-        pts += [_corner(off_l, c_lo), _corner(off_l, c_bend_out)]       # outlet cap + left wall
-        if c_bend_in > c_kink > c_bend_out:
-            pts.append(_corner(off_l, c_kink))                          # left wall, outlet-angle
-        pts.append(_corner(off_l, c_bend_in))                           # left wall, remaining
-
-        band_x = [p[0] for p in pts]
-        band_y = [p[1] for p in pts]
+        # Preview of the SAME construction as extract_axial_passage_2d, via
+        # the shared _stator_passage_band_xy helper (mirror=True to match
+        # stator_display's own mirrored, display-only frame -- see
+        # _mirror_pitchwise). Drawn BEHIND the (opaque) blade fill added
+        # right after, so the blade visually "cuts" the hole out of the
+        # band without an actual boolean op here; the real subtraction
+        # only happens in extract_axial_passage_2d, on download.
+        band_x, band_y = _stator_passage_band_xy(
+            stator, passage_stator_inlet_chords, passage_stator_outlet_chords,
+            mirror=True, pitch_shift=passage_stator_shift,
+        )
         fig.add_trace(go.Scatter(
             x=band_x + [band_x[0]], y=band_y + [band_y[0]],
             mode="lines", fill="toself",
@@ -1847,44 +1956,6 @@ def update_cascade_plot(base_blade, edited_blade, rotor_data, n_stator, n_rotor,
 
 
 @app.callback(
-    Output("download-passage-stator", "data"),
-    Output("passage-status-message", "children", allow_duplicate=True),
-    Input("download-passage-stator-btn", "n_clicks"),
-    State("blade-store", "data"),
-    State("blade-edited-store", "data"),
-    State("passage_stator_inlet_chords", "value"),
-    State("passage_stator_outlet_chords", "value"),
-    State("extrude_length", "value"),
-    prevent_initial_call=True,
-)
-def download_passage_stator(n_clicks, base_blade, edited_blade, inlet_chords, outlet_chords, extrude_length):
-    stator = _effective_blade(base_blade, edited_blade)
-    if not stator:
-        return dash.no_update, html.Div("Compute a stator blade first (Phase 2).",
-                                          style={"color": "#b00020"})
-    try:
-        from moc.geometry import extract_axial_passage_2d
-    except ImportError:
-        return dash.no_update, html.Div(
-            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        face_path = os.path.join(tmpdir, "face.step")
-        solid_path = os.path.join(tmpdir, "solid.step")
-        extract_axial_passage_2d(
-            stator, stator["pitch"], face_path, solid_path,
-            extrude_length=float(extrude_length or 1.0), source="stator",
-            inlet_chords=float(inlet_chords or 1.0),
-            outlet_chords=float(outlet_chords or 6.0),
-        )
-        with open(solid_path, "rb") as f:
-            content = f.read()
-
-    return dcc.send_bytes(content, "stator_passage.step"), html.Div(
-        "Stator passage STEP ready.", style={"color": "#1a7a1a"})
-
-
-@app.callback(
     Output("download-passage-rotor", "data"),
     Output("passage-status-message", "children", allow_duplicate=True),
     Input("download-passage-rotor-btn", "n_clicks"),
@@ -1899,11 +1970,6 @@ def download_passage_rotor(n_clicks, rotor_data, rotor_scale, inlet_chords, outl
     if not rotor_data:
         return dash.no_update, html.Div("Compute a rotor blade first (Phase 3).",
                                           style={"color": "#b00020"})
-    try:
-        from moc.geometry import extract_axial_passage_2d
-    except ImportError:
-        return dash.no_update, html.Div(
-            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
 
     scale = float(rotor_scale or 1.0)
     # extract_axial_passage_2d(source="rotor") needs the closed "blade"
@@ -1921,20 +1987,29 @@ def download_passage_rotor(n_clicks, rotor_data, rotor_scale, inlet_chords, outl
         "chord": rotor_data["chord"] * scale,
     }
     rotor_pitch_mm = rotor_data["pitch"] * scale
+    extrude_length = float(extrude_length or 0.0)
+    want_solid = extrude_length > 0.0
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        face_path = os.path.join(tmpdir, "face.step")
-        solid_path = os.path.join(tmpdir, "solid.step")
-        extract_axial_passage_2d(
-            scaled_blade, rotor_pitch_mm, face_path, solid_path,
-            extrude_length=float(extrude_length or 1.0), source="rotor",
-            inlet_chords=float(inlet_chords or 1.0),
-            outlet_chords=float(outlet_chords or 6.0),
-        )
-        with open(solid_path, "rb") as f:
-            content = f.read()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from moc.geometry import extract_axial_passage_2d
+            face_path = os.path.join(tmpdir, "face.step")
+            solid_path = os.path.join(tmpdir, "solid.step") if want_solid else None
+            extract_axial_passage_2d(
+                scaled_blade, rotor_pitch_mm, face_path, solid_path,
+                extrude_length=extrude_length, source="rotor",
+                inlet_chords=float(inlet_chords or 1.0),
+                outlet_chords=float(outlet_chords or 6.0),
+            )
+            target_path = solid_path if want_solid else face_path
+            with open(target_path, "rb") as f:
+                content = f.read()
+    except ImportError:
+        return dash.no_update, html.Div(
+            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
 
-    return dcc.send_bytes(content, "rotor_passage.step"), html.Div(
+    fname = "rotor_passage_solid.step" if want_solid else "rotor_passage_face.step"
+    return dcc.send_bytes(content, fname), html.Div(
         "Rotor passage STEP ready.", style={"color": "#1a7a1a"})
 
 
@@ -1957,26 +2032,30 @@ def download_radial_passage_stator(n_clicks, base_blade, edited_blade, r1, r2,
     if not stator:
         return dash.no_update, html.Div("Compute a stator blade first (Phase 2).",
                                           style={"color": "#b00020"})
+    extrude_length = float(extrude_length or 0.0)
+    want_solid = extrude_length > 0.0
+
     try:
-        from moc.geometry import extract_radial_passage_2d
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from moc.geometry import extract_radial_passage_2d
+            face_path = os.path.join(tmpdir, "face.step")
+            solid_path = os.path.join(tmpdir, "solid.step") if want_solid else None
+            extract_radial_passage_2d(
+                stator, stator["pitch"], float(r1 or 140.0), float(r2 or 190.0),
+                face_path, solid_path,
+                extrude_length=extrude_length, source="stator",
+                inlet_chords=float(inlet_chords or 1.0),
+                outlet_chords=float(outlet_chords or 6.0),
+            )
+            target_path = solid_path if want_solid else face_path
+            with open(target_path, "rb") as f:
+                content = f.read()
     except ImportError:
         return dash.no_update, html.Div(
             "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        face_path = os.path.join(tmpdir, "face.step")
-        solid_path = os.path.join(tmpdir, "solid.step")
-        extract_radial_passage_2d(
-            stator, stator["pitch"], float(r1 or 140.0), float(r2 or 190.0),
-            face_path, solid_path,
-            extrude_length=float(extrude_length or 1.0), source="stator",
-            inlet_chords=float(inlet_chords or 1.0),
-            outlet_chords=float(outlet_chords or 6.0),
-        )
-        with open(solid_path, "rb") as f:
-            content = f.read()
-
-    return dcc.send_bytes(content, "stator_radial_passage.step"), html.Div(
+    fname = "stator_radial_passage_solid.step" if want_solid else "stator_radial_passage_face.step"
+    return dcc.send_bytes(content, fname), html.Div(
         "Stator radial passage STEP ready.", style={"color": "#1a7a1a"})
 
 
@@ -1998,11 +2077,6 @@ def download_radial_passage_rotor(n_clicks, rotor_data, rotor_scale, r1, r2,
     if not rotor_data:
         return dash.no_update, html.Div("Compute a rotor blade first (Phase 3).",
                                           style={"color": "#b00020"})
-    try:
-        from moc.geometry import extract_radial_passage_2d
-    except ImportError:
-        return dash.no_update, html.Div(
-            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
 
     scale = float(rotor_scale or 1.0)
     scaled_blade = {
@@ -2016,21 +2090,30 @@ def download_radial_passage_rotor(n_clicks, rotor_data, rotor_scale, r1, r2,
         "chord": rotor_data["chord"] * scale,
     }
     rotor_pitch_mm = rotor_data["pitch"] * scale
+    extrude_length = float(extrude_length or 0.0)
+    want_solid = extrude_length > 0.0
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        face_path = os.path.join(tmpdir, "face.step")
-        solid_path = os.path.join(tmpdir, "solid.step")
-        extract_radial_passage_2d(
-            scaled_blade, rotor_pitch_mm, float(r1 or 145.0), float(r2 or 188.0),
-            face_path, solid_path,
-            extrude_length=float(extrude_length or 1.0), source="rotor",
-            inlet_chords=float(inlet_chords or 1.0),
-            outlet_chords=float(outlet_chords or 6.0),
-        )
-        with open(solid_path, "rb") as f:
-            content = f.read()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from moc.geometry import extract_radial_passage_2d
+            face_path = os.path.join(tmpdir, "face.step")
+            solid_path = os.path.join(tmpdir, "solid.step") if want_solid else None
+            extract_radial_passage_2d(
+                scaled_blade, rotor_pitch_mm, float(r1 or 145.0), float(r2 or 188.0),
+                face_path, solid_path,
+                extrude_length=extrude_length, source="rotor",
+                inlet_chords=float(inlet_chords or 1.0),
+                outlet_chords=float(outlet_chords or 6.0),
+            )
+            target_path = solid_path if want_solid else face_path
+            with open(target_path, "rb") as f:
+                content = f.read()
+    except ImportError:
+        return dash.no_update, html.Div(
+            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
 
-    return dcc.send_bytes(content, "rotor_radial_passage.step"), html.Div(
+    fname = "rotor_radial_passage_solid.step" if want_solid else "rotor_radial_passage_face.step"
+    return dcc.send_bytes(content, fname), html.Div(
         "Rotor radial passage STEP ready.", style={"color": "#1a7a1a"})
 
 
@@ -2464,20 +2547,19 @@ def _register_flare_callbacks(prefix, scale_input_id=None, gap_input_id=None):
             return dash.no_update, html.Div("Compute a stator blade first (Phase 2).",
                                               style={"color": "#b00020"})
         try:
-            from moc.geometry import export_flared_blade_step
+            with tempfile.TemporaryDirectory() as tmpdir:
+                from moc.geometry import export_flared_blade_step
+                face_path = os.path.join(tmpdir, "face.step")
+                solid_path = os.path.join(tmpdir, "solid.step")
+                export_flared_blade_step(
+                    stator, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
+                    face_path, solid_path, source="stator",
+                )
+                with open(solid_path, "rb") as f:
+                    content = f.read()
         except ImportError:
             return dash.no_update, html.Div(
                 "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            face_path = os.path.join(tmpdir, "face.step")
-            solid_path = os.path.join(tmpdir, "solid.step")
-            export_flared_blade_step(
-                stator, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
-                face_path, solid_path, source="stator",
-            )
-            with open(solid_path, "rb") as f:
-                content = f.read()
 
         return dcc.send_bytes(content, "stator_blade_flared.step"), html.Div(
             "Flared stator STEP ready.", style={"color": "#1a7a1a"})
@@ -2498,12 +2580,6 @@ def _register_flare_callbacks(prefix, scale_input_id=None, gap_input_id=None):
         if not rotor_data:
             return dash.no_update, html.Div("Compute a rotor blade first (Phase 3).",
                                               style={"color": "#b00020"})
-        try:
-            from moc.geometry import export_flared_blade_step
-        except ImportError:
-            return dash.no_update, html.Div(
-                "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
-
         # export_flared_blade_step's r_hub/r_tip are in mm -- the rotor
         # blade's own points are only in mm already if it was designed
         # with r_star; otherwise (nondimensional r*) scale them here
@@ -2514,15 +2590,20 @@ def _register_flare_callbacks(prefix, scale_input_id=None, gap_input_id=None):
             "y": [v * scale for v in rotor_data["blade"]["y"]],
         }}
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            face_path = os.path.join(tmpdir, "face.step")
-            solid_path = os.path.join(tmpdir, "solid.step")
-            export_flared_blade_step(
-                scaled_blade, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
-                face_path, solid_path, source="rotor",
-            )
-            with open(solid_path, "rb") as f:
-                content = f.read()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                from moc.geometry import export_flared_blade_step
+                face_path = os.path.join(tmpdir, "face.step")
+                solid_path = os.path.join(tmpdir, "solid.step")
+                export_flared_blade_step(
+                    scaled_blade, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
+                    face_path, solid_path, source="rotor",
+                )
+                with open(solid_path, "rb") as f:
+                    content = f.read()
+        except ImportError:
+            return dash.no_update, html.Div(
+                "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
 
         return dcc.send_bytes(content, "rotor_blade_flared.step"), html.Div(
             "Flared rotor STEP ready.", style={"color": "#1a7a1a"})
