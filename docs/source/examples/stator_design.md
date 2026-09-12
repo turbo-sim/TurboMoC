@@ -1,15 +1,18 @@
 # Build a stator blade from a two-phase nozzle
 
-This example first solves the same nitrogen expansion as the
-[nozzle tutorial](nozzle_design.md), then uses its wall to construct a stator
+This example solves a cyclopentane expansion using the stator design conditions
+in {cite:t}`cioffiStators2026`, then uses its wall to construct a stator
 blade profile. You will see how nozzle flow design and blade geometry fit
 together, and export both the source wall and the fitted blade.
 
 ## Configure the nozzle and blade
 
-The nozzle starts at 20 bar with a vapor mass fraction of 0.5 and expands
-toward a back pressure of 2 bar using the conventional solver. These inputs
-are independent of the blade geometry parameters below.
+The nozzle starts at 2.513 bar with a vapor mass fraction of 0.025 and expands
+toward a back pressure of 0.95 bar using the conventional solver and the curved
+Sauer initial line. Its throat half-height is 0.01 m. These are the paper's
+operating conditions; the current package's blade parametrization differs from
+the paper's control-point construction, as discussed in
+[stator theory](../theory/stator_design.md).
 
 | Blade input | Value | Meaning |
 | --- | --- | --- |
@@ -52,7 +55,7 @@ Two stator profiles repeated at the design pitch, with coordinates in millimeter
 
 The spacing between the two profiles forms the passage. The fitted contour
 and separate trailing-edge curve show the blade geometry assembled from
-the nozzle wall. This configuration gives a pitch of approximately 158.78 mm.
+the nozzle wall. The script prints the pitch of the resulting profile.
 Set `show_control_points=True` to see the points controlling the spline fit.
 
 ```{figure} assets/stator_design/nozzle_contour.svg

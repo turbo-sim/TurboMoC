@@ -19,10 +19,12 @@ poetry run python examples/stator_design.py
 poetry run python examples/rotor_design.py
 ```
 
-Each example starts from a two-phase nitrogen stagnation state at 20 bar with
-a vapor mass fraction of 0.5 (in the relative frame for the rotor). The nozzle
-example designs a nozzle alone; the stator example also builds a blade profile
-from the nozzle wall; the rotor example designs a vortex-flow blade.
+The nozzle example uses nitrogen at 20 bar with 10 K inlet subcooling, following
+the flashing case in {cite:t}`cioffiNonideal2026`. The stator example uses
+cyclopentane at 2.513 bar and an inlet quality of 0.025, following the design
+conditions in {cite:t}`cioffiStators2026`. The rotor example retains a nitrogen
+relative stagnation state at 20 bar and a vapor mass fraction of 0.5.
+The [theory guide](../theory/index.md) explains the corresponding constructions.
 
 The scripts display Matplotlib figures and save SVG figures and CSV coordinates
 under `examples/output/nozzle_design/`, `examples/output/stator_design/`, and

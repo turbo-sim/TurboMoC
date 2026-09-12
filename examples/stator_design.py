@@ -13,13 +13,16 @@ import moc
 
 from moc.geometry import parametrize_stator_blade
 
-# 1. Expand a saturated mixture from 20 bar to the specified back pressure.
+# 1. Cyclopentane stator design conditions from Cioffi et al. (2026),
+#    Table 3. This uses the current package geometry, not an exact reproduction
+#    of the paper's control-point construction.
 data = moc.design_nozzle(
-    fluid_name="nitrogen",
-    P0=20e5,  # Stagnation pressure [Pa].
-    Q0=0.5,  # Two-phase inlet: vapor mass fraction.
-    p_back=2e5,  # Back pressure [Pa].
+    fluid_name="Cyclopentane",
+    P0=2.513e5,  # Stagnation pressure [Pa].
+    Q0=0.025,  # Two-phase inlet: 2.5% vapor by mass.
+    p_back=0.95e5,  # Design exit pressure [Pa].
     solver="conventional",
+    use_true_sauer_line=True,  # Smooth sonic transition within the mixture.
 )
 
 if not data["converged"] or not data["wall_final"]["x"]:

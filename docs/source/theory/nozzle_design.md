@@ -132,7 +132,7 @@ The denominator is the mass flux normal to a segment inclined at the Mach
 angle to the velocity. Equating the flux through this segment to the cumulative
 incoming flux determines its length. Repeating the operation recovers a wall
 that encloses the corresponding streamtube. The implementation prepares the
-terminal states for aligned outflow and copies the projected state to each wall
+characteristic data for wall recovery and copies the projected state to each wall
 point. These discrete operations approximate the continuous turning region.
 
 At the last point, the recovered wall encloses the full half-channel mass flow.

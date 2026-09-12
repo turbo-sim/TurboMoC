@@ -1,7 +1,7 @@
 # Design a two-phase nozzle
 
-This example designs a symmetric nozzle for nitrogen starting inside the
-liquid–vapor region. You will set the inlet state, solve the expansion,
+This example designs a symmetric nozzle for nitrogen starting as subcooled
+liquid, using the flashing case in {cite:t}`cioffiNonideal2026`. You will set the inlet state, solve the expansion,
 inspect the characteristic mesh and flow properties, and export the two walls.
 
 ## Configure the expansion
@@ -10,12 +10,13 @@ inspect the characteristic mesh and flow properties, and export the two walls.
 | --- | --- | --- |
 | `fluid_name` | `"nitrogen"` | Fluid used by the thermodynamic model. |
 | `P0` | `20e5` Pa | Stagnation pressure of 20 bar. |
-| `Q0` | `0.5` | Inlet vapor mass fraction; half the mass is vapor. |
+| `T0` | $T_\mathrm{sat}(20\,\mathrm{bar})-10$ K | Liquid inlet with 10 K subcooling. |
 | `p_back` | `2e5` Pa | Target back pressure of 2 bar. |
 | `solver` | `"conventional"` | Nozzle solver with a rounded expansion section. |
 
-Specifying pressure and quality fixes the saturated inlet state, so no inlet
-temperature is supplied. Quality is a mass fraction, not a volume fraction.
+The script computes saturation temperature from CoolProp and subtracts the
+specified subcooling. Pressure and temperature define this single-phase inlet;
+quality is not supplied. The expansion subsequently enters the two-phase region.
 The default throat half-height is 0.01 m. The example checks convergence
 before plotting or exporting the wall.
 
@@ -47,7 +48,7 @@ Nozzle wall contour mirrored about the centerline; both axes are in meters.
 
 The wall opens downstream from the throat. The lower half is obtained by
 reflecting the computed upper wall about `y = 0`. Markers identify the initial
-sonic line and points in the rounded expansion section.
+initial front and points in the rounded expansion section.
 
 ```{figure} assets/nozzle_design/characteristics_mesh.svg
 :alt: Characteristic mesh in the upper half of the nozzle.
@@ -58,7 +59,7 @@ Characteristic mesh in the upper half of the nozzle.
 
 The colored lines show the characteristic segments and marching fronts used
 to construct the solution. Their intersections carry the computed flow states.
-This view shows how the solution extends from the initial sonic line into
+This view shows how the solution extends from the flat initial front into
 the expansion and downstream wall region.
 
 ```{figure} assets/nozzle_design/axis_properties.svg
@@ -69,8 +70,9 @@ Pressure and Mach number along the nozzle centerline.
 ```
 
 Read pressure against the left axis in bar and Mach number against the right
-axis. The pressure decrease accompanies supersonic acceleration; this
-configuration gives an exit Mach number of approximately 2.11. The plotting
+axis. The pressure decrease accompanies supersonic acceleration, but
+Mach number can decrease locally as sound speed changes, as explained in
+[the theory guide](../theory/saturation_crossings.md). The plotting
 helper extends the last centerline state to the exit with a constant segment.
 
 ```{figure} assets/nozzle_design/wall_properties.svg

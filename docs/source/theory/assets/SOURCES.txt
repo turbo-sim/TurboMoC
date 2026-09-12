@@ -1,0 +1,31 @@
+Theory figure extracts, prepared 2026-09-12.
+
+The PNGs are cropped page renderings of the user-supplied papers. No curves,
+labels, or data were reconstructed. Each use in the theory pages includes a
+caption identifying the original paper and figure. Original figure notation
+and source inconsistencies are identified in the text.
+
+Source A:
+papers/Cioffi et al. - 2026 - Extension of the method of characteristics for the design of supersonic stators in two-phase turbine.pdf
+  equilibrium_sound_speed.png: PDF page 2, Figure 1
+  stator_parametrization.png: PDF page 4, Figure 2
+
+Source B:
+papers/NICFD2026_Non_ideal_compressible_flow_dynamics_of_two_phase_supersonic_expansions_and_their_implications_for_nozzle_design.pdf
+  mm_expansions.png: PDF page 3, Figure 1
+  nitrogen_flashing.png: PDF page 3, Figure 2
+  crossing_characteristics.png: PDF page 4, Figure 3
+
+Extraction: pdftoppm page rendering followed by rectangular pixel extraction.
+The original PDFs were removed from papers/ during drafting; the final four
+crops below use the retained full-page renderings from the earlier review.
+No source PDF or full-page temporary rendering is required by the docs build.
+
+equilibrium_sound_speed was rendered directly with a longest page dimension
+of 2700 pixels: x=1040 y=145 width=795 height=550.
+
+The other crops use full-page renderings with a longest dimension of 1800:
+  stator_parametrization: x=125 y=90 width=1110 height=400
+  mm_expansions: x=115 y=205 width=1045 height=295
+  nitrogen_flashing: x=115 y=595 width=1045 height=285
+  crossing_characteristics: x=110 y=205 width=1045 height=322

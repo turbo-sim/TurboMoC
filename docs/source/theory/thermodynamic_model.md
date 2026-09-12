@@ -101,7 +101,8 @@ increase the equilibrium compressibility and reduce the sound speed.
 
 Mixture sound speed for cyclopentane at a saturation temperature of 200 °C.
 Extracted from Fig. 1 of {cite:t}`cioffiStators2026`. The curves compare different
-equilibrium assumptions; the MoC uses the full HEM closure.
+equilibrium assumptions; the MoC uses the full HEM closure. In the source
+legend, $\mu$ denotes chemical potential, not the Mach angle used in this guide.
 ```
 
 The equilibrium mixture limit need not coincide with the single-phase sound

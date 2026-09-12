@@ -8,14 +8,18 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from CoolProp.CoolProp import PropsSI
 
 import moc
 
-# 1. Expand a saturated mixture from 20 bar to the specified back pressure.
+# 1. Nitrogen flashing case from Cioffi et al. (NICFD 2026), Fig. 2:
+#    20 bar stagnation pressure and 10 K inlet subcooling, expanding to 2 bar.
+P0 = 20e5
+T0 = PropsSI("T", "P", P0, "Q", 0, "Nitrogen") - 10.0
 data = moc.design_nozzle(
     fluid_name="nitrogen",
-    P0=20e5,  # Stagnation pressure [Pa].
-    Q0=0.5,  # Two-phase inlet: vapor mass fraction.
+    P0=P0,  # Stagnation pressure [Pa].
+    T0=T0,  # Subcooled-liquid inlet temperature [K]; quality is not specified.
     p_back=2e5,  # Back pressure [Pa].
     solver="conventional",
 )
