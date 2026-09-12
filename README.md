@@ -26,10 +26,20 @@ flashing / wet-to-dry inlets** under the Homogeneous Equilibrium Model
 
 ## Install
 
+With [Poetry](https://python-poetry.org/docs/#installation), install the
+package and optional CadQuery support using:
+
+```bash
+poetry install --extras cad
+```
+
+Alternatively, install CadQuery through Conda Forge and let Poetry install the
+package and its other runtime dependencies:
+
 ```bash
 conda env create -f environment.yaml
 conda activate moc_env
-pip install -e .
+poetry install
 ```
 
 ## Quick start

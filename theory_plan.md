@@ -22,13 +22,15 @@ The proposed learning objectives are to:
 6. Understand how the MoC contour is incorporated into a stator passage and which additional geometric choices are required.
 7. Interpret published verification and performance results within their assumptions and distinguish them from validation of the present package.
 
+[I want to replace point 7 with the vortex method details for the rotor design. No need for content of point 7.]
+
 **Question 1 — What is the main purpose of these pages?**
 
 Recommendation: an explanatory reference for researchers and engineers using the package, with enough derivation to understand the method. Other possible emphases are a teaching chapter for newcomers or a mathematical reference detailed enough to support an independent implementation. Please rank these purposes and amend the objectives above.
 
 Your answer:
 
-> [Write here.]
+> [ an explanatory reference for researchers and engineers using the package, with enough derivation to understand the method. One of the goals is to explain details and equations that we didn not have space to explain in the papers]
 
 **Question 2 — Who is the primary reader, and what can we assume they know?**
 
@@ -36,7 +38,7 @@ Recommendation: assume undergraduate thermodynamics, fluid mechanics, and basic 
 
 Your answer:
 
-> [Write here.]
+> [assume undergraduate thermodynamics, you can present famous equations as starting point. I am not sure how much level of detail to present on the nymerical methods of the MoC]
 
 ## 2. Basis in the supplied papers
 
@@ -74,6 +76,10 @@ The recommended core comprises an overview and seven subject pages. The filename
 | 5 | `saturation_crossings.md` | What changes when an expansion crosses the saturation dome? | B §§2–4 |
 | 6 | `stator_design.md` | How does a nozzle contour become a stator blade and passage? | A §2.2 and §4.2; geometry implementation |
 | 7 | `verification_and_limits.md` | What evidence supports the method, and what can it predict? | A §§2.3–4.2; B §§4–5 |
+
+
+
+[Agreed, except part 7, which should be the rotor blade vortex method]
 
 ### 0. Overview — `index.md`
 
@@ -168,6 +174,8 @@ Proposed subsections:
 
 Any quoted efficiency or error is a result for a stated case. For example, Paper A's 97.30% stator efficiency is a viscous CFD result for its design case, not an efficiency prediction returned by the inviscid MoC solver. Published comparisons are also not a substitute for verifying the current software revision.
 
+[replace point 7 with the rotor design]
+
 ### Optional extensions
 
 | Proposed addition | Contents | Recommendation for the first draft |
@@ -175,6 +183,9 @@ Any quoted efficiency or error is a result for a stated case. For example, Paper
 | `rotor_design.md` | Vortex-flow construction, transition and circular arcs, relative-frame assumptions, inlet/outlet continuity, blade pitch and closure, and the real-fluid generalization. | Defer unless complete coverage of the package is a primary objective. It requires separate primary-source reading beyond the supplied papers. |
 | `derivations.md` | Full characteristic derivation, Sauer expansion, equilibrium acoustic derivation, and possibly the fundamental derivative of gas dynamics. | Add only the derivations needed for the requested mathematical depth. |
 | `notation.md` | Shared symbols, units, characteristic signs, coordinate systems, and mapping to API names. | Use a compact table initially; promote it to a separate page if the rotor is included or the notation becomes extensive. |
+
+
+Adding one page of notation at the landing page of theory would be nice
 
 **Question 3 — Which methods should the first draft cover?**
 
@@ -185,12 +196,12 @@ Please edit the final column. “Brief” means a conceptual subsection; “full
 | Planar conventional nozzle MoC | Full | [Write here.] |
 | Single-phase and equilibrium two-phase closure | Full | [Write here.] |
 | Wet-to-dry and flashing extensions | Full | [Write here.] |
-| Minimum-length nozzle method | Brief comparison; full treatment if equally important to users | [Write here.] |
+| Minimum-length nozzle method | Brief comparison; full treatment if equally important to users | Lets give the method in detail, with placeholders for things you are unsure about |
 | Stator parametrization | Full physical construction | [Write here.] |
 | Both stator geometry variants | Brief comparison, with detailed usage in Examples | [Write here.] |
-| Vortex-flow rotor method | Defer | [Write here.] |
-| Axisymmetric characteristic equations | Brief scope note; no claim of a verified axisymmetric solver | [Write here.] |
-| Radial mapping, annulus geometry, and 3D CAD | Defer to geometry/examples documentation | [Write here.] |
+| Vortex-flow rotor method | Defer | Include this here |
+| Axisymmetric characteristic equations | Brief scope note; no claim of a verified axisymmetric solver | Do not include these yet please |
+| Radial mapping, annulus geometry, and 3D CAD | Defer to geometry/examples documentation | Yes, give an explaantion of the radial mapping equations |
 
 **Question 4 — Does this page sequence and length fit your intended documentation?**
 
@@ -198,11 +209,13 @@ Recommendation: retain the proposed sequence and allow short cross-references be
 
 Your answer:
 
-> [Write here.]
+> [The suggested is fine, include some cross referencing
 
 **Question 5 — What mathematical detail should appear in the main text?**
 
 Recommendation: show the governing equations, essential derivation steps, and physical interpretation; move lengthy algebra to optional appendices. In particular, should readers be able to reproduce the characteristic unit processes from the text alone?
+
+[I agree with the approach, no need for lengthyl algebra or derivations. the point is to understand the method a dhow ti works]
 
 | Topic | Recommended depth | Your preference |
 | --- | --- | --- |
@@ -222,7 +235,7 @@ Recommendation: explain the physical method using the papers, then add short, cl
 
 Your answer:
 
-> [Write here.]
+> Explain the method based on the papers, but the pages should describe the current implementation
 
 ## 4. Proposed writing style
 
@@ -236,7 +249,7 @@ For the documentation, I propose to:
 - Preserve the papers' technical vocabulary and causal explanations while correcting typographical errors and simplifying long sentences.
 - Use figures to support an argument, with captions identifying the conditions, quantities, and intended comparison.
 - Use present tense for equations and method descriptions; attribute case-specific findings to the papers.
-- Keep novelty claims, broad literature surveys, and energy-system motivation brief so the pages remain useful as a reference.
+- Keep novelty claims, broad literature surveys, and energy-system motivation brief so the pages remain useful as a reference. [yes, this is not important for the package notes, as it is not a scientific paper. Do not give importance to scientific novelty, and the motivation of the method just at the beginjing of  note0s]
 - Use numbered equations and citations through the existing MyST/Sphinx setup, with links to Examples and the API where practical usage belongs.
 
 **Question 7 — Which paper or passages best represent the writing style you want?**
@@ -245,7 +258,7 @@ Recommendation: Paper A §2.1 for mathematical exposition and Paper B §§2–3 
 
 Your answer:
 
-> [Write here.]
+> Fine by me
 
 **Question 8 — What voice and language conventions should we use?**
 
@@ -253,7 +266,7 @@ Recommendation: neutral scientific voice (“the method”, “the flow”), wit
 
 Your answer:
 
-> [Write here.]
+> Agreed, but use amaerizan english consistently. Since this is a package, I think that it should be described as a reference guide instead of saying "we" ofeteb,
 
 **Question 9 — How closely should we retain the papers' notation?**
 
@@ -261,7 +274,7 @@ Recommendation: retain familiar symbols but resolve collisions: `V` for speed an
 
 Your answer:
 
-> [Write here.]
+> Resolve collisions giving priority to have consistent notation and no clasheses within these notes
 
 ## 5. Figures, examples, and evidence
 
@@ -276,13 +289,16 @@ The following figures would do most of the explanatory work. These are figure pr
 | Stator passage and blade construction | Define coordinate systems, pitch, widths, control points, and bladed regions | A Fig. 2; existing stator image |
 | A compact MoC–CFD comparison | Show the meaning and limits of verification evidence | A Figs. 5–6 or B Figs. 4–6 |
 
+
+[For these figures, please extract them for the paper if you can, or leave placeholders to what we should add]
+
 **Question 10 — How should figures be produced?**
 
 Recommendation: create clean schematics for the theory and regenerate scientific plots from the underlying data/scripts where available, using the papers' plotting conventions. For the first draft, would you prefer finished figures, selected attributed figures from the PDFs, or detailed placeholders? If original plotting scripts or data already exist elsewhere, please note their paths.
 
 Your answer:
 
-> [Write here.]
+> I do not have access to all the fules of the figures. take snipshorts of the figures or use descriptive placeholders.
 
 **Question 11 — Which cases should anchor the explanations?**
 
@@ -290,7 +306,7 @@ Recommendation: cyclopentane for expansion within the two-phase region and stato
 
 Your answer:
 
-> [Write here.]
+> Yes, I think it would be nice to use the cases from the papers. If relevant, also update the examples/ folder scripts to refelct the conditions from the papers
 
 **Question 12 — How much CFD, verification, and off-design discussion belongs here?**
 
@@ -298,7 +314,7 @@ Recommendation: a concise evidence table, a short barotropic-model explanation, 
 
 Your answer:
 
-> [Write here.]
+> Very little, this is the package to generate geometry,. The only improtant point is to make clear that this generates the geometry for subsequence CFD simulations, and method verified about barotorpic HEM. Definiitely no off design discussion
 
 ## 6. Source and implementation questions to resolve
 
@@ -327,7 +343,7 @@ Recommendation: use checked equations and consistent notation in the main text, 
 
 Your answer:
 
-> [Write here.]
+> Please leave placeholders/notes fro incosnsitencies errors so my student can go throguh it
 
 **Question 14 — Which references and manuscript versions should we cite?**
 
@@ -335,7 +351,7 @@ Please provide the preferred citation/DOI or Zotero record for the two supplied 
 
 Your answer:
 
-> [Write here.]
+> Create bib entry for these 2 papers youself
 
 ## 7. Instructions for the subsequent draft
 
@@ -347,4 +363,4 @@ Recommendation: complete prose and essential equations for the selected core pag
 
 Your answer:
 
-> [Write here.]
+> Go ahead and produce the draft
