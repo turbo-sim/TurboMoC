@@ -7,7 +7,7 @@ name = "moc"
 version = "0.1.0"
 description = "Method of Characteristics solvers for two-phase and single-phase nozzle/stator design (minimum-length and conventional/arc-flashing variants)."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.14"
 license = {text = "MIT"}
 dependencies = [
     "jaxprop>=0.5.6",
@@ -28,6 +28,19 @@ cad = ["cadquery"]
 
 [project.scripts]
 moc-app = "moc.app:main"
+
+[tool.poetry.group.dev.dependencies]
+bibtexparser = ">=1.4,<2"
+linkify-it-py = ">=2,<3"
+myst-parser = ">=3,<4"
+numpydoc = ">=1.7,<2"
+pyzotero = ">=1.5,<2"
+sphinx = ">=7.3,<8"
+sphinx-autobuild = ">=2024.0"
+sphinx-book-theme = ">=1.1,<2"
+sphinx-design = ">=0.6,<1"
+sphinx-togglebutton = ">=0.3,<1"
+sphinxcontrib-bibtex = ">=2.6,<3"
 
 [tool.setuptools.packages.find]
 where = ["src"]
