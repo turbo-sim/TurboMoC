@@ -123,7 +123,9 @@ exclude_patterns = [
     "_build",
     "Thumbs.db",
     ".DS_Store",
+    # Exclude notes directories at any depth within the Sphinx source tree.
     "notes",
+    "**/notes",
     "theory/old",
 ]
 

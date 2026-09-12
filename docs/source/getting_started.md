@@ -14,23 +14,16 @@ stator and rotor blades.
 
 ## Installation
 
-`moc` supports Python 3.11 through 3.13. Once the package is released on PyPI,
-install it with pip:
+`moc` supports Python 3.11 through 3.13. Install it from PyPI with pip:
 
 ```bash
 python -m pip install moc
 ```
 
-For STEP export, include the optional CadQuery dependency:
+To include CadQuery for STEP export, install the `cad` extra:
 
 ```bash
 python -m pip install "moc[cad]"
-```
-
-Until the first PyPI release, install directly from the repository:
-
-```bash
-python -m pip install git+https://github.com/turbo-sim/method_of_characteristics.git
 ```
 
 For an editable installation to work on the source code, see the
