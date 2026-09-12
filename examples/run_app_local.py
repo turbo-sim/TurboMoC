@@ -8,9 +8,18 @@ Run:
 
 Then open http://127.0.0.1:8050/ in a browser. Equivalent to running
 `moc-app` (the console-script entry point) or `python -m moc.app` directly.
+
+Set MOC_EXAMPLE_SMOKE_TEST=1 to validate the app without starting the server.
 """
+
+import os
 
 from moc.app import app
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    if os.environ.get("MOC_EXAMPLE_SMOKE_TEST") == "1":
+        if app.layout is None or not callable(app.run):
+            raise RuntimeError("The Dash application was not initialized correctly.")
+        print("Dash application initialized successfully.")
+    else:
+        app.run(debug=True)

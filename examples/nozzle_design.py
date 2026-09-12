@@ -1,7 +1,7 @@
-"""Design a stator from a two-phase nozzle; export coordinates and Matplotlib figures.
+"""Design a two-phase nozzle; save wall coordinates [m] and Matplotlib figures.
 
-Run from the repository root: poetry run python examples/stator_design.py
-Results are saved in examples/output/stator_design/.
+Run from the repository root: poetry run python examples/nozzle_design.py
+Results are saved in examples/output/nozzle_design/.
 """
 import os
 from pathlib import Path
@@ -12,8 +12,6 @@ import numpy as np
 import moc
 
 smoke_test = os.environ.get("MOC_EXAMPLE_SMOKE_TEST") == "1"
-
-from moc.geometry import parametrize_stator_blade
 
 data = moc.design_nozzle(
     fluid_name="nitrogen",
@@ -28,43 +26,28 @@ if not data["converged"] or not data["wall_final"]["x"]:
 
 wall = data["wall_final"]
 
-# Nozzle coordinates are in meters; the stator geometry is returned in mm.
-blade = parametrize_stator_blade(
-    wall["x"], wall["y"],
-    metal_angle_in=0.0,
-    metal_angle_out=70.0,
-    r_trailing=0.5,
-)
-curve = blade["blade_curve"]
-if not np.isfinite(np.column_stack((curve["x"], curve["y"]))).all():
-    raise RuntimeError("The stator design produced invalid coordinates.")
-
 figures = {
     "nozzle_contour": moc.mpl.plot_nozzle_contour(data)[0],
     "characteristics_mesh": moc.mpl.plot_characteristics_mesh(data)[0],
     "axis_properties": moc.mpl.plot_axis_properties(data)[0],
     "wall_properties": moc.mpl.plot_wall_properties(data)[0],
 }
-figures["stator_blade"] = moc.mpl.plot_blade(
-    blade, n_blades=2, show_control_points=False,
-)[0]
 
-print(f"Stator pitch: {blade['pitch']:.4f} mm")
+print(f"Exit Mach number: {data['exit_M']:.4f}")
+# Export both walls of the symmetric nozzle, ordered from throat to exit.
 if not smoke_test:
-    outdir = Path(__file__).resolve().parent / "output" / "stator_design"
+    outdir = Path(__file__).resolve().parent / "output" / "nozzle_design"
     outdir.mkdir(parents=True, exist_ok=True)
     np.savetxt(
-        outdir / "nozzle_wall.csv",
+        outdir / "wall_upper.csv",
         np.column_stack((wall["x"], wall["y"])),
         delimiter=",", header="x_m,y_m", comments="",
     )
-    for name in ("blade_curve", "suction", "pressure", "trailing_edge"):
-        surface = blade[name]
-        np.savetxt(
-            outdir / f"{name}.csv",
-            np.column_stack((surface["x"], surface["y"])),
-            delimiter=",", header="x_mm,y_mm", comments="",
-        )
+    np.savetxt(
+        outdir / "wall_lower.csv",
+        np.column_stack((wall["x"], -np.asarray(wall["y"]))),
+        delimiter=",", header="x_m,y_m", comments="",
+    )
     for name, figure in figures.items():
         figure.savefig(outdir / f"{name}.svg", bbox_inches="tight")
     print(f"Coordinates and figures saved to: {outdir}")
