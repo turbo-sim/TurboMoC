@@ -1,40 +1,25 @@
-"""
-moc.geometry.radial -- conformal (log-spiral) mapping that wraps an
-"unrolled" axial cascade blade (a Phase-2-style stator blade dict, from
-parametrize_stator_blade/_semi, or a Phase-3-style rotor blade dict, from
-moc.rotor.design_rotor_vortex_blade) onto an annular passage between two
-radii.
+"""Conformal mapping from an unrolled blade to an annular passage.
 
-Ported from opt_framework/test_2/01_geometry_parametrization/
-1.2_stator_radial.py's apply_conformal_mapping/rotate_radial_points,
-generalized: the reference point (x1, y1) and axial-chord scale used by
-the mapping are derived directly from the blade's own point cloud (its
-chordwise-max point), not hardcoded per-case constants the way the
-original script computed them for one specific nozzle -- so this works
-for any blade without per-case tuning. The bespoke periodic fluid-domain-
-boundary construction from the original script (its f_domain_1..5 pieces)
-is NOT ported here -- it was built from several magic-number offsets
-specific to that one nozzle's geometry and doesn't generalize; only the
-blade-wrapping itself does.
+The log-spiral mapping wraps either a stator blade produced by
+``parametrize_stator_blade`` or a rotor blade produced by
+``moc.rotor.design_rotor_vortex_blade`` between two radii. Its reference
+point and axial-chord scale are derived from the blade's own point cloud, so
+the mapping does not require geometry-specific constants.
 
-The mapping:
-    r = r1 * exp(ln(r2/r1) * (chordwise - x1) / c_axial)
-    theta = theta0 + ln(r2/r1)/c_axial * (pitchwise - y1)
-"CHORDWISE" and "PITCHWISE" are which of the blade's own (x, y) axes plays
-each role -- this differs between the two blade sources, which is why
-there are two wrapper functions below rather than one:
-  - Stator (parametrize_stator_blade/_semi): its own final rotation (by
-    90-metal_angle_out) leaves the blade's chordwise extent running mostly
-    along y in its mm plot frame, and its pitchwise extent mostly along x.
-  - Rotor (design_rotor_vortex_blade): pitch is directly along y in its
-    OWN local frame (blade_upper = suction shifted by +pitch along y, no
-    extra rotation applied) -- so chordwise (flow/meridional direction,
-    inlet to outlet) runs along x instead, pitchwise along y. The opposite
-    of the stator's convention.
-Moving along the blade's own chord sweeps radius from r1 to r2; a pitch
-offset between adjacent blade copies becomes the annulus's own angular
-blade spacing. Log-spiral, angle-preserving (conformal) by construction --
-the standard way to wrap a planar cascade onto a surface of revolution.
+The mapping is::
+
+    r = r1 * exp(log(r2/r1) * (chordwise - x1) / c_axial)
+    theta = theta0 + log(r2/r1) / c_axial * (pitchwise - y1)
+
+The source axes used for the chordwise and pitchwise coordinates differ:
+
+* A stator's chordwise extent runs mainly along its local y axis and its
+  pitchwise extent along x after the final profile rotation.
+* A rotor's chordwise direction runs along local x and its pitch runs along y.
+
+Moving along the chord sweeps the radius from ``r1`` to ``r2``; a pitch
+offset between adjacent copies becomes the annular blade spacing. The mapping
+is angle-preserving by construction.
 """
 
 import numpy as np

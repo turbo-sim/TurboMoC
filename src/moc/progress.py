@@ -26,26 +26,29 @@ __all__ = ["DEFAULT_STAGE_WEIGHTS", "make_progress_reporter"]
 
 
 def make_progress_reporter(set_progress, weights=None):
-    """
-    Returns a callable(fraction: float, stage_label: str) -> None to pass
-    as progress_callback= to any moc solver stage method. Combines that
-    stage's own local fraction with its weight and calls
-    set_progress((percent_str, message_str)) with the running overall total
-    -- matching the (value, label) tuple shape Dash's set_progress expects
-    when the callback's Output includes a progress bar's value + label.
+    """Create a callback that combines progress from all solver stages.
 
-    Example (Dash background callback):
-        @app.callback(
-            Output("result-store", "data"),
-            Input("compute-btn", "n_clicks"),
-            background=True,
-            manager=background_callback_manager,
-            progress=[Output("progress-bar", "value"), Output("progress-bar", "label")],
-        )
-        def run_design(set_progress, n_clicks):
-            reporter = make_progress_reporter(set_progress)
-            data = design_nozzle(..., progress_callback=reporter)
-            return data
+    Parameters
+    ----------
+    set_progress : callable
+        Receives the ``(percent_string, message_string)`` tuple expected by
+        a Dash background callback.
+    weights : dict, optional
+        Relative weights for solver stages 1 through 4. The defaults reflect
+        their approximate runtime.
+
+    Returns
+    -------
+    callable
+        A reporter accepting ``(fraction, stage_label)``, suitable for a
+        solver's ``progress_callback`` argument.
+
+    Examples
+    --------
+    Use the returned reporter inside a Dash background callback::
+
+        reporter = make_progress_reporter(set_progress)
+        data = design_nozzle(..., progress_callback=reporter)
     """
     weights = weights or DEFAULT_STAGE_WEIGHTS
     order = ["1", "2", "3", "4"]

@@ -12,8 +12,9 @@ algebraic core is sub-second, so it never needed this) -- an explicit
 
 Plots are displayed with moc.plotly (interactive dcc.Graph -- zoom, pan,
 hover, and a native download-as-PNG toolbar button, same as turbodash's own
-app.py). moc.plotly's figures are styled (see plotting_plotly._apply_
-journal_style) to read close to moc.mpl's boxed-axes/gridline look rather
+app.py). moc.plotly's figures are styled (see
+``plotting_plotly._apply_journal_style``) to read close to moc.mpl's
+boxed-axes/gridline look rather
 than Plotly's own default template, since visual consistency with
 examples/plot_design.py's output mattered too -- same colors either way,
 only the interactive vs. static trade-off differs. The "Download this
@@ -23,10 +24,12 @@ click, so an SVG/PDF download is a real vector file, not a rasterized PNG
 relabeled -- display and file-export are genuinely two different renders
 of the same data, not one converted into the other.
 
-Run locally:
+Run locally::
+
     conda activate moc_env
     python -m moc.app
     (or: moc-app, the console-script entry point from pyproject.toml)
+
 then open the printed http://127.0.0.1:8050/ URL in a browser.
 """
 

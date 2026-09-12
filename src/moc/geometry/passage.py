@@ -251,8 +251,9 @@ def extract_axial_passage_2d(blade_data, pitch, face_path, solid_path=None,
     blade_data : dict
         Stator (parametrize_stator_blade/_semi output -- needs
         "blade_curve"/"trailing_edge"/"suction"/"metal_angle_in"/
-        "metal_angle_out"/"axial_chord_convergent"/"axial_chord_
-        divergent") or rotor (design_rotor_vortex_blade output -- needs
+        "metal_angle_out"/"axial_chord_convergent"/
+        "axial_chord_divergent") or rotor
+        (design_rotor_vortex_blade output -- needs
         "blade"/"suction"/"pressure"/"chord") blade dict. Pick which via
         `source`.
     pitch : float
@@ -275,8 +276,9 @@ def extract_axial_passage_2d(blade_data, pitch, face_path, solid_path=None,
     inlet_chords, outlet_chords : float
         How far the inlet/outlet caps sit upstream of the leading edge /
         downstream of the trailing edge, each as a multiple of the
-        blade's own chord (stator: axial_chord_convergent + axial_
-        chord_divergent; rotor: "chord") -- e.g. the outlet default 6.0
+        blade's own chord (stator: ``axial_chord_convergent +
+        axial_chord_divergent``; rotor: "chord") -- e.g. the outlet
+        default 6.0
         places the outlet six chords downstream, far enough that the
         outlet boundary condition doesn't interact with the blade's own
         near-field. Decoupled from the stator's own inlet_chords/
@@ -411,8 +413,9 @@ def extract_radial_passage_2d(blade_data, pitch, r1, r2, face_path, solid_path=N
     mapping's reference point/scale (see moc.geometry.radial's
     _reference_point_and_scale) is derived from the blade's own contour
     and then shared with the band's outer boundary, so the band's
-    inlet/outlet caps (which sit beyond the blade's LE/TE by inlet_
-    chords/outlet_chords) extrapolate naturally to radii OUTSIDE
+    inlet/outlet caps (which sit beyond the blade's LE/TE by
+    ``inlet_chords``/``outlet_chords``) extrapolate naturally to radii
+    outside
     [r1, r2] via the same log-spiral formula, rather than r1/r2
     themselves being squeezed onto the (much wider) extended domain.
 

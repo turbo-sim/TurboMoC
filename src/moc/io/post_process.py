@@ -42,21 +42,24 @@ import os
 #
 
 def printProgress (iteration, total, prefix = '', suffix = '', decimals = 2, barLength = 100, on_progress = None):
-    """
-    Call in a loop to create terminal progress bar
-    @params:
-        iteration   - Required  : current iteration (Int)
-        total       - Required  : total iterations (Int)
-        prefix      - Optional  : prefix string (Str)
-        suffix      - Optional  : suffix string (Str)
-        on_progress - Optional  : callable(fraction: float, prefix: str) -> None,
-                                   called with the same (clamped 0..1) fraction
-                                   used for the terminal bar. Lets a caller
-                                   (e.g. a Dash background callback's
-                                   set_progress) mirror this same progress
-                                   stream to a UI progress bar without
-                                   touching the terminal output at all --
-                                   see moc.progress.
+    """Update a terminal progress bar from inside a loop.
+
+    Parameters
+    ----------
+    iteration : int
+        Current iteration.
+    total : int
+        Total number of iterations.
+    prefix, suffix : str
+        Text displayed before and after the progress bar.
+    decimals : int
+        Number of decimal places used for the percentage.
+    barLength : int
+        Width of the terminal bar in characters.
+    on_progress : callable, optional
+        Called as ``on_progress(fraction, prefix)`` with the same clamped
+        fraction used for the terminal bar. This allows a UI progress bar to
+        mirror the terminal output.
     """
     fraction        = min(1.0, iteration / float(total))
     filledLength    = int(round(barLength * fraction))

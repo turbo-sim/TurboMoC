@@ -102,8 +102,9 @@ class MOCSolver:
         use_true_sauer_line=True: the actual classical Sauer (1947) transonic
         small-perturbation solution (InternalPoint.SauerMain -- a parabolic
         sonic line x(y), built from an expansion around a*), only physically
-        applicable when the isentrope crosses M=1 smoothly (jax_solve_
-        critical_state's SMOOTH_SONIC mode) -- i.e. no discontinuous flashing
+        applicable when the isentrope crosses M=1 smoothly
+        (``jax_solve_critical_state``'s ``SMOOTH_SONIC`` mode) -- i.e.
+        no discontinuous flashing
         jump to violate the small-perturbation assumption. Kept as an
         explicit opt-in alongside the flat-front default (not a replacement)
         so both can be generated and compared for the same case.

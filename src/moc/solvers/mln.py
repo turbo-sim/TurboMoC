@@ -1,12 +1,15 @@
 """
 Minimum-Length Nozzle (MLN) solver.
 
-Inherits Stages 1, 2, and 4 from MOCSolver in moc/srcMOC/moc_solver.py.
+Inherits Stages 1, 2, and 4 from ``MOCSolver``.
 Replaces Stage 3 (kernel) with a centred-expansion-fan construction:
-  - No circular arc wall; the throat corner is a sharp point at (0, y_t).
-  - All right-running (C+) characteristics originate from the corner.
-  - Interior points and axis points are computed exactly as before.
-  - Termination: axis Mach number >= Noz_Mach.
+
+* There is no circular arc wall; the throat corner is a sharp point at
+  ``(0, y_t)``.
+* All right-running (C+) characteristics originate from the corner.
+* Interior points and axis points are computed exactly as before.
+* Marching terminates when the axis Mach number reaches ``Noz_Mach``.
+
 Stage 4 (reflex / turning section) is inherited unchanged.
 """
 

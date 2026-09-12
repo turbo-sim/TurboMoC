@@ -1,15 +1,16 @@
 """
 moc: Method of Characteristics solvers for nozzle/stator design.
 
-Two solver variants sharing one thermodynamic/characteristics core
-(moc.core.classes):
-  - moc.solvers.conventional.MOCSolver    -- rounded-arc kernel, supports
-    subcooled-liquid flashing inlets (flat post-jump throat front) as well
-    as ordinary single-phase and saturated-two-phase inlets.
-  - moc.solvers.mln.MOCSolverMLN          -- minimum-length (sharp-corner)
-    nozzle, centred expansion fan from the throat corner.
+Two solver variants share one thermodynamic/characteristics core
+(``moc.core.classes``):
 
-Both accept the same style of config dict and export_full_result_data()
+* ``moc.solvers.conventional.MOCSolver`` is the rounded-arc kernel. It
+  supports subcooled-liquid flashing inlets (with a flat post-jump throat
+  front), ordinary single-phase inlets, and saturated two-phase inlets.
+* ``moc.solvers.mln.MOCSolverMLN`` is the minimum-length, sharp-corner
+  nozzle with a centred expansion fan from the throat corner.
+
+Both accept the same style of config dict and ``export_full_result_data()``
 schema, so results are directly comparable.
 """
 

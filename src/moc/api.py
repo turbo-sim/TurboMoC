@@ -69,55 +69,63 @@ def design_nozzle(
     progress_callback=None,
     auto_nudge_q0: bool = True,
 ) -> dict:
-    """
-    Runs a full MOC nozzle design (all solver stages) and returns one flat,
-    JSON-safe result dict -- no MOCSolver/FluidManager objects, so this is
-    safe to call directly from a UI callback or an HTTP handler.
+    """Run every stage of a method-of-characteristics nozzle design.
 
-    progress_callback: optional callable(fraction: float, stage_label: str),
-    threaded through every solver stage. Pass moc.progress.
-    make_progress_reporter(set_progress)'s return value here to drive a
-    Dash background-callback progress bar across the whole solve.
+    The function accepts ordinary values and returns no solver or fluid-manager
+    objects, so its result can be passed directly to a UI callback or HTTP
+    handler.
 
-    Inlet condition (same convention throughout moc):
-      - Q0 = nan (default) + T0: subcooled-liquid (flashing) or single-phase
-        superheated-vapor inlet, set via (P0, T0).
-      - Q0 in [0, 1]: saturated two-phase inlet, set via (P0, Q0); T0 is
-        derived automatically and does not need to be supplied.
-
-    Design target: give p_back (recommended -- pressure-based termination
-    is unambiguous even where two-phase HEM sound speed makes Mach
-    non-monotonic along the expansion, see MOCSolver.run_stage_3_kernel's
-    docstring) and/or Noz_Mach directly. At least one is required. p_back
-    is required for solver="mln" (used to compute the corner fan's target
-    turning angle theta*).
-
-    solver: "conventional" (rounded-arc kernel) or "mln" (minimum-length,
-    sharp-corner kernel) -- both share the same FluidManager cache key, so
-    calling both for the same (fluid_name, P0, T0, Q0) only builds the
-    fluid table once.
-
-    auto_nudge_q0: when use_true_sauer_line=True and Q0 is exactly 0.0
-    (saturated liquid), the classical parabolic Sauer construction can
-    leave Stage 2's characteristics march pinned in the ill-conditioned
-    M~1 zone for far too many steps (observed for cyclopentane at
-    P0=2.513 bar, Q0=0.0: the front loses y-monotonicity and Stage 3
-    exhausts every wall-intersection candidate). Starting even slightly
-    inside the two-phase dome avoids this (Q0=0.02 converged cleanly for
-    that same case; Q0=0.001/0.005 did not). When True (default) and
-    that combination is hit and the plain Q0=0.0 attempt doesn't
-    converge, this retries with Q0 in (0.005, 0.01, 0.02, 0.05, 0.1),
-    keeping the first one that converges (or the last, best-effort
-    attempt if none do) -- the returned dict's "Q0" and "q0_nudged_from"
-    report what was actually used. Has no effect for any other
-    combination of use_true_sauer_line/Q0.
+    Parameters
+    ----------
+    fluid_name : str
+        CoolProp fluid name.
+    P0 : float
+        Stagnation pressure in pascals.
+    T0 : float, optional
+        Stagnation temperature in kelvin for a single-phase or flashing inlet.
+    Q0 : float, optional
+        Inlet quality for a saturated two-phase state. Leave as NaN when using
+        ``T0``.
+    p_back : float, optional
+        Back pressure in pascals. This is the recommended design target and is
+        required by the minimum-length solver.
+    Noz_Mach : float, optional
+        Direct nozzle Mach-number target. At least one of ``p_back`` and
+        ``Noz_Mach`` is required.
+    solver : {"conventional", "mln"}
+        Rounded-arc conventional solver or sharp-corner minimum-length solver.
+    y_t : float
+        Throat half-height.
+    n : int
+        Number of points used to discretize the initial characteristic line.
+    rho_t, rho_d : float
+        Geometric radii used by the nozzle construction.
+    delta_flow : float
+        Axisymmetric-flow switch or coefficient passed to the solver.
+    tau_max, tau_step : float
+        Angular extent and increment for the conventional solver.
+    n_tau_mln : int
+        Number of angular samples for the minimum-length expansion fan.
+    use_true_sauer_line : bool
+        Use the classical parabolic Sauer sonic line instead of the default
+        flat post-jump throat front.
+    backend : str
+        Thermodynamic backend passed to the fluid manager.
+    show_plot : bool
+        Enable the solver's diagnostic plotting.
+    progress_callback : callable, optional
+        Called as ``progress_callback(fraction, stage_label)`` throughout
+        the solver stages.
+    auto_nudge_q0 : bool
+        If a saturated-liquid classical Sauer solve fails, retry with small
+        positive inlet qualities and retain the first converged result.
 
     Returns
     -------
-    dict with keys:
-      wall_final, div_wall, kernel_wall, sauer, IVP, mesh_data, axis
-        -- same schema as MOCSolver.build_result_data / export_full_result_data
-      fluid_name, solver, design_Noz_Mach, p_back, converged, runtime_s
+    dict
+        JSON-safe solver data. It includes wall, kernel, Sauer-line, mesh, and
+        axis data together with the resolved inputs, convergence state, and
+        runtime.
     """
     import time
 

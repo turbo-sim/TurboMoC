@@ -755,9 +755,11 @@ class InternalPoint:
         Exact planar (delta=0) interior-point unit process.
 
         Zebbiche & Youbi (2007), eqs. 1-2, 9-23: for planar flow the
-        characteristic compatibility relations are the EXACT invariants
-            theta + nu(V) = const   along C- (paramM's characteristic)
-            theta - nu(V) = const   along C+ (paramP's characteristic)
+        characteristic compatibility relations are the exact invariants:
+
+        * ``theta + nu(V) = const`` along C- (paramM's characteristic)
+        * ``theta - nu(V) = const`` along C+ (paramP's characteristic)
+
         so theta3 and nu3 (hence V3) at the new point follow directly from
         the two foot points' theta and nu, with no linearisation at all in
         the thermodynamic part. This replaces the general (axisymmetric-
@@ -1199,8 +1201,9 @@ def build_convergent_inlet(y_t, rho_d, L_conv, n_points=30):
     same construction long-radius flow nozzles use).
 
     Arc 1 (throat -> inflection) is literally the SAME circle as the
-    kernel region's own throat rounding (moc.core.classes.
-    rotation_around_center, center (0, rho_d+y_t), same radius rho_d) --
+    kernel region's own throat rounding
+    (``moc.core.classes.rotation_around_center``, center
+    ``(0, rho_d+y_t)``, same radius ``rho_d``) --
     continued backward (negative angle) instead of forward, so the wall
     is curvature-continuous across the throat, not just position/slope-
     continuous.
@@ -1226,8 +1229,8 @@ def build_convergent_inlet(y_t, rho_d, L_conv, n_points=30):
         Throat half-height (m).
     rho_d : float
         Throat/kernel radius of curvature (m) -- same value already used
-        for the divergent side's own throat rounding (rotation_around_
-        center's rho_d).
+        for the divergent side's own throat rounding
+        (``rotation_around_center``'s ``rho_d``).
     L_conv : float
         Total axial length of the convergent inlet section (m), split
         evenly between the two arcs (L1 = L2 = L_conv/2). Must satisfy
