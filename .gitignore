@@ -31,3 +31,4 @@ artifacts/
 figures/
 .moc_app_cache/
 docs/_build/
+examples/output/
