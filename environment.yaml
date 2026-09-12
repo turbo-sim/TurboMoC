@@ -1,33 +1,13 @@
-# Conda environment for the moc package (mirrors jaxprop's own
-# environment.yaml, since moc depends on it directly). Create with, run
-# from this directory (moc/, where pyproject.toml lives):
+# Conda environment for moc. Conda provides the Python runtime and CadQuery;
+# Poetry installs moc and all other dependencies declared in pyproject.toml.
+# Run these commands from the repository root:
 #   conda env create -f environment.yaml
 #   conda activate moc_env
-#   pip install -e .
-#
-# The final `pip install -e .` is a separate step, not folded into this
-# file's pip list, since a relative "-e ." inside environment.yaml only
-# resolves correctly if `conda env create` happens to be run from this
-# exact directory -- explicit is safer than relying on that.
-#
-# Versions pinned here match what the package was developed and validated
-# against (see the performance-optimization + regime-testing work in
-# core/classes.py's docstrings/comments) -- not hard requirements, just a
-# known-good baseline.
+#   poetry install
 name: moc_env
 channels:
   - conda-forge
 dependencies:
   - python=3.12
   - pip
-  - numpy=2.4
-  - scipy=1.16
-  - matplotlib=3.10
-  - pandas=2.3
-  - plotly=6.5
   - cadquery
-  - pip:
-      - jaxprop==0.5.6
-      - jax==0.6.2
-      - jaxlib==0.6.2
-      - dash[diskcache]==3.3.0

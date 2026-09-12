@@ -21,10 +21,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# STEP export for moc.geometry.export_blade_step -- pulls in OCCT, best
-# installed via conda-forge (see environment.yaml) rather than pip on
-# Windows. moc.geometry.parametrize_stator_blade itself has no cadquery
-# dependency.
+# Optional STEP export support. CadQuery may instead be installed through the
+# Conda environment defined in environment.yaml.
 cad = ["cadquery"]
 
 [project.scripts]
