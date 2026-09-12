@@ -1,31 +1,33 @@
-# Python
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
-*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging artifacts
 build/
 dist/
-*.egg
+*.egg-info/
 
 # Virtual environments
 .venv/
 venv/
 env/
 
-# moc.app background-callback disk cache
-.moc_app_cache/
+# Jupyter
+.ipynb_checkpoints/
 
-# Regenerable example outputs (plots, dumped design JSON)
-examples/output/
-
-# 5 Eqs. model
-src/moc/core/nonequilibrium_5eq_fast.py
-src/moc/core/nonequilibrium_5eq.py
-notes/nonequilibrium_5eq_derivation.md
-
-# OS cruft
+# Editors and operating systems
+.idea/
+.vscode/
 .DS_Store
 Thumbs.db
 
-# Editors
-.vscode/
-.idea/
+# Generated project output
+artifacts/
+figures/
+docs/_build/
+docs/source/api/
