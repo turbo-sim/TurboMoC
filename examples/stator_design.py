@@ -34,7 +34,9 @@ blade = parametrize_stator_blade(
     metal_angle_in=0.0,
     metal_angle_out=70.0,
     r_trailing=0.5,
+    inlet_opening_ratio=1.5,
 )
+
 curve = blade["blade_curve"]
 if not np.isfinite(np.column_stack((curve["x"], curve["y"]))).all():
     raise RuntimeError("The stator design produced invalid coordinates.")
