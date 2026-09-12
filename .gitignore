@@ -32,3 +32,5 @@ figures/
 .moc_app_cache/
 docs/_build/
 output/
+.moc_app_cache
+
