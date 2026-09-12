@@ -1,0 +1,66 @@
+name: Test and release Method of Characteristics app
+
+on:
+  push:
+    branches: [main]
+    tags: ['app-v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Check out tested revision
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install Poetry
+        run: python -m pip install "poetry==2.1.2"
+
+      - name: Install locked dependencies
+        run: poetry install --no-interaction
+
+      - name: Run smoke tests
+        run: poetry run python tests/run_tests.py
+
+  deploy:
+    name: Request Render deployment
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: render-production
+      cancel-in-progress: false
+    steps:
+      - name: Check out the tested release
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Deploy tested commit to Render
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          test -n "$RENDER_DEPLOY_HOOK_URL" || { echo "Missing RENDER_DEPLOY_HOOK_URL secret"; exit 1; }
+          curl --fail --silent --show-error --max-time 60 --output /dev/null \
+            --get --data-urlencode "ref=$(git rev-parse HEAD)" \
+            "$RENDER_DEPLOY_HOOK_URL"
+          echo "Deployment requested. Check Render for build and rollout status."
