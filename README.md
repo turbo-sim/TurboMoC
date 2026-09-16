@@ -8,6 +8,13 @@ flashing / wet-to-dry inlets** under the Homogeneous Equilibrium Model
 
 ![MOC characteristics mesh](docs/images/characteristics_mesh.png)
 
+
+📦 **PyPI package**: [https://pypi.org/project/barotropy/](https://pypi.org/project/barotropy/)
+
+📚 **Documentation**: [https://turbo-sim.github.io/TurboMoC/](https://turbo-sim.github.io/TurboMoC)
+
+
+
 ## Features
 
 - **Two solver kernels**: `ConventionalSolver` (rounded-arc, supports the
