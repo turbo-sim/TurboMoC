@@ -10,9 +10,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import jaxprop as jxp
 
-import moc
+import turbo_moc
 
-from moc.rotor import design_rotor_vortex_blade
+from turbo_moc.rotor import design_rotor_vortex_blade
 
 # 1. Resolve the saturated inlet state in the rotor-relative frame.
 pressure = 20e5
@@ -45,11 +45,11 @@ if (
 
 # Plotting helpers return (figure, axes); keep the figures for SVG export.
 figures = {
-    "rotor_blade": moc.mpl.plot_rotor_vortex_blade(
+    "rotor_blade": turbo_moc.mpl.plot_rotor_vortex_blade(
         data,
         show_surfaces=False,
     )[0],
-    "rotor_passage": moc.mpl.plot_rotor_blade(data)[0],
+    "rotor_passage": turbo_moc.mpl.plot_rotor_blade(data)[0],
 }
 print(
     f"Pitch: {data['pitch']:.6f} m  Chord: {data['chord']:.6f} m  "
@@ -84,7 +84,7 @@ print(f"Coordinates and figures saved to: {outdir}")
 # Show figures during interactive runs; smoke tests still exercise all exports.
 import os
 
-if os.environ.get("MOC_EXAMPLE_SMOKE_TEST") != "1":
+if os.environ.get("TURBO_MOC_EXAMPLE_SMOKE_TEST") != "1":
     plt.show()
 else:
     plt.close("all")

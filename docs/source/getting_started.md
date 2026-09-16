@@ -2,7 +2,7 @@
 
 ## Introduction
 
-`moc` designs supersonic nozzles and turbomachinery geometry with a real-fluid
+TurboMoC designs supersonic nozzles and turbomachinery geometry with a real-fluid
 thermodynamic core supplied by `jaxprop`. It includes a conventional rounded-arc
 solver and a sharp-corner minimum-length-nozzle solver. Both expose a common
 high-level function and return the same JSON-safe result structure.
@@ -14,16 +14,16 @@ stator and rotor blades.
 
 ## Installation
 
-`moc` supports Python 3.11 through 3.13. Install it from PyPI with pip:
+TurboMoC supports Python 3.11 through 3.13. Install it from PyPI with pip:
 
 ```bash
-python -m pip install moc
+python -m pip install turbo_moc
 ```
 
 To include CadQuery for STEP export, install the `cad` extra:
 
 ```bash
-python -m pip install "moc[cad]"
+python -m pip install "turbo_moc[cad]"
 ```
 
 For an editable installation to work on the source code, see the
@@ -32,7 +32,7 @@ For an editable installation to work on the source code, see the
 Verify the installation:
 
 ```bash
-python -c "import moc; print(moc.__version__)"
+python -c "import turbo_moc; print(turbo_moc.__version__)"
 ```
 
 ## Design a nozzle
@@ -41,7 +41,7 @@ The public `design_nozzle` function accepts ordinary Python values and returns a
 flat dictionary suitable for serialization and plotting:
 
 ```python
-from moc import design_nozzle
+from turbo_moc import design_nozzle
 
 data = design_nozzle(
     fluid_name="nitrogen",
@@ -60,16 +60,16 @@ wall = data["wall_final"]
 Plot the characteristics mesh or nozzle contour from the same result:
 
 ```python
-import moc
+import turbo_moc
 
-fig, ax = moc.mpl.plot_characteristics_mesh(data, mirror=True)
-fig = moc.plotly.plot_nozzle_contour(data)
+fig, ax = turbo_moc.mpl.plot_characteristics_mesh(data, mirror=True)
+fig = turbo_moc.plotly.plot_nozzle_contour(data)
 ```
 
 ## Launch the interactive app
 
 ```bash
-moc-app
+turbo_moc-app
 ```
 
 Open `http://127.0.0.1:8050/` in a browser.

@@ -9,14 +9,14 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-import moc
+import turbo_moc
 
-from moc.geometry import parametrize_stator_blade
+from turbo_moc.geometry import parametrize_stator_blade
 
 # 1. Cyclopentane stator design conditions from Cioffi et al. (2026),
 #    Table 3. This uses the current package geometry, not an exact reproduction
 #    of the paper's control-point construction.
-data = moc.design_nozzle(
+data = turbo_moc.design_nozzle(
     fluid_name="Cyclopentane",
     P0=2.513e5,  # Stagnation pressure [Pa].
     Q0=0.025,  # Two-phase inlet: 2.5% vapor by mass.
@@ -46,12 +46,12 @@ if not np.isfinite(np.column_stack((curve["x"], curve["y"]))).all():
 
 # Plotting helpers return (figure, axes); keep the figures for SVG export.
 figures = {
-    "nozzle_contour": moc.mpl.plot_nozzle_contour(data)[0],
-    "characteristics_mesh": moc.mpl.plot_characteristics_mesh(data)[0],
-    "axis_properties": moc.mpl.plot_axis_properties(data)[0],
-    "wall_properties": moc.mpl.plot_wall_properties(data)[0],
+    "nozzle_contour": turbo_moc.mpl.plot_nozzle_contour(data)[0],
+    "characteristics_mesh": turbo_moc.mpl.plot_characteristics_mesh(data)[0],
+    "axis_properties": turbo_moc.mpl.plot_axis_properties(data)[0],
+    "wall_properties": turbo_moc.mpl.plot_wall_properties(data)[0],
 }
-figures["stator_blade"] = moc.mpl.plot_blade(
+figures["stator_blade"] = turbo_moc.mpl.plot_blade(
     blade,
     n_blades=2,
     show_control_points=False,
@@ -85,7 +85,7 @@ print(f"Coordinates and figures saved to: {outdir}")
 # Show figures during interactive runs; smoke tests still exercise all exports.
 import os
 
-if os.environ.get("MOC_EXAMPLE_SMOKE_TEST") != "1":
+if os.environ.get("TURBO_MOC_EXAMPLE_SMOKE_TEST") != "1":
     plt.show()
 else:
     plt.close("all")

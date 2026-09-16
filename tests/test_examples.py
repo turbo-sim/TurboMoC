@@ -15,7 +15,7 @@ EXAMPLES = sorted((PROJECT_ROOT / "examples").glob("*.py"))
 @pytest.mark.parametrize("script", EXAMPLES, ids=lambda path: path.stem)
 def test_example_runs(script):
     env = os.environ.copy()
-    env["MOC_EXAMPLE_SMOKE_TEST"] = "1"
+    env["TURBO_MOC_EXAMPLE_SMOKE_TEST"] = "1"
     env["MPLBACKEND"] = "Agg"
 
     result = subprocess.run(

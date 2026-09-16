@@ -1,4 +1,4 @@
-# moc
+# TurboMoC
 
 Method of Characteristics solver for supersonic nozzle and stator blade
 design, built on a real-gas (CoolProp, via `jaxprop`) thermodynamic core.
@@ -16,7 +16,7 @@ flashing / wet-to-dry inlets** under the Homogeneous Equilibrium Model
 - **`design_nozzle(...)`**: one function, plain arguments in, flat
   JSON-safe dict out.
 - **Stator blade parametrization**: fit a closed B-spline blade profile
-  from the nozzle wall and export to STEP (`moc.geometry`) -- two
+  from the nozzle wall and export to STEP (`turbo_moc.geometry`) -- two
   variants, full (pressure side mirrors the wall) and semi (pressure
   side is a single arc).
 - **Interactive Dash app** for nozzle design and blade parametrization,
@@ -38,14 +38,14 @@ package and its other runtime dependencies:
 
 ```bash
 conda env create -f environment.yaml
-conda activate moc_env
+conda activate turbo_moc_env
 poetry install
 ```
 
 ## Quick start
 
 ```python
-from moc import design_nozzle
+from turbo_moc import design_nozzle
 
 data = design_nozzle(
     fluid_name="nitrogen",
@@ -59,10 +59,10 @@ wall = data["wall_final"]    # {"x": [...], "y": [...], "p": [...], "M": [...], 
 ```
 
 ```python
-import moc
+import turbo_moc
 
-fig, ax = moc.mpl.plot_characteristics_mesh(data, mirror=True)
-fig = moc.plotly.plot_nozzle_contour(data)
+fig, ax = turbo_moc.mpl.plot_characteristics_mesh(data, mirror=True)
+fig = turbo_moc.plotly.plot_nozzle_contour(data)
 ```
 
 ## Interactive app
@@ -77,9 +77,9 @@ design comparison ("pin as reference"), and plot/STEP export.
 
 ## Repo layout
 
-- `src/moc/core`, `src/moc/solvers` -- solver kernels
-- `src/moc/api.py` -- `design_nozzle`
-- `src/moc/geometry` -- stator blade parametrization + CAD export
-- `src/moc/plotting_mpl.py`, `src/moc/plotting_plotly.py` -- plotting
-- `src/moc/app.py` -- Dash app
+- `src/turbo_moc/core`, `src/turbo_moc/solvers` -- solver kernels
+- `src/turbo_moc/api.py` -- `design_nozzle`
+- `src/turbo_moc/geometry` -- stator blade parametrization + CAD export
+- `src/turbo_moc/plotting_mpl.py`, `src/turbo_moc/plotting_plotly.py` -- plotting
+- `src/turbo_moc/app.py` -- Dash app
 - `examples/` -- runnable scripts

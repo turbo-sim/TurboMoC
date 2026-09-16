@@ -1,6 +1,6 @@
 # Supersonic rotor blade design by the vortex-flow method
 
-Implementation: [`moc.rotor.vortex_blade`](../src/moc/rotor/vortex_blade.py) —
+Implementation: [`turbo_moc.rotor.vortex_blade`](../src/turbo_moc/rotor/vortex_blade.py) —
 `design_rotor_vortex_blade(...)`.
 
 ## Sources

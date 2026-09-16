@@ -204,6 +204,6 @@ ax.set_xlim(x_lo - x_pad, x_hi + x_pad)
 ax.set_ylim(y_lo - 0.85 * (y_hi - y_lo), y_hi + 0.55 * (y_hi - y_lo))
 
 fig.tight_layout()
-out = r'c:\Users\ancio\OneDrive - Danmarks Tekniske Universitet\Documents\python_scripts\method_of_characteristics\moc\notes\img\marching_step.png'
+out = r'c:\Users\ancio\OneDrive - Danmarks Tekniske Universitet\Documents\python_scripts\turbo_moc\turbo_moc\notes\img\marching_step.png'
 fig.savefig(out, dpi=160)
 print('saved', out)

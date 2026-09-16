@@ -29,8 +29,7 @@ Thumbs.db
 # Generated project output
 artifacts/
 figures/
-.moc_app_cache/
+.*_app_cache/
 docs/_build/
 output/
-.moc_app_cache
 

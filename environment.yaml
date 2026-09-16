@@ -1,10 +1,10 @@
-# Conda environment for moc. Conda provides the Python runtime and CadQuery;
-# Poetry installs moc and all other dependencies declared in pyproject.toml.
+# Conda environment for TurboMoC. Conda provides the Python runtime and CadQuery;
+# Poetry installs TurboMoC and all other dependencies declared in pyproject.toml.
 # Run these commands from the repository root:
 #   conda env create -f environment.yaml
-#   conda activate moc_env
+#   conda activate turbo_moc_env
 #   poetry install
-name: moc_env
+name: turbo_moc_env
 channels:
   - conda-forge
 dependencies:

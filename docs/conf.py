@@ -7,10 +7,10 @@ sys.path.insert(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")),
 )
 
-from moc import __version__
+from turbo_moc import __version__
 
 # Define project metadata
-project = "Method of Characteristics"
+project = "TurboMoC"
 copyright = "2026, Sustainable Thermal Power Research group at DTU Construct"
 author = "Andrea Cioffi, Roberto Agromayor, Fredrik Haglind"
 release = __version__
@@ -133,11 +133,11 @@ exclude_patterns = [
 # HTML theme
 # ---------------------------------------------------------------------------
 html_theme = "sphinx_book_theme"
-html_title = "Method of Characteristics"
-html_baseurl = "https://turbo-sim.github.io/method_of_characteristics/"
+html_title = "TurboMoC"
+html_baseurl = "https://turbo-sim.github.io/turbo_moc/"
 
 html_theme_options = {
-    "repository_url": "https://github.com/turbo-sim/method_of_characteristics",
+    "repository_url": "https://github.com/turbo-sim/turbo_moc",
     "use_repository_button": True,
     "use_issues_button": True,
     "use_edit_page_button": True,

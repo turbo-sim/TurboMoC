@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "moc"
+name = "turbo_moc"
 version = "0.1.0"
 description = "Method of Characteristics solvers for two-phase and single-phase nozzle/stator design (minimum-length and conventional/arc-flashing variants)."
 readme = "README.md"
@@ -26,7 +26,7 @@ dependencies = [
 cad = ["cadquery"]
 
 [project.scripts]
-moc-app = "moc.app:main"
+turbo_moc-app = "turbo_moc.app:main"
 
 [tool.poetry.group.dev.dependencies]
 bibtexparser = ">=1.4,<2"

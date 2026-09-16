@@ -1,6 +1,6 @@
-# Method of Characteristics
+# TurboMoC
 
-`moc` is a Python package for designing supersonic nozzles and turbomachinery
+TurboMoC is a Python package for designing supersonic nozzles and turbomachinery
 blades using the method of characteristics. It combines real-fluid
 thermodynamics with conventional and minimum-length nozzle solvers, geometry
 parametrization, plotting tools, and an interactive web application.

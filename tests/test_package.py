@@ -1,10 +1,10 @@
 """Basic checks that the installed package exposes its public interface."""
 
-import moc
+import turbo_moc
 
 
 def test_package_version_and_public_api():
-    assert moc.__version__
+    assert turbo_moc.__version__
 
     expected_names = {
         "FluidManager",
@@ -17,11 +17,11 @@ def test_package_version_and_public_api():
         "mpl",
         "plotly",
     }
-    assert expected_names <= set(moc.__all__)
-    assert all(hasattr(moc, name) for name in expected_names)
+    assert expected_names <= set(turbo_moc.__all__)
+    assert all(hasattr(turbo_moc, name) for name in expected_names)
 
 
 def test_supported_fluids_are_available():
-    fluids = moc.list_supported_fluids()
+    fluids = turbo_moc.list_supported_fluids()
     assert fluids
     assert any(name.lower() == "nitrogen" for name in fluids)

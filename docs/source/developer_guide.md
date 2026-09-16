@@ -7,13 +7,13 @@ clone the repository and install the package, development tools, and optional
 CadQuery support:
 
 ```bash
-git clone https://github.com/turbo-sim/method_of_characteristics.git
-cd method_of_characteristics
+git clone https://github.com/turbo-sim/turbo_moc.git
+cd turbo_moc
 poetry install --with dev --extras cad
 ```
 
 Poetry installs the package in editable mode, so changes to the source under
-`src/moc/` are available without reinstalling. The `dev` dependency group
+`src/turbo_moc/` are available without reinstalling. The `dev` dependency group
 includes documentation, testing, and release tools. The `cad` extra provides
 CadQuery for STEP export. The main implementation areas are `core`, `solvers`,
 `geometry`, `rotor`, plotting, and the Dash application.
@@ -28,11 +28,11 @@ environment file:
 
 ```bash
 conda env create -f environment.yaml
-conda activate moc_env
+conda activate turbo_moc_env
 poetry install --with dev
 ```
 
-In this setup, Conda provides Python, pip, and CadQuery. Poetry installs `moc`
+In this setup, Conda provides Python, pip, and CadQuery. Poetry installs TurboMoC
 and all remaining runtime and development dependencies from `pyproject.toml`.
 
 ## Building the documentation
@@ -85,7 +85,7 @@ You can also invoke pytest directly or run one test module:
 poetry run pytest tests/test_examples.py
 ```
 
-The example checks set `MOC_EXAMPLE_SMOKE_TEST=1` and use Matplotlib's
+The example checks set `TURBO_MOC_EXAMPLE_SMOKE_TEST=1` and use Matplotlib's
 non-interactive backend. The nozzle and rotor calculations still run and their
 figures are still constructed, but the checks do not start the Dash server,
 open plot windows. The design examples still export coordinates and figures

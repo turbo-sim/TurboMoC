@@ -13,7 +13,7 @@ liquefaction systems. A one-dimensional calculation establishes the required
 area ratio, but does not determine the wall shape or resolve the expansion waves
 and their reflections. The MoC supplies this two-dimensional construction.
 
-This guide describes the planar methods implemented in `moc`, with particular
+This guide describes the planar methods implemented in TurboMoC, with particular
 attention to details that are condensed in the accompanying papers
 {cite:p}`cioffiStators2026,cioffiNonideal2026`. The starting point is steady,
 inviscid, irrotational flow with uniform stagnation enthalpy and entropy.
