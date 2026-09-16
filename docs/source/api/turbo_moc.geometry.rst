@@ -1,5 +1,5 @@
-turbo_moc.geometry package
-==========================
+turbo\_moc.geometry package
+===========================
 
 .. automodule:: turbo_moc.geometry
    :members:

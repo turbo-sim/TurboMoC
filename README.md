@@ -1,92 +1,91 @@
-# TurboMoC
+﻿# TurboMoC
 
-Method of Characteristics solver for supersonic nozzle and stator blade
-design, built on a real-gas (CoolProp, via `jaxprop`) thermodynamic core.
-Handles **single-phase, saturated two-phase, and subcooled-liquid
-flashing / wet-to-dry inlets** under the Homogeneous Equilibrium Model
-(HEM) assumption, on the same solver.
-
-![MOC characteristics mesh](docs/images/characteristics_mesh.png)
-
+TurboMoC is an open-source Python package for exploring nozzle and blade designs with real-fluid thermodynamics. It supports single-phase and two-phase expansions, including flashing and condensing flows, under the Homogeneous Equilibrium Model (HEM). Use Python scripts or the interactive app to define operating conditions, inspect the flow, and export geometries for CFD simulations.
 
 📦 **PyPI package**: [https://pypi.org/project/turbo_moc/](https://pypi.org/project/turbo_moc/)
 
-📚 **Documentation**: [https://turbo-sim.github.io/TurboMoC/](https://turbo-sim.github.io/TurboMoC)
+📚 **Documentation**: [https://turbo-sim.github.io/TurboMoC/](https://turbo-sim.github.io/TurboMoC/)
+
+🎓 **Tutorials**: [https://turbo-sim.github.io/TurboMoC/examples/index.html](https://turbo-sim.github.io/TurboMoC/examples/index.html)
 
 
 
 ## Features
 
-- **Two solver kernels**: `ConventionalSolver` (rounded-arc, supports the
-  flashing flat post-jump throat front) and `MOCSolverMLN`
-  (minimum-length, sharp-corner) nozzles.
-- **`design_nozzle(...)`**: one function, plain arguments in, flat
-  JSON-safe dict out.
-- **Stator blade parametrization**: fit a closed B-spline blade profile
-  from the nozzle wall and export to STEP (`turbo_moc.geometry`) -- two
-  variants, full (pressure side mirrors the wall) and semi (pressure
-  side is a single arc).
-- **Interactive Dash app** for nozzle design and blade parametrization,
-  with `matplotlib`/`plotly` plotting and design comparison.
+- Design conventional and minimum-length supersonic nozzles.
+- Explore single-phase and two-phase flows using real-fluid properties.
+- Generate stator and rotor blade geometries from nozzle designs.
+- Visualize flow properties and compare designs using Python scripts or the interactive app.
+- Export coordinates, figures, and stator STEP geometry for downstream workflows.
+
+![Method of characteristics mesh for a supersonic nozzle](docs/images/characteristics_mesh.png)
 
 ![Stator blade parametrization](docs/images/stator_blade.png)
 
-## Install
+## Installation instructions
 
-With [Poetry](https://python-poetry.org/docs/#installation), install the
-package and optional CadQuery support using:
+TurboMoC requires Python 3.11, 3.12, or 3.13. Install it with pip in your Python environment:
 
 ```bash
+python -m pip install --upgrade "turbo_moc[cad]"
+```
+
+This also installs CadQuery for STEP geometry export and upgrades an existing TurboMoC installation.
+
+To install from source with [Poetry](https://python-poetry.org/docs/#installation), clone the repository and install the package with CAD support:
+
+```bash
+git clone https://github.com/turbo-sim/TurboMoC.git
+cd TurboMoC
 poetry install --extras cad
 ```
 
-Alternatively, install CadQuery through Conda Forge and let Poetry install the
-package and its other runtime dependencies:
-
-```bash
-conda env create -f environment.yaml
-conda activate turbo_moc_env
-poetry install
-```
+Use `poetry run python` to run Python scripts in the Poetry environment.
 
 ## Quick start
 
-```python
-from turbo_moc import design_nozzle
+Save the following as `quick_start.py` and run `python quick_start.py` (or `poetry run python quick_start.py` for a source installation). It designs a CO₂ expansion nozzle, prints the convergence status and exit Mach number, and displays the characteristics mesh with Matplotlib.
 
-data = design_nozzle(
-    fluid_name="nitrogen",
-    P0=20e5, T0=113.0,      # subcooled-liquid (flashing) inlet
-    p_back=2e5,
-    solver="conventional",   # or "mln"
-    y_t=0.01, rho_t=0.2, rho_d=0.1,
+The conditions are representative of a transcritical CO₂ heat pump: the nozzle
+expands CO₂ from a gas-cooler outlet at 35 °C and 1.2 times the critical pressure
+(about 88.5 bar) to the saturation pressure at an evaporation temperature of 5 °C
+(about 39.7 bar).
+
+```python
+import jaxprop as jxp
+import matplotlib.pyplot as plt
+from turbo_moc import design_nozzle, mpl
+
+fluid = jxp.Fluid("CO2")
+inlet_pressure = 1.2 * fluid.critical_point.p  # Pa
+inlet_temperature = 273.15 + 35.0  # K; gas-cooler outlet at 35 °C
+evaporation_temperature = 273.15 + 5.0  # K (5 °C)
+back_pressure = fluid.get_state(jxp.QT_INPUTS, 0, evaporation_temperature).p
+
+result = design_nozzle(
+    fluid_name="CO2",
+    P0=inlet_pressure,
+    T0=inlet_temperature,  # K
+    p_back=back_pressure,  # Pa; saturation pressure at 5 °C
+    solver="conventional",
 )
 
-wall = data["wall_final"]    # {"x": [...], "y": [...], "p": [...], "M": [...], ...}
+print(f"Converged: {result['converged']}")
+print(f"Exit Mach number: {result['exit_M']:.4f}")
+
+fig, ax = mpl.plot_characteristics_mesh(result, mirror=True)
+plt.show()
 ```
 
-```python
-import turbo_moc
-
-fig, ax = turbo_moc.mpl.plot_characteristics_mesh(data, mirror=True)
-fig = turbo_moc.plotly.plot_nozzle_contour(data)
-```
+See the [worked examples](https://turbo-sim.github.io/TurboMoC/examples/index.html)
+for nozzle, stator, and rotor design, including plots and coordinate exports.
 
 ## Interactive app
 
+Launch the app from your terminal:
+
 ```bash
-python examples/run_app_local.py
+turbo_moc-app
 ```
 
-Two tabs: nozzle design (Phase 1) and stator blade parametrization
-(Phase 2, consuming Phase 1's result), each with interactive plots,
-design comparison ("pin as reference"), and plot/STEP export.
-
-## Repo layout
-
-- `src/turbo_moc/core`, `src/turbo_moc/solvers` -- solver kernels
-- `src/turbo_moc/api.py` -- `design_nozzle`
-- `src/turbo_moc/geometry` -- stator blade parametrization + CAD export
-- `src/turbo_moc/plotting_mpl.py`, `src/turbo_moc/plotting_plotly.py` -- plotting
-- `src/turbo_moc/app.py` -- Dash app
-- `examples/` -- runnable scripts
+For a Poetry source installation, use `poetry run turbo_moc-app`. Open the local URL printed in the terminal to explore nozzle designs, parametrize stator blades, compare results, and export plots and STEP geometry.

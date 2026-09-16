@@ -1,5 +1,5 @@
-turbo_moc package
-=================
+turbo\_moc package
+==================
 
 .. automodule:: turbo_moc
    :members:

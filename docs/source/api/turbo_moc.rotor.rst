@@ -1,5 +1,5 @@
-turbo_moc.rotor package
-=======================
+turbo\_moc.rotor package
+========================
 
 .. automodule:: turbo_moc.rotor
    :members:

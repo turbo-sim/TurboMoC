@@ -2,13 +2,14 @@
 
 ## Installation for developers
 
-With Git and [Poetry](https://python-poetry.org/docs/#installation) installed,
+With Python 3.11, 3.12, or 3.13, Git, and
+[Poetry](https://python-poetry.org/docs/#installation) installed,
 clone the repository and install the package, development tools, and optional
 CadQuery support:
 
 ```bash
-git clone https://github.com/turbo-sim/turbo_moc.git
-cd turbo_moc
+git clone https://github.com/turbo-sim/TurboMoC.git
+cd TurboMoC
 poetry install --with dev --extras cad
 ```
 
@@ -21,26 +22,12 @@ CadQuery for STEP export. The main implementation areas are `core`, `solvers`,
 JAX is used by the core solver and comes through the `jaxprop` dependency;
 this package does not have a separate `jax` extra.
 
-### Conda alternative
-
-CadQuery can instead be installed from Conda Forge using the supplied
-environment file:
-
-```bash
-conda env create -f environment.yaml
-conda activate turbo_moc_env
-poetry install --with dev
-```
-
-In this setup, Conda provides Python, pip, and CadQuery. Poetry installs TurboMoC
-and all remaining runtime and development dependencies from `pyproject.toml`.
-
 ## Building the documentation
 
 Run these commands from the repository root:
 
 ```bash
-poetry install --with dev
+poetry install --with dev --extras cad
 poetry run python docs/build_docs.py
 ```
 

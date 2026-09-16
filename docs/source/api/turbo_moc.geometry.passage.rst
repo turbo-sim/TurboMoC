@@ -1,5 +1,5 @@
-turbo_moc.geometry.passage module
-=================================
+turbo\_moc.geometry.passage module
+==================================
 
 .. automodule:: turbo_moc.geometry.passage
    :members:

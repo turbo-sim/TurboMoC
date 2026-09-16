@@ -1,5 +1,5 @@
-turbo_moc.progress module
-=========================
+turbo\_moc.progress module
+==========================
 
 .. automodule:: turbo_moc.progress
    :members:

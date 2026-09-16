@@ -1,5 +1,5 @@
-turbo_moc.geometry.spline\_tool module
-======================================
+turbo\_moc.geometry.spline\_tool module
+=======================================
 
 .. automodule:: turbo_moc.geometry.spline_tool
    :members:

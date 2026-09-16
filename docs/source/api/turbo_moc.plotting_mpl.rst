@@ -1,5 +1,5 @@
-turbo_moc.plotting\_mpl module
-==============================
+turbo\_moc.plotting\_mpl module
+===============================
 
 .. automodule:: turbo_moc.plotting_mpl
    :members:

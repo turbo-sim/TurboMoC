@@ -1,5 +1,5 @@
-turbo_moc.geometry.blade module
-===============================
+turbo\_moc.geometry.blade module
+================================
 
 .. automodule:: turbo_moc.geometry.blade
    :members:

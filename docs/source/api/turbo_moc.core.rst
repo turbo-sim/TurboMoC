@@ -1,5 +1,5 @@
-turbo_moc.core package
-======================
+turbo\_moc.core package
+=======================
 
 .. automodule:: turbo_moc.core
    :members:

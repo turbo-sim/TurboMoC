@@ -11,7 +11,8 @@ stator_design
 rotor_design
 ```
 
-Run these examples from the repository root after installing the package:
+Follow the [source installation instructions](../getting_started.md#install-from-source-with-poetry),
+then run these examples from the repository root:
 
 ```bash
 poetry run python examples/nozzle_design.py

@@ -1,5 +1,5 @@
-turbo_moc.geometry.radial module
-================================
+turbo\_moc.geometry.radial module
+=================================
 
 .. automodule:: turbo_moc.geometry.radial
    :members:

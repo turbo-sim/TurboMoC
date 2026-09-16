@@ -1,5 +1,5 @@
-turbo_moc.app module
-====================
+turbo\_moc.app module
+=====================
 
 .. automodule:: turbo_moc.app
    :members:

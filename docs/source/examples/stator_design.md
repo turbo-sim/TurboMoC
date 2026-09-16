@@ -29,7 +29,7 @@ at the calculated pitch; `n_blades` changes only the display.
 
 ## Run and inspect the script
 
-Run from the repository root after following the [installation instructions](../developer_guide.md#installation-for-developers):
+Run from the repository root after following the [source installation instructions](../getting_started.md#install-from-source-with-poetry):
 
 ```bash
 poetry run python examples/stator_design.py

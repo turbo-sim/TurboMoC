@@ -63,6 +63,11 @@ def jax_solve_critical_state(fluid, h0, s0, mach_tol=0.05):
     P0_guess = stagnation_state["p"]
 
     lower = 0.05 * P0_guess
+    # Liquid/two-phase isentropes cannot be evaluated below the triple point.
+    triple_liquid = fluid.fluid.triple_point_liquid
+    triple_vapor = fluid.fluid.triple_point_vapor
+    if triple_liquid.s <= s0 <= triple_vapor.s:
+        lower = max(lower, triple_liquid.p * (1.0 + 1e-6))
     upper = 0.999 * P0_guess
 
     def flashing_fallback():

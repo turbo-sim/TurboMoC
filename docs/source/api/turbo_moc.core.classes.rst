@@ -1,5 +1,5 @@
-turbo_moc.core.classes module
-=============================
+turbo\_moc.core.classes module
+==============================
 
 .. automodule:: turbo_moc.core.classes
    :members:

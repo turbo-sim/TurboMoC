@@ -1,5 +1,5 @@
-turbo_moc.solvers package
-=========================
+turbo\_moc.solvers package
+==========================
 
 .. automodule:: turbo_moc.solvers
    :members:

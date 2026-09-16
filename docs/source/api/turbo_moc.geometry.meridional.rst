@@ -1,5 +1,5 @@
-turbo_moc.geometry.meridional module
-====================================
+turbo\_moc.geometry.meridional module
+=====================================
 
 .. automodule:: turbo_moc.geometry.meridional
    :members:

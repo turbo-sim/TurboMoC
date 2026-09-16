@@ -1,5 +1,5 @@
-turbo_moc.solvers.mln module
-============================
+turbo\_moc.solvers.mln module
+=============================
 
 .. automodule:: turbo_moc.solvers.mln
    :members:

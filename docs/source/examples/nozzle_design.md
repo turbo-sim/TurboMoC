@@ -22,7 +22,7 @@ before plotting or exporting the wall.
 
 ## Run and inspect the script
 
-Run from the repository root after following the [installation instructions](../developer_guide.md#installation-for-developers):
+Run from the repository root after following the [source installation instructions](../getting_started.md#install-from-source-with-poetry):
 
 ```bash
 poetry run python examples/nozzle_design.py
