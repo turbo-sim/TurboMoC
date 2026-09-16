@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "turbo_moc"
-version = "0.1.0"
+version = "1.0.0"
 description = "Method of Characteristics solvers for two-phase and single-phase nozzle/stator design (minimum-length and conventional/arc-flashing variants)."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
