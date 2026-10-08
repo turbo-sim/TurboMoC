@@ -49,13 +49,9 @@ For a Poetry source installation, prefix this command with `poetry run`.
 
 ## Design a nozzle
 
-The public `design_nozzle` function accepts ordinary Python values and returns a
-flat dictionary suitable for serialization and plotting.
+The public `design_nozzle` function accepts ordinary Python values and returns a flat dictionary suitable for serialization and plotting.
 
-The conditions below are representative of a transcritical CO₂ heat pump: the
-nozzle expands CO₂ from a gas-cooler outlet at 35 °C and 1.2 times the critical
-pressure (about 88.5 bar) to the saturation pressure at an evaporation temperature
-of 5 °C (about 39.7 bar).
+The conditions below are representative of a transcritical CO₂ heat pump: the nozzle expands CO₂ from a gas-cooler outlet at 35 °C and 1.2 times the critical pressure (about 88.5 bar) to the saturation pressure at an evaporation temperature of 5 °C (about 39.7 bar).
 
 ```python
 import jaxprop as jxp
