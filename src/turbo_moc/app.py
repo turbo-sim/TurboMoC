@@ -38,7 +38,9 @@ import io
 import json
 import os
 import tempfile
+import zipfile
 from datetime import datetime
+from pathlib import Path
 
 import diskcache
 import dash
@@ -50,16 +52,32 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 import jaxprop as jxp
 
+try:
+    # Must be imported at module load (before the Dash server starts), not
+    # lazily inside a callback: Dash only registers a component library's
+    # JS/CSS assets into the page if the module has been imported by the
+    # time the layout is first served. An import deferred to callback time
+    # (the pattern used for cadquery, which needs no such registration)
+    # left the browser with no idea how to render a dash_vtk.View at all --
+    # "Callback error updating sizing-vtk-container.children" with no
+    # Python-side traceback, since the failure is purely on the frontend.
+    import dash_vtk
+    from dash_vtk.utils import to_mesh_state
+    DASH_VTK_AVAILABLE = True
+except ImportError:
+    DASH_VTK_AVAILABLE = False
+
 import turbo_moc
 from turbo_moc import design_nozzle, list_supported_fluids, make_progress_reporter, NozzleDesignError
 from turbo_moc.core.classes import build_convergent_inlet
+from turbo_moc.coupling import derive_rotor_inlet_from_stator
 from turbo_moc.geometry import (
-    build_meridional_view,
     move_control_point_along_normal,
     parametrize_stator_blade,
     parametrize_stator_blade_semi,
-    wrap_blade_radial,
-    wrap_rotor_blade_radial,
+    size_rotor_from_pitch,
+    size_stator_mode_a,
+    size_stator_mode_b,
 )
 from turbo_moc.rotor import design_rotor_vortex_blade
 
@@ -72,19 +90,17 @@ BLADE_PARAM_FUNCS = {
 # Plotly one (display) and the matplotlib one + filename base (download).
 # Adding a new plot tab only means adding one entry to each of these three.
 TAB_LABELS = {
-    "contour": "Nozzle contour", "mesh": "Characteristics mesh",
+    "mesh": "Nozzle contour",
     "axis": "Axis properties", "wall": "Wall properties", "ts": "T-s diagram",
 }
 PLOT_FUNCS_PLOTLY = {
-    "contour": turbo_moc.plotly.plot_nozzle_contour,
     "mesh": turbo_moc.plotly.plot_characteristics_mesh,
     "axis": turbo_moc.plotly.plot_axis_properties,
     "wall": turbo_moc.plotly.plot_wall_properties,
     "ts": turbo_moc.plotly.plot_ts_diagram,
 }
 PLOT_FUNCS_MPL = {
-    "contour": (turbo_moc.mpl.plot_nozzle_contour, "nozzle_contour"),
-    "mesh": (turbo_moc.mpl.plot_characteristics_mesh, "characteristics_mesh"),
+    "mesh": (turbo_moc.mpl.plot_characteristics_mesh, "nozzle_contour_mesh"),
     "axis": (turbo_moc.mpl.plot_axis_properties, "axis_properties"),
     "wall": (turbo_moc.mpl.plot_wall_properties, "wall_properties"),
     "ts": (turbo_moc.mpl.plot_ts_diagram, "ts_diagram"),
@@ -95,16 +111,29 @@ cache = diskcache.Cache("./.turbo_moc_app_cache")
 background_callback_manager = dash.DiskcacheManager(cache)
 
 app = Dash(__name__, background_callback_manager=background_callback_manager)
-app.title = "TurboMoC Nozzle Design"
+app.title = "TurboMoC"
 server = app.server  # WSGI app, for gunicorn (matches turbodash's Procfile convention)
 
 FLUIDS = list_supported_fluids()
-DEFAULT_FLUID = "Nitrogen" if "Nitrogen" in FLUIDS else FLUIDS[0]
+DEFAULT_FLUID = "Novec649" if "Novec649" in FLUIDS else FLUIDS[0]
 
 DEFAULTS = dict(
     # P0/p_back are in bar (UI + save/load convention) -- converted to Pa
-    # only at the design_nozzle() call boundary in run_design.
-    P0=20.0, T0=113.0, Q0=0.5, p_back=2.0,
+    # only at the design_nozzle() call boundary in run_design. Novec649
+    # stator inlet/exit from the meanline design (Parisi, EMPOWER_DTU
+    # design_turbine/meanline/Novec649.yaml) RECOMPUTED with
+    # degree_reaction=0 (pure impulse) instead of the file's own 0.25 --
+    # the 0.25 case leaves the rotor inlet barely SUBSONIC (M_rel=0.999),
+    # unusable by this tool's supersonic vortex-flow rotor method; zero
+    # reaction pushes the whole enthalpy drop into the stator, giving
+    # M_rel=1.14-1.19 (confirmed both in turbodash's own recompute and
+    # through this tool's full nozzle+blade+coupling pipeline). P0/Q0 are
+    # unchanged by degree_reaction (784351.18 Pa, 0.15); p_back is this
+    # recompute's own stator EXIT static pressure (flow_stations[2].p =
+    # 130884.61 Pa, alpha=70 deg) -- NOT the turbine/condenser exit
+    # pressure. Confirmed converging and reproducing the recompute's own
+    # stator-exit Mach (1.726) to 4 significant figures.
+    P0=7.8435, T0=397.6290, Q0=0.15, p_back=1.3088,
     y_t=0.01, n=15, rho_d=0.1,
 )
 
@@ -156,6 +185,17 @@ def make_table(data, columns):
     )
 
 
+def _vtk_placeholder(message):
+    """Centered gray message inside the Phase 3 VTK container, standing in
+    for a dash_vtk.View before a sizing result exists (or if dash-vtk/
+    cadquery aren't installed) -- never leave the container visually empty
+    with no explanation."""
+    return html.Div(message, style={"display": "flex", "alignItems": "center",
+                                      "justifyContent": "center", "height": "100%",
+                                      "color": "#888", "fontSize": "13px", "padding": "16px",
+                                      "textAlign": "center"})
+
+
 controls = html.Div(
     [
         html.Div(
@@ -183,13 +223,13 @@ controls = html.Div(
                 {"label": " Subcooled liquid / single-phase (P0, T0)", "value": "T0"},
                 {"label": " Saturated two-phase (P0, Q0)", "value": "Q0"},
             ],
-            value="T0",
+            value="Q0",
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
         _field(r"$P_0$ (bar)", "P0", DEFAULTS["P0"]),
-        html.Div(_field(r"$T_0$ (K)", "T0", DEFAULTS["T0"]), id="T0_container"),
+        html.Div(_field(r"$T_0$ (K)", "T0", DEFAULTS["T0"]), id="T0_container", style={"display": "none"}),
         html.Div(_field(r"$Q_0$ (-)", "Q0", DEFAULTS["Q0"], min=0, max=1),
-                 id="Q0_container", style={"display": "none"}),
+                 id="Q0_container"),
 
         html.H4("Design target"),
         _field(r"$p_{\text{back}}$ (bar)", "p_back", DEFAULTS["p_back"]),
@@ -212,7 +252,7 @@ controls = html.Div(
                 {"label": " Linear", "value": "flat"},
                 {"label": " Parabolic (Sauer line)", "value": "sauer"},
             ],
-            value="flat",
+            value="sauer",
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
 
@@ -259,7 +299,7 @@ plots = html.Div(
                 dcc.Dropdown(
                     id="plot-select",
                     options=[{"label": TAB_LABELS[key], "value": key} for key in TAB_LABELS],
-                    value="contour", clearable=False,
+                    value="mesh", clearable=False,
                     style={"width": "180px", "display": "inline-block", "verticalAlign": "middle"},
                 ),
                 dcc.Dropdown(
@@ -304,7 +344,7 @@ plots = html.Div(
 # Phase 2: stator blade parametrization (consumes Phase 1's wall_final)
 # --------------------------------------------------------------------------
 BLADE_DEFAULTS = dict(
-    metal_angle_in=0.0, metal_angle_out=70.0, r_trailing=0.5,
+    metal_angle_in=0.0, metal_angle_out=70.0, r_trailing=0.1143,
     inlet_opening_ratio=1.5, n_cp=30,
 )
 
@@ -326,6 +366,12 @@ blade_controls = html.Div(
         _field(r"$s / o_1$ (pitch / inlet opening)", "inlet_opening_ratio",
                BLADE_DEFAULTS["inlet_opening_ratio"]),
         _field(r"$n_{cp}$ (B-spline control points)", "n_cp", BLADE_DEFAULTS["n_cp"], step=1, min=6),
+        dcc.Checklist(
+            id="blade_mirror",
+            options=[{"label": " Mirror (flip concavity)", "value": "on"}],
+            value=[],
+            labelStyle={"fontSize": "13px"},
+        ),
 
         html.Button("Compute blade", id="compute-blade-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px",
@@ -383,11 +429,6 @@ blade_controls = html.Div(
         html.Div(
             id="step-export-passage-fields",
             children=[
-                html.Div(
-                    "One blade-to-blade flow channel (pitch band minus the "
-                    "blade solid), for periodic-BC CFD meshing.",
-                    style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
-                ),
                 _field(r"Inlet distance ($\times$ chord)",
                        "passage_stator_inlet_chords", 1.0, step=0.5, min=0),
                 _field(r"Outlet distance ($\times$ chord)",
@@ -435,7 +476,87 @@ blade_plots = html.Div(
 )
 
 # --------------------------------------------------------------------------
-# Phase 3: rotor blade design by the vortex-flow method (standalone --
+# Phase 3: stator sizing -- couples the Phase 2 2D cascade blade (a
+# reference shape) to a real annulus + mass-flow target, producing an
+# actual sized stator (r_hub, r_shroud, N_blades, rescaled blade). Pure
+# post-hoc rescaling of the Phase 2 result -- never re-invokes design_nozzle
+# at a different y_t (see turbo_moc.geometry.sizing module docstring).
+# --------------------------------------------------------------------------
+SIZING_DEFAULTS = dict(
+    # Novec649 meanline design (Parisi, EMPOWER_DTU), recomputed with
+    # degree_reaction=0 (see DEFAULTS' own comment) -- stator radius_in,
+    # height, blade_count, mass_flow_rate (unaffected by degree_reaction).
+    mdot_a=0.52353, n_blades_a=15, r_hub_a=13.391,
+    r_hub_b=13.391, H_b=2.9367, n_blades_b=15, mdot_b=0.52353,
+)
+
+sizing_controls = html.Div(
+    [
+        html.H4("Stator sizing"),
+        dcc.RadioItems(
+            id="sizing_mode",
+            options=[
+                {"label": " Case A (cycle-level: mass flow target)", "value": "A"},
+                {"label": " Case B (full meanline: all given)", "value": "B"},
+            ],
+            value="A",
+            labelStyle={"display": "block", "fontSize": "13px"},
+        ),
+        html.Div(
+            id="sizing_mode_a_fields",
+            children=[
+                _field(r"$\dot{m}$ (kg/s)", "sizing_mdot_a", SIZING_DEFAULTS["mdot_a"]),
+                _field(r"$N_{\text{blades}}$", "sizing_n_blades_a", SIZING_DEFAULTS["n_blades_a"], step=1, min=1),
+                _field(r"$r_{\text{hub}}$ (mm)", "sizing_r_hub_a", SIZING_DEFAULTS["r_hub_a"]),
+            ],
+        ),
+        html.Div(
+            id="sizing_mode_b_fields",
+            children=[
+                _field(r"$r_{\text{hub}}$ (mm)", "sizing_r_hub_b", SIZING_DEFAULTS["r_hub_b"]),
+                _field(r"$H$ (blade height, mm)", "sizing_H_b", SIZING_DEFAULTS["H_b"]),
+                _field(r"$N_{\text{blades}}$", "sizing_n_blades_b", SIZING_DEFAULTS["n_blades_b"], step=1, min=1),
+                _field(r"$\dot{m}$ (kg/s)", "sizing_mdot_b", SIZING_DEFAULTS["mdot_b"]),
+            ],
+            style={"display": "none"},
+        ),
+        html.Button("Compute sizing", id="compute-sizing-btn", n_clicks=0,
+                     style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                            "fontWeight": "600"}),
+        html.Div(id="sizing-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+
+        html.H4("Export", style={"marginTop": "16px"}),
+        html.Button("Download scaled blade (JSON)", id="download-sizing-json-btn", n_clicks=0,
+                     style={"width": "100%", "padding": "8px"}),
+        dcc.Download(id="download-sizing-json"),
+        html.Button("Download blade solid (STEP)", id="download-sizing-step-btn", n_clicks=0,
+                     style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+        dcc.Download(id="download-sizing-step"),
+        html.Div(id="sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
+    ],
+    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+           "overflowY": "auto"},
+)
+
+sizing_plots = html.Div(
+    [
+        dcc.Loading(
+            type="circle",
+            children=html.Div(
+                id="sizing-vtk-container",
+                children=_vtk_placeholder("Compute a sizing (Case A or B) to see the 3D solid preview."),
+                style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                       "borderRadius": "4px"},
+            ),
+        ),
+        html.Div(id="sizing-info-table", style={"marginTop": "12px"}),
+    ],
+    style={"flex": "1", "padding": "16px"},
+)
+
+
+# --------------------------------------------------------------------------
+# Phase 4: rotor blade design by the vortex-flow method (standalone --
 # doesn't consume Phase 1's output, has its own fluid/inlet state)
 # --------------------------------------------------------------------------
 ROTOR_DEFAULTS = dict(
@@ -449,6 +570,18 @@ rotor_controls = html.Div(
         html.H4("Rotor blade (vortex-flow method)"),
         dcc.Dropdown(id="rotor_fluid_name", options=FLUIDS, value=DEFAULT_FLUID, clearable=False),
         html.Br(),
+
+        html.H4("Couple to stator exit", style={"marginTop": "16px"}),
+        dcc.Checklist(
+            id="couple_to_stator",
+            options=[{"label": " Couple to stator exit", "value": "on"}],
+            value=[],
+            labelStyle={"fontSize": "13px"},
+        ),
+        _field(r"$\Omega$ (RPM)", "rotor_omega", 20716.71),
+        _field(r"$r$ (mm, blade-speed radius)", "rotor_radius_mm", 21.685),
+        html.Div(id="rotor-triangle-status", style={"fontSize": "12px"}),
+
         _field(r"$P_0$ (Pa)", "rotor_P0", ROTOR_DEFAULTS["P0_rel"]),
         _field(r"$T_0$ (K)", "rotor_T0", ROTOR_DEFAULTS["T0_rel"]),
 
@@ -523,281 +656,52 @@ rotor_plots = html.Div(
     style={"flex": "1", "padding": "16px"},
 )
 
+
 # --------------------------------------------------------------------------
-# Phase 4: combined stator + rotor cascade view (consumes Phase 2's and
-# Phase 3's stores -- doesn't recompute anything, just lays both rows of
-# blades out together). Stator is in mm (Phase 2's own units); rotor is in
-# r* by default (nondimensional) -- rotor_scale converts r* -> mm so the
-# two rows can share one plot, and rotor_x/y_offset position the rotor row
-# relative to the stator row (axial gap + any vertical stagger). rotor_shift
-# is a fraction of the ROTOR's own pitch -- sliding it sweeps one rotor
-# blade past the stator passage, the simplest way to look at the relative
-# (unsteady) stator/rotor position without an actual time-accurate solve.
+# Phase 5: 3D rotor design -- the rotor's twin of Phase 3: couples the
+# Phase 4 2D rotor blade (nondimensional-by-r* reference shape) to the SAME
+# annulus as the stator (r_hub/r_shroud reused from Phase 3's own sizing
+# result -- one through-flow passage in an axial stage), with its own free
+# N_blades (generally different from the stator's). Unlike the stator,
+# there's no mass-flow equation at this 2D-cascade level for the rotor
+# method, so k is derived from pitch consistency alone (see
+# turbo_moc.geometry.sizing.size_rotor_from_pitch).
 # --------------------------------------------------------------------------
-# --------------------------------------------------------------------------
-# Flare (meridional view + flared STEP export) -- an OPTIONAL section
-# embedded into both Phase 4 (axial/unrolled) and Phase 5 (radial/
-# conformal), not a standalone phase, since it's a property of the stage
-# either view is already showing, not a separate design step. Built once
-# as _flare_controls(prefix)/_flare_plot(prefix) and registered twice (see
-# _register_flare_callbacks below) with distinct ID prefixes ("cascade"
-# for Phase 4, "radial" for Phase 5) so both copies coexist in the same
-# page. Both the meridional sketch and the flared STEP solid read the SAME
-# hub/tip radii fields (see turbo_moc/geometry/meridional.py's module docstring
-# for why) -- they can never disagree with each other.
-# --------------------------------------------------------------------------
-def _flare_controls(prefix, scale_input_id=None, gap_input_id=None):
-    """scale_input_id/gap_input_id: when given, this prefix's flare panel
-    reuses that OTHER (already-on-screen) control instead of rendering its
-    own independent rotor-scale/axial-gap field -- geometry the flare view
-    shares with the cascade/radial view it's embedded next to must stay
-    single-sourced, not editable twice with no guarantee the two numbers
-    agree."""
-    rotor_fields = [
-        _field(r"$r_{\text{hub,in}}$", f"{prefix}_rotor_r_hub_in", 145.0),
-        _field(r"$r_{\text{hub,out}}$", f"{prefix}_rotor_r_hub_out", 148.0),
-        _field(r"$r_{\text{tip,in}}$", f"{prefix}_rotor_r_tip_in", 188.0),
-        _field(r"$r_{\text{tip,out}}$", f"{prefix}_rotor_r_tip_out", 185.0),
-    ]
-    if scale_input_id is None:
-        rotor_fields.append(_field(r"$s_{\text{rotor}}$ (mm per r*)",
-                                     f"{prefix}_flare_rotor_scale", 50.0))
-    extra_fields = []
-    if gap_input_id is None:
-        extra_fields.append(_field(r"$\Delta z_{\text{gap}}$ (mm)", f"{prefix}_flare_gap", 5.0))
+ROTOR_SIZING_DEFAULTS = dict(n_blades=34)  # EMPOWER_DTU Novec649 meanline rotor blade_count
 
-    return html.Div(
-        [
-            html.H4("Flare (meridional)", style={"marginTop": "16px"}),
-            dcc.Checklist(
-                id=f"{prefix}_flare_enable",
-                options=[{"label": " Enable", "value": "on"}],
-                value=[],
-            ),
-            html.Div(
-                id=f"{prefix}_flare_fields",
-                children=[
-                    html.H4("Stator radii (mm)", style={"marginTop": "12px"}),
-                    _field(r"$r_{\text{hub,in}}$", f"{prefix}_stator_r_hub_in", 140.0),
-                    _field(r"$r_{\text{hub,out}}$", f"{prefix}_stator_r_hub_out", 145.0),
-                    _field(r"$r_{\text{tip,in}}$", f"{prefix}_stator_r_tip_in", 190.0),
-                    _field(r"$r_{\text{tip,out}}$", f"{prefix}_stator_r_tip_out", 188.0),
-
-                    html.H4("Rotor radii (mm)", style={"marginTop": "12px"}),
-                    *rotor_fields,
-                    *extra_fields,
-
-                    html.H4("Flared STEP export", style={"marginTop": "12px"}),
-                    html.Button("Download flared stator STEP", id=f"{prefix}_download_flared_stator_btn",
-                                 n_clicks=0, style={"width": "100%", "padding": "6px", "marginBottom": "6px"}),
-                    html.Button("Download flared rotor STEP", id=f"{prefix}_download_flared_rotor_btn",
-                                 n_clicks=0, style={"width": "100%", "padding": "6px"}),
-                    dcc.Download(id=f"{prefix}_download_flared_stator"),
-                    dcc.Download(id=f"{prefix}_download_flared_rotor"),
-                    html.Div(id=f"{prefix}_flared_step_status", style={"marginTop": "8px", "fontSize": "13px"}),
-                ],
-                style={"display": "none"},
-            ),
-        ],
-    )
-
-
-def _flare_plot(prefix, height="380px"):
-    return dcc.Graph(id=f"fig-{prefix}-meridional", config={"displaylogo": False},
-                       style={"height": height, "flex": "1"})
-
-cascade_controls = html.Div(
+rotor_sizing_controls = html.Div(
     [
-        html.H4("Stator + rotor cascade"),
-        _field(r"$N_{\text{stator}}$", "n_stator_blades", 4, step=1, min=1),
-        _field(r"$N_{\text{rotor}}$", "n_rotor_blades", 4, step=1, min=1),
-
-        html.H4("Rotor placement", style={"marginTop": "16px"}),
-        _field(r"$s_{\text{rotor}}$ (mm per r*)", "rotor_scale_mm", 50.0),
-        _field(r"$\Delta z_{\text{gap}}$ (mm, stator TE to rotor LE)", "rotor_axial_gap", 5.0),
-        dcc.RadioItems(
-            id="rotor_downstream_direction",
-            options=[
-                {"label": " Below (-y)", "value": "below"},
-                {"label": " Above (+y)", "value": "above"},
-            ],
-            value="below",
-            labelStyle={"display": "inline-block", "marginRight": "12px", "fontSize": "13px"},
-        ),
-        _field(r"$\Delta x_{\text{rotor}}$ (mm)", "rotor_lateral_offset", 0.0),
-
-        html.H4("Relative position", style={"marginTop": "16px"}),
-        html.Div("Slide the rotor row by a fraction of its own pitch:",
-                  style={"fontSize": "12px", "marginBottom": "4px"}),
-        dcc.Slider(id="rotor_shift", min=0, max=1, step=0.01, value=0,
-                    marks={0: "0", 0.25: "0.25", 0.5: "0.5", 0.75: "0.75", 1: "1"},
-                    tooltip={"placement": "bottom", "always_visible": False}),
-
-        _flare_controls("cascade", scale_input_id="rotor_scale_mm", gap_input_id="rotor_axial_gap"),
-
-        html.H4("Periodic passage (2D, for CFD)", style={"marginTop": "16px"}),
-        html.Div(
-            "One blade-to-blade flow channel (pitch band minus the blade "
-            "solid), for periodic-BC CFD meshing.",
-            style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
-        ),
-        dcc.Checklist(
-            id="passage_show",
-            options=[
-                {"label": " Show stator passage", "value": "stator"},
-                {"label": " Show rotor passage", "value": "rotor"},
-            ],
-            value=[],
-            labelStyle={"display": "block", "fontSize": "13px"},
-        ),
-        # Stator inlet/outlet-distance fields (passage_stator_inlet_chords /
-        # passage_stator_outlet_chords) now live in Phase 2's CAD export
-        # section (its "Fluid domain (passage)" export target) -- the
-        # preview trace below still reads them by id regardless of which
-        # tab they're rendered under, so moving them doesn't touch this
-        # callback at all, and there's exactly one place to set them for
-        # both the preview and the actual STEP export (never two numbers
-        # that could disagree).
-        _field(r"Rotor inlet distance ($\times$ chord)",
-               "passage_rotor_inlet_chords", 1.0, step=0.5, min=0),
-        _field(r"Rotor outlet distance ($\times$ chord)",
-               "passage_rotor_outlet_chords", 6.0, step=0.5, min=0),
-        _field(r"Stator passage shift (pitches)", "passage_stator_shift", 0, step=1),
-        _field(r"Rotor passage shift (pitches)", "passage_rotor_shift", -4, step=1),
-        html.Button("Download rotor passage STEP", id="download-passage-rotor-btn",
-                     n_clicks=0, style={"width": "100%", "padding": "6px"}),
-        dcc.Download(id="download-passage-rotor"),
-        html.Div(id="passage-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
-    ],
-    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
-           "overflowY": "auto"},
-)
-
-cascade_plots = html.Div(
-    [
-        html.Div(
-            [
-                dcc.Graph(id="fig-cascade", config={"displaylogo": False},
-                           style={"height": "380px", "flex": "2"}),
-                _flare_plot("cascade"),
-            ],
-            style={"display": "flex", "flexDirection": "row", "gap": "12px", "alignItems": "flex-start"},
-        ),
-        html.Div(id="cascade-status-message", style={"width": "50%"}),
-    ],
-    style={"flex": "1", "padding": "16px"},
-)
-
-# --------------------------------------------------------------------------
-# Phase 5: conformal (log-spiral) radial wrap of an unrolled axial blade --
-# either Phase 2's stator or Phase 3's rotor -- onto an annular passage
-# between two radii. See turbo_moc/geometry/radial.py's module docstring for the
-# mapping itself, and for why stator/rotor need separate wrap functions
-# (their own local (x,y) frames put "chordwise" on opposite axes).
-# --------------------------------------------------------------------------
-radial_controls = html.Div(
-    [
-        html.H4("Radial (conformal) wrap"),
-        dcc.RadioItems(
-            id="radial-source",
-            options=[
-                {"label": " Stator (Phase 2)", "value": "stator"},
-                {"label": " Rotor (Phase 3)", "value": "rotor"},
-                {"label": " Both (stator + rotor)", "value": "both"},
-            ],
-            value="stator",
-            labelStyle={"display": "block", "fontSize": "13px"},
-        ),
-        html.Div(id="radial-rotor-scale-container", children=[
-            _field(r"$s_{\text{rotor}}$ (mm per r*, if Phase 3 is nondim.)",
-                   "radial_rotor_scale", 50.0),
-        ], style={"display": "none"}),
-
-        html.Div(id="radial-single-radii-container", children=[
-            _field(r"$r_1$ (mm)", "radial_r1", 140.0),
-            _field(r"$r_2$ (mm)", "radial_r2", 190.0),
-        ]),
-        _field(r"$N_{\text{blades}}$", "radial_n_blades", 12, step=1, min=1),
-        _field(r"$\theta_0$ (deg)", "radial_theta0", 0.0),
-
-        html.Div(id="radial-both-container", children=[
-            html.H4("Coupled stator + rotor radii", style={"marginTop": "16px"}),
-            _field(r"$r_{\text{stator,in}}$ (mm)", "radial_r_stator_in", 140.0),
-            _field(r"$r_{\text{interface}}$ (mm)", "radial_r_interface", 165.0),
-            _field(r"$\Delta r_{\text{gap}}$ (mm)", "radial_gap", 2.0, min=0),
-            _field(r"$r_{\text{rotor,out}}$ (mm)", "radial_r_rotor_out", 190.0),
-            html.H4("Rotor (2nd row)", style={"marginTop": "16px"}),
-            _field(r"$N_{\text{rotor}}$", "radial_n_blades_rotor", 12, step=1, min=1),
-            _field(r"$\theta_{0,\text{rotor}}$ (deg)", "radial_theta0_rotor", 0.0),
-        ], style={"display": "none"}),
-
-        html.Button("Compute radial wrap", id="compute-radial-btn", n_clicks=0,
+        html.H4("3D rotor design"),
+        html.Div(id="rotor-sizing-annulus-readout", style={"fontSize": "12px", "marginBottom": "8px"}),
+        _field(r"$N_{\text{blades}}$ (rotor)", "rotor_sizing_n_blades",
+               ROTOR_SIZING_DEFAULTS["n_blades"], step=1, min=1),
+        html.Button("Compute sizing", id="compute-rotor-sizing-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px",
                             "fontWeight": "600"}),
-        html.Div(id="radial-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+        html.Div(id="rotor-sizing-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
 
-        _flare_controls("radial", scale_input_id="radial_rotor_scale"),
-
-        html.H4("Periodic passage (radial, for CFD)", style={"marginTop": "16px"}),
-        html.Div(
-            "Conformally maps the same periodic passage domain as Phase "
-            "4's axial one (turbo_moc.geometry.radial's log-spiral wrap) onto "
-            "an annular passage between two radii. Inlet/outlet distance "
-            "and bend margins are shared with Phase 4's own passage "
-            "fields.",
-            style={"fontSize": "12px", "color": "#666", "marginBottom": "6px"},
-        ),
-        dcc.Checklist(
-            id="passage_radial_show",
-            options=[
-                {"label": " Show stator passage", "value": "stator"},
-                {"label": " Show rotor passage", "value": "rotor"},
-            ],
-            value=[],
-            labelStyle={"display": "block", "fontSize": "13px"},
-        ),
-        _field(r"$r_1$ (mm, stator)", "passage_radial_stator_r1", 140.0),
-        _field(r"$r_2$ (mm, stator)", "passage_radial_stator_r2", 190.0),
-        html.Button("Download stator radial passage STEP", id="download-radial-passage-stator-btn",
-                     n_clicks=0, style={"width": "100%", "padding": "6px", "marginBottom": "6px"}),
-        _field(r"$r_1$ (mm, rotor)", "passage_radial_rotor_r1", 145.0),
-        _field(r"$r_2$ (mm, rotor)", "passage_radial_rotor_r2", 188.0),
-        html.Button("Download rotor radial passage STEP", id="download-radial-passage-rotor-btn",
-                     n_clicks=0, style={"width": "100%", "padding": "6px"}),
-        dcc.Download(id="download-radial-passage-stator"),
-        dcc.Download(id="download-radial-passage-rotor"),
-        html.Div(id="radial-passage-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+        html.H4("Export", style={"marginTop": "16px"}),
+        html.Button("Download blade solid (STEP)", id="download-rotor-sizing-step-btn", n_clicks=0,
+                     style={"width": "100%", "padding": "8px"}),
+        dcc.Download(id="download-rotor-sizing-step"),
+        html.Div(id="rotor-sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
     ],
     style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
 )
 
-radial_plots = html.Div(
+rotor_sizing_plots = html.Div(
     [
-        html.Div(
-            [
-                html.Label("Save format:", style={"fontSize": "13px", "marginRight": "6px"}),
-                dcc.Dropdown(
-                    id="radial-save-format",
-                    options=[{"label": fmt.upper(), "value": fmt} for fmt in ("png", "svg", "pdf")],
-                    value="png", clearable=False,
-                    style={"width": "100px", "display": "inline-block", "verticalAlign": "middle"},
-                ),
-                html.Button("Download this plot", id="radial-download-btn", n_clicks=0,
-                             style={"marginLeft": "12px", "padding": "6px 12px"}),
-                dcc.Download(id="download-radial-plot"),
-            ],
-            style={"display": "flex", "alignItems": "center", "marginBottom": "8px"},
+        dcc.Loading(
+            type="circle",
+            children=html.Div(
+                id="rotor-sizing-vtk-container",
+                children=_vtk_placeholder("Compute a sizing to see the 3D solid preview."),
+                style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                       "borderRadius": "4px"},
+            ),
         ),
-        html.Div(
-            [
-                dcc.Graph(id="fig-radial", config={"displaylogo": False},
-                           style={"height": "380px", "flex": "1"}),
-                _flare_plot("radial"),
-            ],
-            style={"display": "flex", "flexDirection": "row", "gap": "12px", "alignItems": "flex-start"},
-        ),
-        html.Div(id="radial-info-table"),
+        html.Div(id="rotor-sizing-info-table", style={"marginTop": "12px"}),
     ],
     style={"flex": "1", "padding": "16px"},
 )
@@ -805,7 +709,7 @@ radial_plots = html.Div(
 
 app.layout = html.Div(
     [
-        html.H2("TurboMoC Nozzle & Stator Design", style={"padding": "16px 16px 0 16px"}),
+        html.H2("TurboMoC", style={"padding": "16px 16px 0 16px"}),
         dcc.Tabs(
             id="phase-tabs",
             value="phase1",
@@ -814,12 +718,12 @@ app.layout = html.Div(
                          children=html.Div([controls, plots], style={"display": "flex"})),
                 dcc.Tab(label="Phase 2: Stator blade", value="phase2",
                          children=html.Div([blade_controls, blade_plots], style={"display": "flex"})),
-                dcc.Tab(label="Phase 3: Rotor blade (vortex-flow)", value="phase3",
+                dcc.Tab(label="Phase 3: Stator sizing", value="phase3_sizing",
+                         children=html.Div([sizing_controls, sizing_plots], style={"display": "flex"})),
+                dcc.Tab(label="Phase 4: 2D rotor design", value="phase3",
                          children=html.Div([rotor_controls, rotor_plots], style={"display": "flex"})),
-                dcc.Tab(label="Phase 4: Stator + rotor cascade", value="phase4",
-                         children=html.Div([cascade_controls, cascade_plots], style={"display": "flex"})),
-                dcc.Tab(label="Phase 5: Radial (conformal) wrap", value="phase5",
-                         children=html.Div([radial_controls, radial_plots], style={"display": "flex"})),
+                dcc.Tab(label="Phase 5: 3D rotor design", value="phase5_sizing",
+                         children=html.Div([rotor_sizing_controls, rotor_sizing_plots], style={"display": "flex"})),
             ],
         ),
         dcc.Store(id="result-store"),
@@ -828,10 +732,10 @@ app.layout = html.Div(
         dcc.Store(id="blade-store"),
         dcc.Store(id="blade-edited-store"),
         dcc.Store(id="blade-reference-store"),
+        dcc.Store(id="stator-sizing-store"),
         dcc.Store(id="rotor-store"),
         dcc.Store(id="rotor-reference-store"),
-        dcc.Store(id="radial-store"),
-        dcc.Store(id="cascade-zrange-store"),
+        dcc.Store(id="rotor-sizing-store"),
     ],
     style={"fontFamily": "Helvetica, Arial, sans-serif"},
 )
@@ -1120,10 +1024,11 @@ def download_wall_csv(n_clicks, data, conv_enable, conv_length):
     State("r_trailing", "value"),
     State("inlet_opening_ratio", "value"),
     State("n_cp", "value"),
+    State("blade_mirror", "value"),
     prevent_initial_call=True,
 )
 def run_blade(n_clicks, nozzle_data, method, metal_angle_in, metal_angle_out, r_trailing,
-              inlet_opening_ratio, n_cp):
+              inlet_opening_ratio, n_cp, mirror_vals):
     if not nozzle_data:
         return None, html.Div("Run Phase 1 Compute first -- no nozzle wall to build a blade from.",
                                 style={"color": "#b00020"}), None
@@ -1136,6 +1041,7 @@ def run_blade(n_clicks, nozzle_data, method, metal_angle_in, metal_angle_out, r_
             metal_angle_in=metal_angle_in, metal_angle_out=metal_angle_out,
             r_trailing=r_trailing,
             inlet_opening_ratio=inlet_opening_ratio, n_cp=int(n_cp),
+            mirror=bool(mirror_vals and "on" in mirror_vals),
         )
     except Exception as e:
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
@@ -1164,6 +1070,247 @@ def _effective_blade(base_blade, edited_blade):
     """The blade actually shown/exported: the edited version if any nudges
     have been applied on top of the last Compute, else the fresh fit."""
     return edited_blade or base_blade
+
+
+@app.callback(
+    Output("sizing_mode_a_fields", "style"),
+    Output("sizing_mode_b_fields", "style"),
+    Input("sizing_mode", "value"),
+)
+def _toggle_sizing_mode(mode):
+    shown, hidden = {"display": "block"}, {"display": "none"}
+    return (shown, hidden) if mode == "A" else (hidden, shown)
+
+
+@app.callback(
+    Output("stator-sizing-store", "data"),
+    Output("sizing-status-message", "children"),
+    Output("sizing-info-table", "children"),
+    Input("compute-sizing-btn", "n_clicks"),
+    State("sizing_mode", "value"),
+    State("blade-store", "data"),
+    State("blade-edited-store", "data"),
+    State("result-store", "data"),
+    State("sizing_mdot_a", "value"),
+    State("sizing_n_blades_a", "value"),
+    State("sizing_r_hub_a", "value"),
+    State("sizing_r_hub_b", "value"),
+    State("sizing_H_b", "value"),
+    State("sizing_n_blades_b", "value"),
+    State("sizing_mdot_b", "value"),
+    prevent_initial_call=True,
+)
+def run_stator_sizing(n_clicks, mode, base_blade, edited_blade, nozzle_data,
+                       mdot_a, n_blades_a, r_hub_a,
+                       r_hub_b, H_b, n_blades_b, mdot_b):
+    stator = _effective_blade(base_blade, edited_blade)
+    if not stator:
+        return None, html.Div("Run Phase 2 first -- no stator blade to size.",
+                                style={"color": "#b00020"}), None
+    if not nozzle_data:
+        return None, html.Div("Run Phase 1 first -- sizing needs the throat sonic state.",
+                                style={"color": "#b00020"}), None
+
+    try:
+        if mode == "A":
+            result = size_stator_mode_a(stator, nozzle_data, mdot_a, int(n_blades_a), r_hub_a)
+        else:
+            result = size_stator_mode_b(stator, nozzle_data, r_hub_b, H_b, int(n_blades_b), mdot_b)
+    except Exception as e:
+        return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
+
+    scaled_pitch = result["scaled_blade"]["pitch"]
+    if mode == "A":
+        table_data = [
+            {"Quantity": "k (scale factor)", "Value": f"{result['k']:.2f}", "Unit": "-"},
+            {"Quantity": "Pitch (scaled)", "Value": f"{scaled_pitch:.2f}", "Unit": "mm"},
+            {"Quantity": "r_hub", "Value": f"{result['r_hub']:.2f}", "Unit": "mm"},
+            {"Quantity": "r_shroud", "Value": f"{result['r_shroud']:.2f}", "Unit": "mm"},
+            {"Quantity": "H (blade height)", "Value": f"{result['H']:.2f}", "Unit": "mm"},
+            {"Quantity": "N_blades", "Value": str(result["n_blades"]), "Unit": "-"},
+            {"Quantity": "mdot", "Value": f"{result['mdot']:.2f}", "Unit": "kg/s"},
+            {"Quantity": "rho_star", "Value": f"{result['rho_star']:.2f}", "Unit": "kg/m3"},
+            {"Quantity": "a_star", "Value": f"{result['a_star']:.2f}", "Unit": "m/s"},
+        ]
+        status = html.Div("Sizing computed (Case A).", style={"color": "#1a7a1a", "fontWeight": "600"})
+    else:
+        ok = abs(result["residual"]) <= 0.05
+        table_data = [
+            {"Quantity": "k_pitch", "Value": f"{result['k_pitch']:.2f}", "Unit": "-"},
+            {"Quantity": "k_massflow", "Value": f"{result['k_massflow']:.2f}", "Unit": "-"},
+            {"Quantity": "residual", "Value": f"{result['residual'] * 100:.2f}", "Unit": "%"},
+            {"Quantity": "Pitch (scaled, from k_pitch)", "Value": f"{scaled_pitch:.2f}", "Unit": "mm"},
+            {"Quantity": "r_hub", "Value": f"{result['r_hub']:.2f}", "Unit": "mm"},
+            {"Quantity": "r_shroud", "Value": f"{result['r_shroud']:.2f}", "Unit": "mm"},
+            {"Quantity": "N_blades", "Value": str(result["n_blades"]), "Unit": "-"},
+            {"Quantity": "rho_star", "Value": f"{result['rho_star']:.2f}", "Unit": "kg/m3"},
+            {"Quantity": "a_star", "Value": f"{result['a_star']:.2f}", "Unit": "m/s"},
+        ]
+        color = "#1a7a1a" if ok else "#b00020"
+        if ok:
+            msg = "Sizing computed (Case B) -- k_pitch/k_massflow agree."
+        else:
+            msg = ("Sizing computed (Case B) -- LARGE residual: the 2D blade shape "
+                    "(metal_angle_out/solidity) may need redesigning, not just rescaling.")
+        status = html.Div(msg, style={"color": color, "fontWeight": "600"})
+
+    return result, status, make_table(table_data, ["Quantity", "Value", "Unit"])
+
+
+@app.callback(
+    Output("download-sizing-json", "data"),
+    Input("download-sizing-json-btn", "n_clicks"),
+    State("stator-sizing-store", "data"),
+    prevent_initial_call=True,
+)
+def download_sizing_json(n_clicks, sizing_result):
+    if not sizing_result:
+        return None
+    return dcc.send_string(json.dumps(sizing_result, indent=2), "stator_sized_blade.json")
+
+
+@app.callback(
+    Output("sizing-vtk-container", "children"),
+    Input("stator-sizing-store", "data"),
+)
+def _update_sizing_vtk_preview(sizing_result):
+    if not sizing_result:
+        return _vtk_placeholder("Compute a sizing (Case A or B) to see the 3D solid preview.")
+
+    # True CAD-quality preview: the SAME watertight solid export_annular_
+    # blade_step would write to STEP (lofted through every span station,
+    # capped at hub/shroud -- see _close_loft_solid), meshed to STL and
+    # rendered with VTK's own Phong shading via dash-vtk/vtk.js. This
+    # replaces an earlier Plotly Mesh3d preview of just the blade curve
+    # swept across span, which had no end caps and read as a hollow shell
+    # rather than a solid.
+    if not DASH_VTK_AVAILABLE:
+        return _vtk_placeholder(
+            "dash-vtk is not installed -- 3D solid preview unavailable "
+            "(pip install \"turbo_moc[cad]\").")
+    try:
+        import vtk
+        from turbo_moc.geometry import export_annular_blade_stl
+    except ImportError:
+        return _vtk_placeholder(
+            "cadquery / vtk are not installed -- 3D solid preview unavailable "
+            "(pip install \"turbo_moc[cad]\").")
+
+    n_blades = int(sizing_result["n_blades"])
+    # Show the WHOLE annulus, not just one blade -- cheaply: the cadquery
+    # solid (the slow part, a loft + sew + cap) is built ONCE, then the
+    # other copies are made by rotating the already-triangulated mesh about
+    # the machine (Z) axis with vtkTransformPolyDataFilter and merging with
+    # vtkAppendPolyData. That's a few hundred microseconds per copy, not
+    # another CAD rebuild, so rendering all 40-70+ real blades costs about
+    # the same as rendering one. n_render_cap is only a safety valve
+    # against a mistyped pathological blade count, same role as the
+    # n_preview cap on the older Plotly annular preview.
+    n_render_cap = 200
+    n_render = min(n_blades, n_render_cap)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stl_path = os.path.join(tmpdir, "blade.stl")
+            export_annular_blade_stl(
+                sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
+                stl_path, n_blades=n_blades, flare="pitch_scale", source="stator",
+            )
+            reader = vtk.vtkSTLReader()
+            reader.SetFileName(stl_path)
+            reader.Update()
+            base_mesh = reader.GetOutput()
+
+            append = vtk.vtkAppendPolyData()
+            for i in range(n_render):
+                transform = vtk.vtkTransform()
+                transform.RotateZ(i * 360.0 / n_blades)
+                tf = vtk.vtkTransformPolyDataFilter()
+                tf.SetTransform(transform)
+                tf.SetInputData(base_mesh)
+                tf.Update()
+                append.AddInputData(tf.GetOutput())
+            append.Update()
+            mesh_state = to_mesh_state(append.GetOutput())
+    except Exception as e:
+        return _vtk_placeholder(f"Error building 3D solid preview: {e}")
+
+    caption = (f"Showing {n_render} of {n_blades} blades (capped at {n_render_cap})."
+               if n_render < n_blades else f"Showing all {n_blades} blades.")
+
+    return html.Div(
+        [
+            html.Div(caption, style={"position": "absolute", "top": "8px", "left": "8px",
+                                       "fontSize": "12px", "color": "#666", "zIndex": 1,
+                                       "backgroundColor": "rgba(255,255,255,0.85)",
+                                       "padding": "2px 8px", "borderRadius": "4px"}),
+            dash_vtk.View(
+                # A soft gray-blue viewport tone (not flat white) reads
+                # closer to a real CAD viewport (SolidWorks/Fusion-style)
+                # and gives the shaded solid some contrast to sit against.
+                background=[0.93, 0.95, 0.97],
+                style={"height": "100%", "width": "100%"},
+                children=[
+                    dash_vtk.GeometryRepresentation(
+                        children=[dash_vtk.Mesh(state=mesh_state)],
+                        property={
+                            "color": [0.55, 0.63, 0.75],
+                            "edgeVisibility": False,
+                            "interpolation": "Phong",
+                            # Lower ambient + higher specular than a flat
+                            # preview: without real shadow mapping (not
+                            # exposed by dash-vtk's high-level API), this is
+                            # what reads as "CAD-shaded" rather than
+                            # flat-lit -- faces turned away from the light
+                            # go noticeably darker, giving the solid depth.
+                            "ambient": 0.12, "diffuse": 0.8,
+                            "specular": 0.45, "specularPower": 30,
+                        },
+                        # The reference frame the CAD view is missing: a
+                        # bounding-box ruler with tick marks and axis
+                        # labels (X / Y / Z, Z being the machine/axial
+                        # axis per wrap_blade_annular's convention) around
+                        # the solid, the same role a CAD viewer's
+                        # coordinate triad plays.
+                        showCubeAxes=True,
+                        cubeAxesStyle={
+                            "axisLabels": ["X [mm]", "Y [mm]", "Z (axial) [mm]"],
+                        },
+                    ),
+                ],
+            ),
+        ],
+        style={"position": "relative", "height": "100%", "width": "100%"},
+    )
+
+
+@app.callback(
+    Output("download-sizing-step", "data"),
+    Output("sizing-step-status", "children"),
+    Input("download-sizing-step-btn", "n_clicks"),
+    State("stator-sizing-store", "data"),
+    prevent_initial_call=True,
+)
+def download_sizing_step(n_clicks, sizing_result):
+    if not sizing_result:
+        return dash.no_update, html.Div("Compute a sizing first.", style={"color": "#b00020"})
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from turbo_moc.geometry import export_annular_blade_step
+            face_path = os.path.join(tmpdir, "face.step")
+            solid_path = os.path.join(tmpdir, "solid.step")
+            export_annular_blade_step(
+                sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
+                face_path, solid_path, n_blades=int(sizing_result["n_blades"]),
+                flare="pitch_scale", source="stator",
+            )
+            with open(solid_path, "rb") as f:
+                content = f.read()
+    except ImportError:
+        return dash.no_update, html.Div(
+            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
+
+    return dcc.send_bytes(content, "stator_sized_blade.step"), html.Div(
+        "Sized stator STEP ready (1 blade).", style={"color": "#1a7a1a"})
 
 
 @app.callback(
@@ -1385,6 +1532,88 @@ def download_step(n_clicks, base_blade, edited_blade, target, kind, extrude_leng
 # Phase 3 callbacks: rotor blade (vortex-flow method)
 # --------------------------------------------------------------------------
 @app.callback(
+    Output("rotor_P0", "value"), Output("rotor_P0", "disabled"),
+    Output("rotor_T0", "value"), Output("rotor_T0", "disabled"),
+    Output("rotor_M_inlet", "value"), Output("rotor_M_inlet", "disabled"),
+    Output("rotor_beta_inlet", "value"), Output("rotor_beta_inlet", "disabled"),
+    Output("rotor_fluid_name", "value"), Output("rotor_fluid_name", "disabled"),
+    Output("rotor-triangle-status", "children"),
+    Input("couple_to_stator", "value"),
+    Input("rotor_omega", "value"),
+    Input("rotor_radius_mm", "value"),
+    Input("blade-store", "data"),
+    Input("blade-edited-store", "data"),
+    Input("result-store", "data"),
+    State("rotor_P0", "value"), State("rotor_T0", "value"),
+    State("rotor_M_inlet", "value"), State("rotor_beta_inlet", "value"),
+    State("rotor_fluid_name", "value"),
+)
+def _couple_rotor_inlet_to_stator(couple_vals, omega, r_mm, base_blade, edited_blade, nozzle_data,
+                                   p0_cur, t0_cur, m_in_cur, beta_cur, fluid_cur):
+    """When "Couple to stator exit" is checked, overwrite (and lock) the
+    rotor's P0/T0/M_inlet/beta_inlet/fluid fields with values derived from
+    the Phase 1/2 stator's own exit state + the chosen Omega/r, via
+    derive_rotor_inlet_from_stator's velocity triangle -- rather than
+    leaving them as independently hand-typed numbers that can silently
+    drift out of consistency with the upstream design. Unchecked, the
+    fields return to ordinary free (enabled) manual entry, same as today."""
+    coupled = bool(couple_vals and "on" in couple_vals)
+    if not coupled:
+        return (p0_cur, False, t0_cur, False, m_in_cur, False, beta_cur, False,
+                fluid_cur, False, "")
+
+    stator = _effective_blade(base_blade, edited_blade)
+    if not stator:
+        return (p0_cur, True, t0_cur, True, m_in_cur, True, beta_cur, True, fluid_cur, True,
+                html.Div("Compute a stator blade first (Phase 2).", style={"color": "#b00020"}))
+    if not nozzle_data:
+        return (p0_cur, True, t0_cur, True, m_in_cur, True, beta_cur, True, fluid_cur, True,
+                html.Div("Run Phase 1 first.", style={"color": "#b00020"}))
+    if not omega or not r_mm:
+        return (p0_cur, True, t0_cur, True, m_in_cur, True, beta_cur, True, fluid_cur, True,
+                html.Div("Enter Omega and r.", style={"color": "#b00020"}))
+
+    U = float(omega) * (2.0 * np.pi / 60.0) * (float(r_mm) / 1000.0)
+    alpha_deg = float(stator["metal_angle_out"])
+    try:
+        tri = derive_rotor_inlet_from_stator(nozzle_data, alpha_deg, U)
+    except Exception as e:
+        return (p0_cur, True, t0_cur, True, m_in_cur, True, beta_cur, True, fluid_cur, True,
+                html.Div(f"Error: {e}", style={"color": "#b00020"}))
+
+    # U is a free choice (Omega*r) with no guarantee it's anywhere near the
+    # stator exit's own absolute velocity -- if it isn't, W_rel balloons
+    # (mostly from the U-sized tangential term), M_rel follows it well past
+    # any real supersonic-impulse/reaction design point, and the isentropic
+    # reconstruction of P0_rel/T0_rel at that enthalpy can land outside the
+    # fluid's valid EOS range entirely (a real crash two steps downstream,
+    # in the rotor's OWN FluidManager setup, with a cryptic Brent-solver
+    # traceback -- not obviously related to Omega/r at all from there).
+    # Surfacing U vs V_abs here, before that happens, is the whole point.
+    extreme = tri["M_rel"] > 3.0
+    base_info = (f"V_abs={tri['V_abs']:.1f} m/s (M_abs={tri['M_abs']:.2f}), "
+                 f"U={U:.1f} m/s -> M_rel={tri['M_rel']:.2f}, beta_rel={tri['beta_rel_deg']:.1f} deg.")
+    if extreme:
+        msg_color = "#b00020"
+        msg = (base_info + " U is much larger than V_abs, which drives M_rel/P0_rel to "
+               "physically extreme values (may crash the rotor solve below) -- reduce "
+               "Omega or r.")
+    elif not tri["is_supersonic"]:
+        msg_color = "#b00020"
+        msg = (base_info + " Relative inlet is SUBSONIC -- the vortex-flow method requires "
+               "supersonic relative inflow; increase U (Omega/r) or check alpha.")
+    else:
+        msg_color = "#1a7a1a"
+        msg = base_info + " Relative inlet is supersonic, OK for this method."
+
+    return (
+        tri["P0_rel"], True, tri["T0_rel"], True, tri["M_rel"], True,
+        tri["beta_rel_deg"], True, nozzle_data["fluid_name"], True,
+        html.Div(msg, style={"color": msg_color, "marginTop": "4px"}),
+    )
+
+
+@app.callback(
     Output("rotor-store", "data"),
     Output("rotor-status-message", "children"),
     Output("rotor-info-table", "children"),
@@ -1488,1132 +1717,171 @@ def download_rotor_plot(n_clicks, data, reference, display_options, fmt):
 
 
 # --------------------------------------------------------------------------
-# Phase 4 callback: combined stator + rotor cascade view
+# Phase 5 callbacks: 3D rotor design -- mirrors Phase 3's own
+# run_stator_sizing / _update_sizing_vtk_preview / download_sizing_step
+# (see those for the pattern this repeats almost line for line).
 # --------------------------------------------------------------------------
-def _rotate_traces_display(fig):
-    """x -> -x (keeps the CW-180 horizontal/flow orientation already
-    confirmed correct -- x still runs the same visual direction as
-    before), y unchanged (NOT negated) -- a vertical mirror, not a further
-    rotation: a genuine second 180 deg turn ((x,y)->(-x,-y) again) would
-    undo the flow-direction fix too and land back on the original tall/
-    narrow, pitch-horizontal layout, which isn't what was asked for.
-    Flipping y alone swaps which row (stator/rotor) ends up on top
-    without touching the horizontal orientation: stator is built at
-    higher y than the rotor in this callback's own raw (pre-display-
-    transform) coordinates whenever downstream_direction="below" (the
-    default -- rotor placed at y_off = stator_y_min - ... - gap, i.e.
-    below/more-negative), so leaving y unflipped keeps that same relative
-    order (stator above) once displayed."""
-    for tr in fig.data:
-        x = list(tr.x)
-        tr.x = [-xx for xx in x]
-    return fig
-
-
-def _mirror_pitchwise(blade_data):
-    """Copy of a Phase-2-style blade dict with its own pitchwise
-    coordinate (x, in blade_data's own frame -- chordwise is y, see
-    turbo_moc/geometry/radial.py's module docstring) negated: flips the
-    blade's own lean/incline about its local chordwise axis, without
-    moving it relative to the other row or touching its chordwise shape.
-    A GLOBAL mirror of the whole assembled figure was tried first, but
-    that also flips which row ends up on top (that's controlled by the
-    same Y axis this local mirror doesn't touch) -- this is scoped to
-    just the one blade's own shape instead."""
-    curve = blade_data["blade_curve"]
-    te = blade_data["trailing_edge"]
-    mirrored = dict(blade_data)
-    mirrored["blade_curve"] = {"x": [-v for v in curve["x"]], "y": curve["y"]}
-    mirrored["trailing_edge"] = {"x": [-v for v in te["x"]], "y": te["y"]}
-    mirrored["control_points"] = [[-p[0], p[1]] for p in blade_data["control_points"]]
-    return mirrored
-
-
-def _stator_passage_band_xy(stator, inlet_chords, outlet_chords, mirror=False, pitch_shift=0.0):
-    """Periodic-passage band geometry around `stator` (Phase 2's own blade
-    dict) -- same construction as extract_axial_passage_2d (a pitch-wide
-    domain, vertical near inlet/outlet, staggered in between -- the
-    staggered section is two lines, through the LE at metal_angle_in and
-    through the TE at metal_angle_out, meeting at their own intersection,
-    so the wall passes exactly through the blade's own LE/TE corners and
-    the throat-height centerline runs exactly through the mid-pitch point
-    at the trailing edge). Shared by Phase 2's own blade plot (mirror=
-    False, its natural orientation) and Phase 4's cascade view (mirror=
-    True, to match _mirror_pitchwise's display-only x negation) so both
-    previews and the actual STEP export (extract_axial_passage_2d) can
-    never disagree with each other. pitch_shift: extra offset in units of
-    pitches (positive = toward +x, matching the blade-copy loops' own
-    dx=i*pitch convention) -- purely a display choice, doesn't change the
-    exported geometry."""
-    sgn = -1.0 if mirror else 1.0
-    suction = stator["suction"]
-    p0 = (sgn * suction["x"][0], suction["y"][0])
-    p1 = (sgn * suction["x"][-1], suction["y"][-1])
-    end_slope = (p1[0] - p0[0]) / (p1[1] - p0[1])
-    sign = 1.0 if end_slope >= 0 else -1.0
-    slope_in = sign * abs(np.tan(np.radians(stator["metal_angle_in"])))
-    slope_out = sign * abs(np.tan(np.radians(stator["metal_angle_out"])))
-    s_in = p0[0] - slope_in * p0[1]
-    s_out = p1[0] - slope_out * p1[1]
-    c_kink = (s_out - s_in) / (slope_in - slope_out) if slope_in != slope_out else p0[1]
-
-    curve = stator["blade_curve"]
-    te = stator["trailing_edge"]
-    contour = list(zip([sgn * v for v in curve["x"]], curve["y"])) + list(
-        zip([sgn * v for v in te["x"]], te["y"]))
-    c_vals = [y for _, y in contour]
-    c_span = max(c_vals) - min(c_vals)
-    inlet_chords = float(inlet_chords or 1.0)
-    outlet_chords = float(outlet_chords or 6.0)
-    axial_chord = stator["axial_chord_convergent"] + stator["axial_chord_divergent"]
-    c_hi = max(c_vals) + inlet_chords * axial_chord
-    c_lo = min(c_vals) - outlet_chords * axial_chord
-    c_bend_in = max(max(c_vals) - 0.15 * c_span, c_kink)
-    c_bend_out = min(min(c_vals) + 0.05 * c_span, c_kink)
-
-    def _wall_p(offset, c):
-        c_eff = min(max(c, c_bend_out), c_bend_in)
-        if c_eff >= c_kink:
-            return offset + s_in + slope_in * c_eff
-        return offset + s_out + slope_out * c_eff
-
-    def _corner(offset, c):
-        return _wall_p(offset, c), c
-
-    # Walls at +/- half a pitch, not 0/+pitch -- centers the blade's own
-    # LE/TE line in the middle of the domain (see extract_axial_
-    # passage_2d's matching note).
-    pitch = stator["pitch"]
-    shift_amt = float(pitch_shift or 0) * pitch
-    off_l = -0.5 * pitch + shift_amt
-    off_r = 0.5 * pitch + shift_amt
-    pts = [_corner(off_l, c_hi), _corner(off_r, c_hi)]              # inlet cap
-    pts.append(_corner(off_r, c_bend_in))                           # right wall, vertical
-    if c_bend_in > c_kink > c_bend_out:
-        pts.append(_corner(off_r, c_kink))                          # right wall, inlet-angle
-    pts += [_corner(off_r, c_bend_out), _corner(off_r, c_lo)]       # right wall + cap
-    pts += [_corner(off_l, c_lo), _corner(off_l, c_bend_out)]       # outlet cap + left wall
-    if c_bend_in > c_kink > c_bend_out:
-        pts.append(_corner(off_l, c_kink))                          # left wall, outlet-angle
-    pts.append(_corner(off_l, c_bend_in))                           # left wall, remaining
-
-    band_x = [p[0] for p in pts]
-    band_y = [p[1] for p in pts]
-    return band_x, band_y
-
-
 @app.callback(
-    Output("fig-cascade", "figure"),
-    Output("cascade-status-message", "children"),
-    Output("cascade-zrange-store", "data"),
-    Input("blade-store", "data"),
-    Input("blade-edited-store", "data"),
-    Input("rotor-store", "data"),
-    Input("n_stator_blades", "value"),
-    Input("n_rotor_blades", "value"),
-    Input("rotor_scale_mm", "value"),
-    Input("rotor_axial_gap", "value"),
-    Input("rotor_downstream_direction", "value"),
-    Input("rotor_lateral_offset", "value"),
-    Input("rotor_shift", "value"),
-    Input("result-store", "data"),
-    Input("cascade_flare_enable", "value"),
-    Input("cascade_stator_r_hub_in", "value"),
-    Input("cascade_stator_r_tip_in", "value"),
-    Input("passage_show", "value"),
-    Input("passage_stator_inlet_chords", "value"),
-    Input("passage_stator_outlet_chords", "value"),
-    Input("passage_rotor_inlet_chords", "value"),
-    Input("passage_rotor_outlet_chords", "value"),
-    Input("passage_stator_shift", "value"),
-    Input("passage_rotor_shift", "value"),
+    Output("rotor-sizing-annulus-readout", "children"),
+    Input("stator-sizing-store", "data"),
 )
-def update_cascade_plot(base_blade, edited_blade, rotor_data, n_stator, n_rotor,
-                         rotor_scale, rotor_axial_gap, downstream_direction,
-                         rotor_lateral_offset, rotor_shift, nozzle_data,
-                         flare_enable, stator_r_hub_in, stator_r_tip_in,
-                         passage_show, passage_stator_inlet_chords, passage_stator_outlet_chords,
-                         passage_rotor_inlet_chords, passage_rotor_outlet_chords,
-                         passage_stator_shift, passage_rotor_shift):
-    stator = _effective_blade(base_blade, edited_blade)
-    if not stator or not rotor_data:
-        missing = []
-        if not stator:
-            missing.append("stator blade (Phase 2)")
-        if not rotor_data:
-            missing.append("rotor blade (Phase 3)")
-        return go.Figure(), html.Div(
-            f"Compute the {' and '.join(missing)} first.", style={"color": "#b00020"}), None
-
-    n_stator = int(n_stator or 1)
-    n_rotor = int(n_rotor or 1)
-    scale = float(rotor_scale or 1.0)
-    gap = float(rotor_axial_gap or 0.0)
-    x_off = float(rotor_lateral_offset or 0.0)
-    shift = float(rotor_shift or 0.0)
-    show_passage = passage_show or []
-
-    # Stator: drawn exactly as Phase 2 does (turbo_moc.plotly.plot_blade), so its
-    # own pitch direction/orientation convention is respected automatically
-    # rather than re-guessed here -- same figure this callback then adds
-    # the rotor's traces onto, so both share one set of axes (same mm
-    # scale by construction, no separate scale-matching needed). plot_blade
-    # itself only draws outlines (no fill), so a translucent fill is added
-    # here on top, per-copy, in a color distinct from the rotor's.
-    stator_display = _mirror_pitchwise(stator)
-    fig = turbo_moc.plotly.plot_blade(stator_display, n_blades=n_stator,
-                                  show_control_points=False, show_cp_labels=False)
-    stator_pitch = stator["pitch"]
-    scurve = stator_display["blade_curve"]
-
-    if "stator" in show_passage:
-        # Preview of the SAME construction as extract_axial_passage_2d, via
-        # the shared _stator_passage_band_xy helper (mirror=True to match
-        # stator_display's own mirrored, display-only frame -- see
-        # _mirror_pitchwise). Drawn BEHIND the (opaque) blade fill added
-        # right after, so the blade visually "cuts" the hole out of the
-        # band without an actual boolean op here; the real subtraction
-        # only happens in extract_axial_passage_2d, on download.
-        band_x, band_y = _stator_passage_band_xy(
-            stator, passage_stator_inlet_chords, passage_stator_outlet_chords,
-            mirror=True, pitch_shift=passage_stator_shift,
-        )
-        fig.add_trace(go.Scatter(
-            x=band_x + [band_x[0]], y=band_y + [band_y[0]],
-            mode="lines", fill="toself",
-            line=dict(color="black", width=1.5, dash="dot"),
-            fillcolor="#2ecc71", opacity=0.25,
-            name="Stator passage", showlegend=False, hoverinfo="skip",
-        ))
-
-    for i in range(n_stator):
-        dx = i * stator_pitch
-        fig.add_trace(go.Scatter(
-            x=[v + dx for v in scurve["x"]], y=scurve["y"], mode="lines", fill="toself",
-            line=dict(color=turbo_moc.plotly.COLOR_RADIAL_STATOR, width=0),
-            fillcolor=turbo_moc.plotly.COLOR_RADIAL_STATOR, opacity=0.30,
-            name="Stator", showlegend=(i == 0), hoverinfo="skip",
-        ))
-
-    # Rotor: rotated 90 deg clockwise as a rigid body -- (x,y) -> (y,-x) in
-    # its own local (unscaled, r*) frame -- before scaling/offsetting, so
-    # the blade's own chord direction (originally along local x) reads
-    # along the plot's y after rotation, and what was its pitch direction
-    # (local y, TN D-4421's GSTAR) now stacks copies along the plot's x
-    # instead. In THIS display, X is the pitch/tangential direction for
-    # BOTH rows (stacking copies via each row's own pitch) and Y is the
-    # chordwise/flow direction for both -- so the "don't overlap the
-    # stator" separation belongs on Y, not X (an earlier version of this
-    # put it on X, which just shifted the rotor sideways in the same
-    # flow-direction band as the stator -- visually wrong). y_off is
-    # DERIVED, not guessed: the stator's own Y extent (its real axial
-    # chord, not a fixed number) plus `gap`, placed below (or above, per
-    # downstream_direction) it, so the two rows never overlap regardless
-    # of the stator's own chord length. x_off is a manual lateral nudge
-    # for lining an individual rotor blade up against a stator passage
-    # (rotor_shift's pitch-fraction slider does the same thing in relative
-    # terms). Distinct color/fill from the stator's.
-    stator_y_min = min(scurve["y"])
-    stator_y_max = max(scurve["y"])
-    rotor_pitch_mm = rotor_data["pitch"] * scale
-    rblade = rotor_data["blade"]
-    rotor_y_raw = [-v * scale for v in rblade["x"]]
-    if downstream_direction == "above":
-        y_off = stator_y_max - min(rotor_y_raw) + gap
-    else:
-        y_off = stator_y_min - max(rotor_y_raw) - gap
-    rx0 = [-v * scale + x_off for v in rblade["y"]]
-    ry0 = [v + y_off for v in rotor_y_raw]
-
-    if "rotor" in show_passage:
-        # STEP 1 (diagnostic, per user request -- verify before building
-        # the rest on top of it). pressure(N) and suction(N)+pitch+
-        # translate are literally the two walls _close_blade_le_te closes
-        # into ONE blade's own solid (blade_lower/blade_upper) -- so
-        # their midpoint is the blade's own mid-thickness line, not the
-        # passage. The actual passage midline pairs THIS blade's own
-        # outer wall (suction(N)+pitch+translate) with the NEXT blade's
-        # wall (pressure(N)+pitch instead of pressure(N)) -- i.e. the
-        # blade-midline shifted by one FULL pitch, not half.
-        #
-        # The centerline is only computed where BOTH surfaces have real
-        # data; beyond that (out to the true LE/TE chordwise position),
-        # it's extended as a STRAIGHT LINE continuing the centerline's
-        # OWN last real trend -- not each surface blended toward the tip
-        # separately (tried and reverted: pressure/suction don't
-        # converge near the tip the way that assumed, which showed up as
-        # the line bending the wrong way right at the LE). Worked out in
-        # the rotor's own RAW (unscaled r*) frame, THEN run through the
-        # SAME display transform as rblade just above (x_disp = -y_raw*
-        # scale, y_disp = -x_raw*scale + y_off -- rotor's raw frame has
-        # pitch along y, chordwise along x, opposite of the stator's),
-        # offset to align with rotor copy j=0's own dx = shift*
-        # rotor_pitch_mm.
-        rsuction, rpressure = rotor_data["suction"], rotor_data["pressure"]
-        translate_r = rotor_data["blade"]["translate"]
-        suction_shift = rotor_data["pitch"] + translate_r
-
-        def _sorted_xy(d):
-            pts = sorted(zip(d["x"], d["y"]))
-            xs_, ys_ = zip(*pts)
-            return list(xs_), list(ys_)
-
-        px_r, py_r = _sorted_xy(rpressure)
-        sx_r, sy_r = _sorted_xy(rsuction)
-        c_overlap_lo_r = max(px_r[0], sx_r[0])
-        c_overlap_hi_r = min(px_r[-1], sx_r[-1])
-
-        rblade_pts = list(zip(rotor_data["blade"]["x"], rotor_data["blade"]["y"]))
-        le_idx_r = max(range(len(rblade_pts)), key=lambda i: rblade_pts[i][0])
-        te_idx_r = min(range(len(rblade_pts)), key=lambda i: rblade_pts[i][0])
-        c_le_r = rblade_pts[le_idx_r][0]  # true LE tip, chordwise position
-        c_te_r = rblade_pts[te_idx_r][0]  # true TE tip, chordwise position
-
-        # Real-data portion only: pressure(c) + pitch (next blade's own
-        # wall) paired with suction(c) + pitch + translate (this blade's
-        # own outer wall).
-        cs_real = sorted(c for c in set(px_r + sx_r) if c_overlap_lo_r <= c <= c_overlap_hi_r)
-        y_pressure_real = [float(np.interp(c, px_r, py_r)) + rotor_data["pitch"] for c in cs_real]
-        y_suction_real = [float(np.interp(c, sx_r, sy_r)) + suction_shift for c in cs_real]
-        centerline_real = [0.5 * (p + s) for p, s in zip(y_pressure_real, y_suction_real)]
-
-        # Straight-line extension of the CENTERLINE's own last segment,
-        # out to the true LE/TE chordwise position -- not a re-blend of
-        # the individual surfaces.
-        slope_hi = (centerline_real[-1] - centerline_real[-2]) / (cs_real[-1] - cs_real[-2])
-        slope_lo = (centerline_real[1] - centerline_real[0]) / (cs_real[1] - cs_real[0])
-        c_le_val = centerline_real[-1] + slope_hi * (c_le_r - cs_real[-1])
-        c_te_val = centerline_real[0] + slope_lo * (c_te_r - cs_real[0])
-
-        cs_r = [c_te_r] + cs_real + [c_le_r]
-        centerline_p_r = [c_te_val] + centerline_real + [c_le_val]
-
-        # Domain: duplicate the centerline, shift one copy by one pitch
-        # (the two periodic walls), extend both ends with vertical lines
-        # out to the inlet/outlet caps, close with horizontal caps --
-        # same topology as the stator's own construction.
-        #
-        # NOTE the swap here vs the stator: c_le_r/c_te_r are just labels
-        # for "max(c_vals)"/"min(c_vals)" (kept for the rest of the
-        # algorithm's variable names) -- for THIS blade's own raw x
-        # convention, max(c_vals) turned out to be the OUTLET side, not
-        # the inlet (opposite of the stator's own chordwise convention),
-        # so outlet_chords_r is applied at c_le_r and inlet_chords_r at
-        # c_te_r, not the other way around.
-        inlet_chords_r = float(passage_rotor_inlet_chords or 1.0)
-        outlet_chords_r = float(passage_rotor_outlet_chords or 6.0)
-        c_hi_r = c_le_r + outlet_chords_r * abs(rotor_data["chord"])
-        c_lo_r = c_te_r - inlet_chords_r * abs(rotor_data["chord"])
-
-        def _wall_ref_r(c):
-            c_eff = min(max(c, c_te_r), c_le_r)
-            return float(np.interp(c_eff, cs_r, centerline_p_r))
-
-        dx0 = shift * rotor_pitch_mm
-
-        def _xf(px, py):
-            return -py * scale + x_off + dx0, -px * scale + y_off
-
-        def _corner_r(offset, c):
-            return _xf(c, offset + _wall_ref_r(c))
-
-        # Extra shift (in pitches). In this display's own transform
-        # (x_disp = -py*scale + ...), the raw pitchwise value is
-        # negated, so a POSITIVE shift value here moves the domain LEFT
-        # on screen, negative moves it RIGHT -- which blade the domain
-        # surrounds is purely a display choice, doesn't change the
-        # exported passage geometry.
-        shift_r = float(passage_rotor_shift or 0) * rotor_data["pitch"]
-        offset_left_r = 0.0 + shift_r
-        offset_right_r = rotor_data["pitch"] + shift_r
-
-        mid_cs_r = list(reversed(cs_r))  # c_le_r (inlet side) down to c_te_r (outlet side)
-        pts_r = [_corner_r(offset_left_r, c_hi_r)]
-        for c in [c_hi_r] + mid_cs_r + [c_lo_r]:
-            pts_r.append(_corner_r(offset_right_r, c))
-        pts_r.append(_corner_r(offset_left_r, c_lo_r))
-        for c in reversed(mid_cs_r):
-            pts_r.append(_corner_r(offset_left_r, c))
-
-        band_xr = [p[0] for p in pts_r]
-        band_yr = [p[1] for p in pts_r]
-        fig.add_trace(go.Scatter(
-            x=band_xr + [band_xr[0]], y=band_yr + [band_yr[0]],
-            mode="lines", fill="toself",
-            line=dict(color="black", width=1.5, dash="dot"),
-            fillcolor="#2ecc71", opacity=0.25,
-            name="Rotor passage", showlegend=False, hoverinfo="skip",
-        ))
-
-    for j in range(n_rotor):
-        dx = (j + shift) * rotor_pitch_mm
-        rx_dx = [v + dx for v in rx0]
-        # Two traces, same split as the stator's own (plot_blade's outline
-        # + a separate translucent fill): a single trace can't have a
-        # fully-opaque line and a translucent fill at once -- Plotly's
-        # `opacity` applies to the whole trace, so bundling both here (as
-        # an earlier version of this did) made the outline just as faint
-        # as the fill.
-        fig.add_trace(go.Scatter(
-            x=rx_dx, y=ry0, mode="lines",
-            line=dict(color="black", width=1.5),
-            showlegend=False, hoverinfo="skip",
-        ))
-        fig.add_trace(go.Scatter(
-            x=rx_dx, y=ry0, mode="lines", fill="toself",
-            line=dict(color=turbo_moc.plotly.COLOR_RADIAL_ROTOR, width=0),
-            fillcolor=turbo_moc.plotly.COLOR_RADIAL_ROTOR, opacity=0.35,
-            name="Rotor", showlegend=(j == 0), hoverinfo="skip",
-        ))
-
-    # Rotate for display (see _rotate_traces_display's own docstring), THEN
-    # compute the bounding box -- must happen post-rotation so the tight
-    # clip below actually matches what's on screen.
-    _rotate_traces_display(fig)
-
-    # Shift x and z(=y) so both axes read from 0 (positive), not negative
-    # -- the mirror/rotation above keeps them negative in absolute terms
-    # (shape preserved, just offset from an arbitrary origin); this only
-    # re-zeros the axes, it doesn't change the geometry's shape. Zeroing z
-    # too (not just x) is what lets the meridional view below share the
-    # same z=0 reference and axis scale (see cascade-zrange-store).
-    x_shift = -min(x for tr in fig.data for x in tr.x)
-    y_shift = -min(y for tr in fig.data for y in tr.y)
-    for tr in fig.data:
-        tr.x = [xx + x_shift for xx in tr.x]
-        tr.y = [yy + y_shift for yy in tr.y]
-
-    all_x = [x for tr in fig.data for x in tr.x]
-    all_y = [y for tr in fig.data for y in tr.y]
-    x_min, x_max = min(all_x), max(all_x)
-    y_min, y_max = min(all_y), max(all_y)
-    # Clipped close to the LE/TE, not the old 5% padding -- just enough
-    # (2%) that the outline isn't cut off by the axes themselves.
-    x_pad = 0.02 * (x_max - x_min if x_max > x_min else 1.0)
-    y_pad = 0.02 * (y_max - y_min if y_max > y_min else 1.0)
-    fig.update_layout(
-        showlegend=False,
-        # No scaleanchor/scaleratio 1:1 lock: the pitchwise (y) span here
-        # is much larger than the axial (z) span, so a true 1:1 aspect
-        # would letterbox the plot well short of its declared height --
-        # shorter than the meridional figure beside it, which fills its
-        # full container. Autoscaling both axes independently instead
-        # fills the full height, matching that neighbor (see
-        # cascade-zrange-store / plot_meridional_view's own z_range).
-        xaxis=dict(title_text="y [mm]", range=[x_min - x_pad, x_max + x_pad]),
-        # dtick fixed (not autotick) so the gridline spacing matches the
-        # meridional plot's z axis exactly, not just the numeric range --
-        # autotick can pick different steps for the same range depending
-        # on subtle rendered-height differences between the two figures.
-        yaxis=dict(title_text="z [mm]", range=[y_min - y_pad, y_max + y_pad], dtick=50),
-        height=380,
-        margin=dict(l=50, r=20, t=20, b=40),
-    )
-    chord_stator = _stator_axial_chord(stator)
-    chord_rotor = rotor_data["chord"] * scale
-    solidity_stator = chord_stator / stator["pitch"]
-    solidity_rotor = chord_rotor / rotor_pitch_mm
-
-    table_data = [
-        {"Quantity": "Pitch, stator", "Value": f"{stator['pitch']:.2f}", "Unit": "mm"},
-        {"Quantity": "Pitch, rotor", "Value": f"{rotor_pitch_mm:.2f}", "Unit": "mm"},
-        {"Quantity": "Chord, stator", "Value": f"{chord_stator:.2f}", "Unit": "mm"},
-        {"Quantity": "Chord, rotor", "Value": f"{chord_rotor:.2f}", "Unit": "mm"},
-        {"Quantity": "Solidity, stator", "Value": f"{solidity_stator:.3f}", "Unit": "-"},
-        {"Quantity": "Solidity, rotor", "Value": f"{solidity_rotor:.3f}", "Unit": "-"},
-        {"Quantity": "Scale, rotor", "Value": f"{scale:.2f}", "Unit": "mm/r*"},
-        {"Quantity": "Offset, rotor (y)", "Value": f"{y_off:.2f}", "Unit": "mm"},
-        {"Quantity": "Direction", "Value": downstream_direction, "Unit": "-"},
-        {"Quantity": "Gap, axial", "Value": f"{gap:.2f}", "Unit": "mm"},
-    ]
-
-    # Choked mass flow rate: only computable once the throat has a real
-    # SPAN (blade height), which only exists if flare is enabled here --
-    # A_throat = throat_opening (Phase 2's own geometric passage width) x
-    # (r_tip_in - r_hub_in) x n_stator (all passages), and rho*/V* come
-    # from Phase 1's own solved throat state (wall_final index 0 -- see
-    # parametrize_stator_blade's docstring: "throat at index 0"), not
-    # assumed to be exactly sonic (M there may be <1 for a flashing/flat-
-    # front design) -- V* = M* x a*, with a* from a real jaxprop property
-    # call at the throat's own (p, T), same pattern as critical_flow.py.
-    flare_on = bool(flare_enable and "on" in flare_enable)
-    mdot_row = {"Quantity": "Mass flow rate, choked", "Value": "n/a", "Unit": "kg/s"}
-    if flare_on and nozzle_data and stator_r_hub_in is not None and stator_r_tip_in is not None:
-        try:
-            wall = nozzle_data["wall_final"]
-            p_star, T_star, rho_star, M_star = wall["p"][0], wall["T"][0], wall["rho"][0], wall["M"][0]
-            fluid = jxp.Fluid(nozzle_data["fluid_name"])
-            a_star = fluid.get_state(jxp.PT_INPUTS, p_star, T_star).a
-            V_star = M_star * a_star
-            throat_height_mm = float(stator_r_tip_in) - float(stator_r_hub_in)
-            A_throat_m2 = stator["throat_opening"] * throat_height_mm * n_stator * 1e-6
-            mdot_choked = rho_star * V_star * A_throat_m2
-            mdot_row["Value"] = f"{mdot_choked:.4f}"
-        except Exception:
-            pass
-    table_data.append(mdot_row)
-
-    status = make_table(table_data, ["Quantity", "Value", "Unit"])
-    z_range = [y_min - y_pad, y_max + y_pad]
-    return fig, status, z_range
+def _update_rotor_sizing_annulus_readout(stator_sizing):
+    if not stator_sizing:
+        return html.Div("Run Phase 3 (stator sizing) first -- the rotor shares its annulus.",
+                          style={"color": "#b00020"})
+    return html.Div(
+        f"Annulus from Phase 3: r_hub={stator_sizing['r_hub']:.2f} mm, "
+        f"r_shroud={stator_sizing['r_shroud']:.2f} mm.")
 
 
 @app.callback(
-    Output("download-passage-rotor", "data"),
-    Output("passage-status-message", "children", allow_duplicate=True),
-    Input("download-passage-rotor-btn", "n_clicks"),
+    Output("rotor-sizing-store", "data"),
+    Output("rotor-sizing-status-message", "children"),
+    Output("rotor-sizing-info-table", "children"),
+    Input("compute-rotor-sizing-btn", "n_clicks"),
     State("rotor-store", "data"),
-    State("rotor_scale_mm", "value"),
-    State("passage_rotor_inlet_chords", "value"),
-    State("passage_rotor_outlet_chords", "value"),
-    State("extrude_length", "value"),
+    State("stator-sizing-store", "data"),
+    State("rotor_sizing_n_blades", "value"),
     prevent_initial_call=True,
 )
-def download_passage_rotor(n_clicks, rotor_data, rotor_scale, inlet_chords, outlet_chords, extrude_length):
+def run_rotor_sizing(n_clicks, rotor_data, stator_sizing, n_blades):
     if not rotor_data:
-        return dash.no_update, html.Div("Compute a rotor blade first (Phase 3).",
-                                          style={"color": "#b00020"})
-
-    scale = float(rotor_scale or 1.0)
-    # extract_axial_passage_2d(source="rotor") needs the closed "blade"
-    # solid contour too (for the boolean cut), not just suction/pressure
-    # -- all THREE scaled by the same mm-per-r* factor Phase 4 uses
-    # everywhere else; beta_inlet/beta_outlet are angles, no scaling.
-    scaled_blade = {
-        "suction": {"x": [v * scale for v in rotor_data["suction"]["x"]],
-                     "y": [v * scale for v in rotor_data["suction"]["y"]]},
-        "pressure": {"x": [v * scale for v in rotor_data["pressure"]["x"]],
-                      "y": [v * scale for v in rotor_data["pressure"]["y"]]},
-        "blade": {"x": [v * scale for v in rotor_data["blade"]["x"]],
-                   "y": [v * scale for v in rotor_data["blade"]["y"]],
-                   "translate": rotor_data["blade"]["translate"] * scale},
-        "chord": rotor_data["chord"] * scale,
-    }
-    rotor_pitch_mm = rotor_data["pitch"] * scale
-    extrude_length = float(extrude_length or 0.0)
-    want_solid = extrude_length > 0.0
+        return None, html.Div("Run Phase 4 first -- no rotor blade to size.",
+                                style={"color": "#b00020"}), None
+    if not stator_sizing:
+        return None, html.Div("Run Phase 3 (stator sizing) first -- the rotor "
+                                "shares its annulus.", style={"color": "#b00020"}), None
 
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            from turbo_moc.geometry import extract_axial_passage_2d
-            face_path = os.path.join(tmpdir, "face.step")
-            solid_path = os.path.join(tmpdir, "solid.step") if want_solid else None
-            extract_axial_passage_2d(
-                scaled_blade, rotor_pitch_mm, face_path, solid_path,
-                extrude_length=extrude_length, source="rotor",
-                inlet_chords=float(inlet_chords or 1.0),
-                outlet_chords=float(outlet_chords or 6.0),
-            )
-            target_path = solid_path if want_solid else face_path
-            with open(target_path, "rb") as f:
-                content = f.read()
-    except ImportError:
-        return dash.no_update, html.Div(
-            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
-
-    fname = "rotor_passage_solid.step" if want_solid else "rotor_passage_face.step"
-    return dcc.send_bytes(content, fname), html.Div(
-        "Rotor passage STEP ready.", style={"color": "#1a7a1a"})
-
-
-@app.callback(
-    Output("download-radial-passage-stator", "data"),
-    Output("radial-passage-status-message", "children", allow_duplicate=True),
-    Input("download-radial-passage-stator-btn", "n_clicks"),
-    State("blade-store", "data"),
-    State("blade-edited-store", "data"),
-    State("passage_radial_stator_r1", "value"),
-    State("passage_radial_stator_r2", "value"),
-    State("passage_stator_inlet_chords", "value"),
-    State("passage_stator_outlet_chords", "value"),
-    State("extrude_length", "value"),
-    prevent_initial_call=True,
-)
-def download_radial_passage_stator(n_clicks, base_blade, edited_blade, r1, r2,
-                                     inlet_chords, outlet_chords, extrude_length):
-    stator = _effective_blade(base_blade, edited_blade)
-    if not stator:
-        return dash.no_update, html.Div("Compute a stator blade first (Phase 2).",
-                                          style={"color": "#b00020"})
-    extrude_length = float(extrude_length or 0.0)
-    want_solid = extrude_length > 0.0
-
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            from turbo_moc.geometry import extract_radial_passage_2d
-            face_path = os.path.join(tmpdir, "face.step")
-            solid_path = os.path.join(tmpdir, "solid.step") if want_solid else None
-            extract_radial_passage_2d(
-                stator, stator["pitch"], float(r1 or 140.0), float(r2 or 190.0),
-                face_path, solid_path,
-                extrude_length=extrude_length, source="stator",
-                inlet_chords=float(inlet_chords or 1.0),
-                outlet_chords=float(outlet_chords or 6.0),
-            )
-            target_path = solid_path if want_solid else face_path
-            with open(target_path, "rb") as f:
-                content = f.read()
-    except ImportError:
-        return dash.no_update, html.Div(
-            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
-
-    fname = "stator_radial_passage_solid.step" if want_solid else "stator_radial_passage_face.step"
-    return dcc.send_bytes(content, fname), html.Div(
-        "Stator radial passage STEP ready.", style={"color": "#1a7a1a"})
-
-
-@app.callback(
-    Output("download-radial-passage-rotor", "data"),
-    Output("radial-passage-status-message", "children", allow_duplicate=True),
-    Input("download-radial-passage-rotor-btn", "n_clicks"),
-    State("rotor-store", "data"),
-    State("rotor_scale_mm", "value"),
-    State("passage_radial_rotor_r1", "value"),
-    State("passage_radial_rotor_r2", "value"),
-    State("passage_rotor_inlet_chords", "value"),
-    State("passage_rotor_outlet_chords", "value"),
-    State("extrude_length", "value"),
-    prevent_initial_call=True,
-)
-def download_radial_passage_rotor(n_clicks, rotor_data, rotor_scale, r1, r2,
-                                    inlet_chords, outlet_chords, extrude_length):
-    if not rotor_data:
-        return dash.no_update, html.Div("Compute a rotor blade first (Phase 3).",
-                                          style={"color": "#b00020"})
-
-    scale = float(rotor_scale or 1.0)
-    scaled_blade = {
-        "suction": {"x": [v * scale for v in rotor_data["suction"]["x"]],
-                     "y": [v * scale for v in rotor_data["suction"]["y"]]},
-        "pressure": {"x": [v * scale for v in rotor_data["pressure"]["x"]],
-                      "y": [v * scale for v in rotor_data["pressure"]["y"]]},
-        "blade": {"x": [v * scale for v in rotor_data["blade"]["x"]],
-                   "y": [v * scale for v in rotor_data["blade"]["y"]],
-                   "translate": rotor_data["blade"]["translate"] * scale},
-        "chord": rotor_data["chord"] * scale,
-    }
-    rotor_pitch_mm = rotor_data["pitch"] * scale
-    extrude_length = float(extrude_length or 0.0)
-    want_solid = extrude_length > 0.0
-
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            from turbo_moc.geometry import extract_radial_passage_2d
-            face_path = os.path.join(tmpdir, "face.step")
-            solid_path = os.path.join(tmpdir, "solid.step") if want_solid else None
-            extract_radial_passage_2d(
-                scaled_blade, rotor_pitch_mm, float(r1 or 145.0), float(r2 or 188.0),
-                face_path, solid_path,
-                extrude_length=extrude_length, source="rotor",
-                inlet_chords=float(inlet_chords or 1.0),
-                outlet_chords=float(outlet_chords or 6.0),
-            )
-            target_path = solid_path if want_solid else face_path
-            with open(target_path, "rb") as f:
-                content = f.read()
-    except ImportError:
-        return dash.no_update, html.Div(
-            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
-
-    fname = "rotor_radial_passage_solid.step" if want_solid else "rotor_radial_passage_face.step"
-    return dcc.send_bytes(content, fname), html.Div(
-        "Rotor radial passage STEP ready.", style={"color": "#1a7a1a"})
-
-
-# --------------------------------------------------------------------------
-# Phase 5 callbacks: conformal radial wrap of a stator (Phase 2) or rotor
-# (Phase 3) blade
-# --------------------------------------------------------------------------
-@app.callback(
-    Output("radial-rotor-scale-container", "style"),
-    Output("radial-both-container", "style"),
-    Output("radial-single-radii-container", "style"),
-    Input("radial-source", "value"),
-)
-def toggle_radial_extra_fields(source):
-    rotor_scale_style = {} if source in ("rotor", "both") else {"display": "none"}
-    both_style = {} if source == "both" else {"display": "none"}
-    single_radii_style = {"display": "none"} if source == "both" else {}
-    return rotor_scale_style, both_style, single_radii_style
-
-
-@app.callback(
-    Output("radial-store", "data"),
-    Output("radial-status-message", "children"),
-    Output("radial-info-table", "children"),
-    Input("compute-radial-btn", "n_clicks"),
-    State("radial-source", "value"),
-    State("blade-store", "data"),
-    State("blade-edited-store", "data"),
-    State("rotor-store", "data"),
-    State("radial_rotor_scale", "value"),
-    State("radial_r1", "value"),
-    State("radial_r2", "value"),
-    State("radial_n_blades", "value"),
-    State("radial_theta0", "value"),
-    State("radial_n_blades_rotor", "value"),
-    State("radial_theta0_rotor", "value"),
-    State("radial_r_stator_in", "value"),
-    State("radial_r_interface", "value"),
-    State("radial_gap", "value"),
-    State("radial_r_rotor_out", "value"),
-    prevent_initial_call=True,
-)
-def run_radial_wrap(n_clicks, source, base_blade, edited_blade, rotor_data, rotor_scale,
-                     r1, r2, n_blades, theta0_deg, n_blades_rotor, theta0_rotor_deg,
-                     r_stator_in, r_interface, gap, r_rotor_out):
-    theta0 = np.radians(float(theta0_deg or 0.0))
-    try:
-        if source == "both":
-            blade = _effective_blade(base_blade, edited_blade)
-            missing = []
-            if not blade:
-                missing.append("stator blade (Phase 2)")
-            if not rotor_data:
-                missing.append("rotor blade (Phase 3)")
-            if missing:
-                return None, html.Div(f"Run the {' and '.join(missing)} Compute first.",
-                                        style={"color": "#b00020"}), None
-            # Coupled radii: ONE shared interface radius (stator exit =
-            # rotor inlet reference), not two independently guessed r1/r2
-            # pairs -- see the "Coupled stator + rotor radii" note in the
-            # controls. `gap` is the row-to-row spacing, inserted as an
-            # annular band between the stator's own outer radius and
-            # where the rotor's own wrap begins.
-            r_stator_in = float(r_stator_in)
-            r_interface = float(r_interface)
-            r_rotor_in = r_interface + float(gap or 0.0)
-            r_rotor_out = float(r_rotor_out)
-            stator_radial = wrap_blade_radial(
-                blade, r1=r_stator_in, r2=r_interface, n_blades=int(n_blades), theta0=theta0,
-            )
-            stator_radial["theta0"] = theta0
-            rotor_theta0 = np.radians(float(theta0_rotor_deg or 0.0))
-            rotor_radial = wrap_rotor_blade_radial(
-                rotor_data, r1=r_rotor_in, r2=r_rotor_out, n_blades=int(n_blades_rotor),
-                theta0=rotor_theta0,
-                scale=float(rotor_scale or 1.0),
-            )
-            rotor_radial["theta0"] = rotor_theta0
-            radial = {
-                "mode": "combined", "stator": stator_radial, "rotor": rotor_radial,
-                "r1": r_stator_in, "r2": r_rotor_out,
-                "r_stator_out": r_interface, "r_rotor_in": r_rotor_in,
-                "units": stator_radial["units"],
-            }
-        elif source == "rotor":
-            r1, r2 = float(r1), float(r2)
-            if not rotor_data:
-                return None, html.Div("Run Phase 3 Compute first -- no rotor blade to wrap.",
-                                        style={"color": "#b00020"}), None
-            radial = wrap_rotor_blade_radial(
-                rotor_data, r1=r1, r2=r2, n_blades=int(n_blades),
-                theta0=theta0, scale=float(rotor_scale or 1.0),
-            )
-            radial["mode"] = "single"
-            radial["source"] = "rotor"
-            radial["theta0"] = theta0
-        else:
-            r1, r2 = float(r1), float(r2)
-            blade = _effective_blade(base_blade, edited_blade)
-            if not blade:
-                return None, html.Div("Run Phase 2 Compute first -- no stator blade to wrap.",
-                                        style={"color": "#b00020"}), None
-            radial = wrap_blade_radial(
-                blade, r1=r1, r2=r2, n_blades=int(n_blades), theta0=theta0,
-            )
-            radial["mode"] = "single"
-            radial["source"] = "stator"
-            radial["theta0"] = theta0
+        result = size_rotor_from_pitch(
+            rotor_data, stator_sizing["r_hub"], stator_sizing["r_shroud"], int(n_blades))
     except Exception as e:
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
 
-    if radial["mode"] == "combined":
-        status = html.Div([
-            html.Span("Radial wrap computed (stator + rotor)",
-                       style={"fontWeight": "600", "color": "#1a7a1a"}),
-        ])
-        table_data = [
-            {"Quantity": "r_stator_in", "Value": f"{radial['r1']:.2f}", "Unit": radial["units"]},
-            {"Quantity": "r_interface", "Value": f"{radial['r_stator_out']:.2f}", "Unit": radial["units"]},
-            {"Quantity": "r_rotor_in", "Value": f"{radial['r_rotor_in']:.2f}", "Unit": radial["units"]},
-            {"Quantity": "r_rotor_out", "Value": f"{radial['r2']:.2f}", "Unit": radial["units"]},
-            {"Quantity": "Number of blades, stator", "Value": str(radial["stator"]["n_blades"]), "Unit": "-"},
-            {"Quantity": "Number of blades, rotor", "Value": str(radial["rotor"]["n_blades"]), "Unit": "-"},
-        ]
-    else:
-        status = html.Div([
-            html.Span(f"Radial wrap computed ({source})", style={"fontWeight": "600", "color": "#1a7a1a"}),
-        ])
-        table_data = [
-            {"Quantity": "r1", "Value": f"{radial['r1']:.2f}", "Unit": radial["units"]},
-            {"Quantity": "r2", "Value": f"{radial['r2']:.2f}", "Unit": radial["units"]},
-            {"Quantity": "Number of blades", "Value": str(radial["n_blades"]), "Unit": "-"},
-            {"Quantity": "d_theta", "Value": f"{radial['d_theta']:.4f}", "Unit": "rad"},
-        ]
-    table = make_table(table_data, ["Quantity", "Value", "Unit"])
-    return radial, status, table
-
-
-def _radial_ref_for_source(radial_data, source):
-    """(r1, r2, theta0) already used by run_radial_wrap to draw this
-    source's blade into radial_data -- so the passage preview lines up
-    EXACTLY with the blade copy already on screen, instead of an
-    independently-entered r1/r2 silently drifting from it (the bug
-    behind "the blade and the fluid domain ... is different than the
-    blade that is already there"). Returns None if radial_data doesn't
-    have this source computed yet (e.g. only "stator" was run but the
-    user also ticked the "rotor" passage checkbox)."""
-    if not radial_data:
-        return None
-    mode = radial_data.get("mode")
-    if mode == "combined":
-        sub = radial_data.get(source)
-        if not sub:
-            return None
-        return float(sub["r1"]), float(sub["r2"]), float(sub.get("theta0", 0.0))
-    if mode == "single" and radial_data.get("source") == source:
-        return float(radial_data["r1"]), float(radial_data["r2"]), float(radial_data.get("theta0", 0.0))
-    return None
-
-
-def _add_radial_passage_trace(fig, blade_data, pitch, r1, r2, source,
-                                 inlet_chords, outlet_chords, color, name, theta0=0.0):
-    """Preview-only: conformally maps the passage band + blade hole (see
-    turbo_moc.geometry.passage.extract_radial_passage_2d, which this mirrors --
-    same shared reference frame, so the preview matches what a download
-    would actually produce) and adds them as two traces -- band
-    (translucent fill) behind, blade (opaque) on top, cutting the hole
-    out visually the same way the axial preview does, no CAD boolean
-    needed just to look at it.
-
-    r1/r2 land at the BLADE's own leading/trailing edge (matching wrap_
-    blade_radial's own convention), NOT the passage domain's own
-    (extended) inlet/outlet caps -- the mapping's reference point/scale
-    is derived from the blade's own contour, then shared with the band,
-    so the band's caps extrapolate naturally to radii outside [r1, r2].
-    theta0 should be the SAME angle already used to lay out this
-    source's blade copy in radial_data (see _radial_ref_for_source) --
-    otherwise this trace and the blade drawn by plot_radial_cascade sit
-    at different angular positions even with matching r1/r2.
-    """
-    from turbo_moc.geometry.passage import _dense_boundary_points, _passage_geometry
-    from turbo_moc.geometry.radial import _reference_point_and_scale, _wrap_with_shared_reference
-
-    g = _passage_geometry(blade_data, pitch, source, inlet_chords, outlet_chords, 0.15, 0.05)
-    chordwise_axis = "y" if source == "stator" else "x"
-
-    blade_x = [p[0] for p in g["curve_xy"]]
-    blade_y = [p[1] for p in g["curve_xy"]]
-    if chordwise_axis == "y":
-        chord_vals, pitch_vals = blade_y, blade_x
-    else:
-        chord_vals, pitch_vals = blade_x, blade_y
-    x1, y1, c_axial = _reference_point_and_scale(chord_vals, pitch_vals)
-
-    band_pts = _dense_boundary_points(g, n_vertical=25, n_cap=15)
-    band_x = [p[0] for p in band_pts]
-    band_y = [p[1] for p in band_pts]
-    band_copies = _wrap_with_shared_reference(band_x, band_y, x1, y1, c_axial, r1, r2, 1, theta0, chordwise_axis)
-    bm = band_copies[0]
-    fig.add_trace(go.Scatter(
-        x=bm["x"] + [bm["x"][0]], y=bm["y"] + [bm["y"][0]],
-        mode="lines", fill="toself",
-        line=dict(color="black", width=1.5, dash="dot"),
-        fillcolor=color, opacity=0.25,
-        name=name, showlegend=False, hoverinfo="skip",
-    ))
-
-    # blade_curve (g["curve_xy"]) is already a closed contour on its own
-    # (fitted through the full suction+pressure loop) -- fill "toself"
-    # directly off it, same as _draw_radial_set/plot_blade both do for
-    # every other blade rendering in this app. Stitching the TE arc into
-    # the same polygon (matching _closed_wire_2d's CAD wire order) is
-    # only meaningful for the actual solid boolean cut in
-    # extract_radial_passage_2d -- as a plain filled polyline it doesn't
-    # survive the conformal mapping's distortion and renders "sliced".
-    blade_copies = _wrap_with_shared_reference(
-        blade_x, blade_y, x1, y1, c_axial, r1, r2, 1, theta0, chordwise_axis
-    )
-    bc = blade_copies[0]
-    fig.add_trace(go.Scatter(
-        x=bc["x"], y=bc["y"],
-        mode="lines", fill="toself",
-        line=dict(color="black", width=1.2),
-        fillcolor="#f0d9b5", opacity=0.9,
-        name=f"{name} blade", showlegend=False, hoverinfo="skip",
-    ))
-
-    if g["te_xy"] is not None:
-        te_x = [p[0] for p in g["te_xy"]]
-        te_y = [p[1] for p in g["te_xy"]]
-        te_copies = _wrap_with_shared_reference(
-            te_x, te_y, x1, y1, c_axial, r1, r2, 1, theta0, chordwise_axis
-        )
-        tc = te_copies[0]
-        fig.add_trace(go.Scatter(
-            x=tc["x"], y=tc["y"], mode="lines",
-            line=dict(color="black", width=1.2), opacity=0.9,
-            showlegend=False, hoverinfo="skip",
-        ))
+    table_data = [
+        {"Quantity": "k (scale factor)", "Value": f"{result['k']:.2f}", "Unit": "-"},
+        {"Quantity": "Pitch (scaled)", "Value": f"{result['pitch_scaled']:.2f}", "Unit": "mm"},
+        {"Quantity": "r_hub", "Value": f"{result['r_hub']:.2f}", "Unit": "mm"},
+        {"Quantity": "r_shroud", "Value": f"{result['r_shroud']:.2f}", "Unit": "mm"},
+        {"Quantity": "N_blades", "Value": str(result["n_blades"]), "Unit": "-"},
+        {"Quantity": "beta_inlet", "Value": f"{rotor_data['beta_inlet']:.2f}", "Unit": "deg"},
+        {"Quantity": "beta_outlet", "Value": f"{rotor_data['beta_outlet']:.2f}", "Unit": "deg"},
+    ]
+    status = html.Div("Sizing computed.", style={"color": "#1a7a1a", "fontWeight": "600"})
+    return result, status, make_table(table_data, ["Quantity", "Value", "Unit"])
 
 
 @app.callback(
-    Output("fig-radial", "figure"),
-    Input("radial-store", "data"),
-    Input("passage_radial_show", "value"),
-    Input("blade-store", "data"),
-    Input("blade-edited-store", "data"),
-    Input("rotor-store", "data"),
-    Input("radial_rotor_scale", "value"),
-    Input("passage_radial_stator_r1", "value"),
-    Input("passage_radial_stator_r2", "value"),
-    Input("passage_radial_rotor_r1", "value"),
-    Input("passage_radial_rotor_r2", "value"),
-    Input("passage_stator_inlet_chords", "value"),
-    Input("passage_stator_outlet_chords", "value"),
-    Input("passage_rotor_inlet_chords", "value"),
-    Input("passage_rotor_outlet_chords", "value"),
+    Output("rotor-sizing-vtk-container", "children"),
+    Input("rotor-sizing-store", "data"),
 )
-def update_radial_plot(radial_data, passage_show, base_blade, edited_blade, rotor_data, rotor_scale,
-                        stator_r1, stator_r2, rotor_r1, rotor_r2,
-                        stator_inlet_chords, stator_outlet_chords,
-                        rotor_inlet_chords, rotor_outlet_chords):
-    fig = turbo_moc.plotly.plot_radial_cascade(radial_data, clip_quadrant=False) if radial_data else go.Figure()
+def _update_rotor_sizing_vtk_preview(sizing_result):
+    if not sizing_result:
+        return _vtk_placeholder("Compute a sizing to see the 3D solid preview.")
 
-    show = passage_show or []
-    if "stator" in show:
-        stator = _effective_blade(base_blade, edited_blade)
-        if stator:
-            ref = _radial_ref_for_source(radial_data, "stator")
-            if ref is not None:
-                r1, r2, theta0 = ref
-            else:
-                r1, r2, theta0 = float(stator_r1 or 140.0), float(stator_r2 or 190.0), 0.0
-            _add_radial_passage_trace(
-                fig, stator, stator["pitch"], r1, r2,
-                source="stator",
-                inlet_chords=float(stator_inlet_chords or 1.0),
-                outlet_chords=float(stator_outlet_chords or 6.0),
-                color="#2ecc71", name="Stator passage", theta0=theta0,
+    if not DASH_VTK_AVAILABLE:
+        return _vtk_placeholder(
+            "dash-vtk is not installed -- 3D solid preview unavailable "
+            "(pip install \"turbo_moc[cad]\").")
+    try:
+        import vtk
+        from turbo_moc.geometry import export_annular_blade_stl
+    except ImportError:
+        return _vtk_placeholder(
+            "cadquery / vtk are not installed -- 3D solid preview unavailable "
+            "(pip install \"turbo_moc[cad]\").")
+
+    n_blades = int(sizing_result["n_blades"])
+    n_render_cap = 200
+    n_render = min(n_blades, n_render_cap)
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stl_path = os.path.join(tmpdir, "blade.stl")
+            export_annular_blade_stl(
+                sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
+                stl_path, n_blades=n_blades, flare="pitch_scale", source="rotor",
             )
-    if "rotor" in show and rotor_data:
-        scale = float(rotor_scale or 1.0)
-        scaled_blade = {
-            "suction": {"x": [v * scale for v in rotor_data["suction"]["x"]],
-                         "y": [v * scale for v in rotor_data["suction"]["y"]]},
-            "pressure": {"x": [v * scale for v in rotor_data["pressure"]["x"]],
-                          "y": [v * scale for v in rotor_data["pressure"]["y"]]},
-            "blade": {"x": [v * scale for v in rotor_data["blade"]["x"]],
-                       "y": [v * scale for v in rotor_data["blade"]["y"]],
-                       "translate": rotor_data["blade"]["translate"] * scale},
-            "chord": rotor_data["chord"] * scale,
-        }
-        rotor_pitch_mm = rotor_data["pitch"] * scale
-        ref = _radial_ref_for_source(radial_data, "rotor")
-        if ref is not None:
-            r1, r2, theta0 = ref
-        else:
-            r1, r2, theta0 = float(rotor_r1 or 145.0), float(rotor_r2 or 188.0), 0.0
-        _add_radial_passage_trace(
-            fig, scaled_blade, rotor_pitch_mm, r1, r2,
-            source="rotor",
-            inlet_chords=float(rotor_inlet_chords or 1.0),
-            outlet_chords=float(rotor_outlet_chords or 6.0),
-            color="#e67e22", name="Rotor passage", theta0=theta0,
-        )
-    return fig
+            reader = vtk.vtkSTLReader()
+            reader.SetFileName(stl_path)
+            reader.Update()
+            base_mesh = reader.GetOutput()
+
+            append = vtk.vtkAppendPolyData()
+            for i in range(n_render):
+                transform = vtk.vtkTransform()
+                transform.RotateZ(i * 360.0 / n_blades)
+                tf = vtk.vtkTransformPolyDataFilter()
+                tf.SetTransform(transform)
+                tf.SetInputData(base_mesh)
+                tf.Update()
+                append.AddInputData(tf.GetOutput())
+            append.Update()
+            mesh_state = to_mesh_state(append.GetOutput())
+    except Exception as e:
+        return _vtk_placeholder(f"Error building 3D solid preview: {e}")
+
+    caption = (f"Showing {n_render} of {n_blades} blades (capped at {n_render_cap})."
+               if n_render < n_blades else f"Showing all {n_blades} blades.")
+
+    return html.Div(
+        [
+            html.Div(caption, style={"position": "absolute", "top": "8px", "left": "8px",
+                                       "fontSize": "12px", "color": "#666", "zIndex": 1,
+                                       "backgroundColor": "rgba(255,255,255,0.85)",
+                                       "padding": "2px 8px", "borderRadius": "4px"}),
+            dash_vtk.View(
+                background=[0.93, 0.95, 0.97],
+                style={"height": "100%", "width": "100%"},
+                children=[
+                    dash_vtk.GeometryRepresentation(
+                        children=[dash_vtk.Mesh(state=mesh_state)],
+                        property={
+                            "color": [0.55, 0.63, 0.75],
+                            "edgeVisibility": False,
+                            "interpolation": "Phong",
+                            "ambient": 0.12, "diffuse": 0.8,
+                            "specular": 0.45, "specularPower": 30,
+                        },
+                        showCubeAxes=True,
+                        cubeAxesStyle={
+                            "axisLabels": ["X [mm]", "Y [mm]", "Z (axial) [mm]"],
+                        },
+                    ),
+                ],
+            ),
+        ],
+        style={"position": "relative", "height": "100%", "width": "100%"},
+    )
 
 
 @app.callback(
-    Output("download-radial-plot", "data"),
-    Input("radial-download-btn", "n_clicks"),
-    State("radial-store", "data"),
-    State("radial-save-format", "value"),
+    Output("download-rotor-sizing-step", "data"),
+    Output("rotor-sizing-step-status", "children"),
+    Input("download-rotor-sizing-step-btn", "n_clicks"),
+    State("rotor-sizing-store", "data"),
     prevent_initial_call=True,
 )
-def download_radial_plot(n_clicks, radial_data, fmt):
-    if not radial_data:
-        return dash.no_update
-    fig, _ax = turbo_moc.mpl.plot_radial_cascade(radial_data)
-    buf = io.BytesIO()
-    fig.savefig(buf, format=fmt, dpi=200, bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    return dcc.send_bytes(buf.read(), f"radial_cascade.{fmt}")
-
-
-# --------------------------------------------------------------------------
-# Flare callbacks -- registered once per prefix ("cascade" for Phase 4,
-# "radial" for Phase 5) via this factory, so the meridional view + flared
-# STEP export logic exists exactly once despite appearing in two phases.
-# Both the meridional sketch and the exported solid read the SAME hub/tip
-# radii fields for a given prefix, so they can never disagree.
-# --------------------------------------------------------------------------
-def _empty_figure_with_message(message):
-    """A blank go.Figure() with a centered annotation instead of a truly
-    empty plot -- the meridional view has three different reasons to come
-    back empty (Flare not enabled, a prerequisite phase not computed yet,
-    or a bad radius/gap value raising inside build_meridional_view) that
-    were all previously indistinguishable from each other (and from a
-    real bug) as a blank dcc.Graph with zero feedback."""
-    fig = go.Figure()
-    fig.add_annotation(text=message, xref="paper", yref="paper", x=0.5, y=0.5,
-                        showarrow=False, font=dict(size=13, color="#666"))
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
-    return fig
-
-
-def _stator_axial_chord(stator_blade):
-    """Stator's own chordwise (flow-direction) extent -- blade_curve's y,
-    per parametrize_stator_blade's own rotation convention (see turbo_moc/
-    geometry/radial.py's module docstring)."""
-    ys = stator_blade["blade_curve"]["y"]
-    return max(ys) - min(ys)
-
-
-def _register_flare_callbacks(prefix, scale_input_id=None, gap_input_id=None):
-    @app.callback(
-        Output(f"{prefix}_flare_fields", "style"),
-        Input(f"{prefix}_flare_enable", "value"),
-    )
-    def _toggle(enable_vals):
-        return {} if enable_vals and "on" in enable_vals else {"display": "none"}
-
-    meridional_inputs = [
-        Input(f"{prefix}_flare_enable", "value"),
-        Input("blade-store", "data"),
-        Input("blade-edited-store", "data"),
-        Input("rotor-store", "data"),
-        Input(f"{prefix}_stator_r_hub_in", "value"),
-        Input(f"{prefix}_stator_r_hub_out", "value"),
-        Input(f"{prefix}_stator_r_tip_in", "value"),
-        Input(f"{prefix}_stator_r_tip_out", "value"),
-        Input(f"{prefix}_rotor_r_hub_in", "value"),
-        Input(f"{prefix}_rotor_r_hub_out", "value"),
-        Input(f"{prefix}_rotor_r_tip_in", "value"),
-        Input(f"{prefix}_rotor_r_tip_out", "value"),
-        Input(scale_input_id or f"{prefix}_flare_rotor_scale", "value"),
-        Input(gap_input_id or f"{prefix}_flare_gap", "value"),
-    ]
-    # Only the "cascade" (Phase 4) copy sits next to a figure with a
-    # comparable z axis (the axial cascade view) -- syncing to its
-    # z-range keeps the two visually aligned (see cascade-zrange-store).
-    # The "radial" (Phase 5) copy has no such sibling, so it just
-    # autoscales to its own data.
-    if prefix == "cascade":
-        meridional_inputs.append(Input("cascade-zrange-store", "data"))
-
-    @app.callback(Output(f"fig-{prefix}-meridional", "figure"), *meridional_inputs)
-    def _update_plot(enable_vals, base_blade, edited_blade, rotor_data,
-                      s_hub_in, s_hub_out, s_tip_in, s_tip_out,
-                      r_hub_in, r_hub_out, r_tip_in, r_tip_out,
-                      rotor_scale, gap, z_range=None):
-        if not enable_vals or "on" not in enable_vals:
-            return _empty_figure_with_message("Enable \"Flare\" above to see the meridional view.")
-        stator = _effective_blade(base_blade, edited_blade)
-        if not stator or not rotor_data:
-            missing = []
-            if not stator:
-                missing.append("a stator blade (Phase 2)")
-            if not rotor_data:
-                missing.append("a rotor blade (Phase 3)")
-            return _empty_figure_with_message(f"Compute {' and '.join(missing)} first.")
-        try:
-            stator_chord = _stator_axial_chord(stator)
-            rotor_chord = rotor_data["chord"] * float(rotor_scale or 1.0)
-            meridional = build_meridional_view(
-                stator_chord, s_hub_in, s_hub_out, s_tip_in, s_tip_out,
-                rotor_chord, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
-                gap or 0.0,
+def download_rotor_sizing_step(n_clicks, sizing_result):
+    if not sizing_result:
+        return dash.no_update, html.Div("Compute a sizing first.", style={"color": "#b00020"})
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from turbo_moc.geometry import export_annular_blade_step
+            face_path = os.path.join(tmpdir, "face.step")
+            solid_path = os.path.join(tmpdir, "solid.step")
+            export_annular_blade_step(
+                sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
+                face_path, solid_path, n_blades=int(sizing_result["n_blades"]),
+                flare="pitch_scale", source="rotor",
             )
-        except (TypeError, ValueError) as e:
-            return _empty_figure_with_message(f"Error: {e}")
-        return turbo_moc.plotly.plot_meridional_view(meridional, z_range=z_range)
+            with open(solid_path, "rb") as f:
+                content = f.read()
+    except ImportError:
+        return dash.no_update, html.Div(
+            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
 
-    @app.callback(
-        Output(f"{prefix}_download_flared_stator", "data"),
-        Output(f"{prefix}_flared_step_status", "children", allow_duplicate=True),
-        Input(f"{prefix}_download_flared_stator_btn", "n_clicks"),
-        State("blade-store", "data"),
-        State("blade-edited-store", "data"),
-        State(f"{prefix}_stator_r_hub_in", "value"),
-        State(f"{prefix}_stator_r_hub_out", "value"),
-        State(f"{prefix}_stator_r_tip_in", "value"),
-        State(f"{prefix}_stator_r_tip_out", "value"),
-        prevent_initial_call=True,
-    )
-    def _download_stator(n_clicks, base_blade, edited_blade, r_hub_in, r_hub_out, r_tip_in, r_tip_out):
-        stator = _effective_blade(base_blade, edited_blade)
-        if not stator:
-            return dash.no_update, html.Div("Compute a stator blade first (Phase 2).",
-                                              style={"color": "#b00020"})
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                from turbo_moc.geometry import export_flared_blade_step
-                face_path = os.path.join(tmpdir, "face.step")
-                solid_path = os.path.join(tmpdir, "solid.step")
-                export_flared_blade_step(
-                    stator, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
-                    face_path, solid_path, source="stator",
-                )
-                with open(solid_path, "rb") as f:
-                    content = f.read()
-        except ImportError:
-            return dash.no_update, html.Div(
-                "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
-
-        return dcc.send_bytes(content, "stator_blade_flared.step"), html.Div(
-            "Flared stator STEP ready.", style={"color": "#1a7a1a"})
-
-    @app.callback(
-        Output(f"{prefix}_download_flared_rotor", "data"),
-        Output(f"{prefix}_flared_step_status", "children", allow_duplicate=True),
-        Input(f"{prefix}_download_flared_rotor_btn", "n_clicks"),
-        State("rotor-store", "data"),
-        State(f"{prefix}_rotor_r_hub_in", "value"),
-        State(f"{prefix}_rotor_r_hub_out", "value"),
-        State(f"{prefix}_rotor_r_tip_in", "value"),
-        State(f"{prefix}_rotor_r_tip_out", "value"),
-        State(scale_input_id or f"{prefix}_flare_rotor_scale", "value"),
-        prevent_initial_call=True,
-    )
-    def _download_rotor(n_clicks, rotor_data, r_hub_in, r_hub_out, r_tip_in, r_tip_out, rotor_scale):
-        if not rotor_data:
-            return dash.no_update, html.Div("Compute a rotor blade first (Phase 3).",
-                                              style={"color": "#b00020"})
-        # export_flared_blade_step's r_hub/r_tip are in mm -- the rotor
-        # blade's own points are only in mm already if it was designed
-        # with r_star; otherwise (nondimensional r*) scale them here
-        # first, same convention as Phases 4/5's own rotor_scale fields.
-        scale = float(rotor_scale or 1.0)
-        scaled_blade = {"blade": {
-            "x": [v * scale for v in rotor_data["blade"]["x"]],
-            "y": [v * scale for v in rotor_data["blade"]["y"]],
-        }}
-
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                from turbo_moc.geometry import export_flared_blade_step
-                face_path = os.path.join(tmpdir, "face.step")
-                solid_path = os.path.join(tmpdir, "solid.step")
-                export_flared_blade_step(
-                    scaled_blade, r_hub_in, r_hub_out, r_tip_in, r_tip_out,
-                    face_path, solid_path, source="rotor",
-                )
-                with open(solid_path, "rb") as f:
-                    content = f.read()
-        except ImportError:
-            return dash.no_update, html.Div(
-                "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
-
-        return dcc.send_bytes(content, "rotor_blade_flared.step"), html.Div(
-            "Flared rotor STEP ready.", style={"color": "#1a7a1a"})
-
-
-_register_flare_callbacks("cascade", scale_input_id="rotor_scale_mm", gap_input_id="rotor_axial_gap")
-_register_flare_callbacks("radial", scale_input_id="radial_rotor_scale")
+    return dcc.send_bytes(content, "rotor_sized_blade.step"), html.Div(
+        "Sized rotor STEP ready (1 blade).", style={"color": "#1a7a1a"})
 
 
 def main():

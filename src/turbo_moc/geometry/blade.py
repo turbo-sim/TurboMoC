@@ -19,11 +19,14 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.interpolate import CubicHermiteSpline
 
+from .annular import wrap_blade_annular
 from .spline_tool import BSplineTool
 
 __all__ = [
     "parametrize_stator_blade", "parametrize_stator_blade_semi",
-    "export_blade_step", "export_flared_blade_step", "move_control_point_along_normal",
+    "export_blade_step", "export_flared_blade_step", "export_annular_blade_step",
+    "export_annular_blade_stl",
+    "move_control_point_along_normal",
 ]
 
 
@@ -183,6 +186,7 @@ def parametrize_stator_blade(
     n_cp=30,
     num_baseline_points=500,
     num_curve_points=500,
+    mirror=False,
 ):
     """
     Build a closed stator blade profile from a MOC nozzle wall contour
@@ -208,6 +212,17 @@ def parametrize_stator_blade(
         Number of B-spline control points fitted to the closed contour.
     num_baseline_points, num_curve_points : int
         Resampling / evaluation resolution for the B-spline fit.
+    mirror : bool
+        Flip the blade's concavity (which side is suction/pressure) by
+        reflecting the finished shape across the chordwise (y) axis --
+        i.e. negating every "x" (pitchwise) coordinate in the returned
+        dict, post-construction. NOT the same as negating metal_angle_out:
+        that feeds a turning-angle profile AND a separate frame rotation,
+        both driven by metal_angle_out, and negating it does not cancel
+        cleanly -- it produces a self-crossing, invalid shape (confirmed
+        by direct comparison, not assumed). Reflecting the finished 2D
+        points is the only method that's actually been verified to give a
+        clean mirror image.
 
     Returns
     -------
@@ -329,6 +344,13 @@ def parametrize_stator_blade(
     control_points, knots = spline3.backward_fixed(baseline_equi, n_cp)
     blade_curve = spline3.forward(control_points, knots, num_points=num_curve_points)
 
+    if mirror:
+        suction_x = -suction_x
+        pressure_x = -pressure_x
+        trailing_x = -trailing_x
+        blade_curve = np.column_stack([-blade_curve[:, 0], blade_curve[:, 1]])
+        control_points = np.column_stack([-control_points[:, 0], control_points[:, 1]])
+
     return {
         "suction": {"x": suction_x.tolist(), "y": suction_y.tolist()},
         "pressure": {"x": pressure_x.tolist(), "y": pressure_y.tolist()},
@@ -345,6 +367,7 @@ def parametrize_stator_blade(
         "metal_angle_out": float(metal_angle_out),
         "r_trailing": float(r_trailing),
         "n_cp": int(n_cp),
+        "mirror": bool(mirror),
         "units": "mm",
     }
 
@@ -360,6 +383,7 @@ def parametrize_stator_blade_semi(
     num_baseline_points=500,
     num_curve_points=500,
     trailing_edge_num_points=15,
+    mirror=False,
 ):
     """
     Build a closed stator blade profile from a MOC nozzle wall contour,
@@ -483,6 +507,13 @@ def parametrize_stator_blade_semi(
     control_points, knots = spline3.backward(baseline_equi, n_cp)
     blade_curve = spline3.forward(control_points, knots, num_points=num_curve_points)
 
+    if mirror:
+        suction_x = -suction_x
+        pressure_x = -pressure_x
+        trailing_x = -trailing_x
+        blade_curve = np.column_stack([-blade_curve[:, 0], blade_curve[:, 1]])
+        control_points = np.column_stack([-control_points[:, 0], control_points[:, 1]])
+
     return {
         "suction": {"x": suction_x.tolist(), "y": suction_y.tolist()},
         "pressure": {"x": pressure_x.tolist(), "y": pressure_y.tolist()},
@@ -499,6 +530,7 @@ def parametrize_stator_blade_semi(
         "metal_angle_out": float(metal_angle_out),
         "r_trailing": float(r_trailing),
         "n_cp": int(n_cp),
+        "mirror": bool(mirror),
         "units": "mm",
         "variant": "semi",
     }
@@ -672,3 +704,208 @@ def export_flared_blade_step(blade_data, r_hub_in, r_hub_out, r_tip_in, r_tip_ou
 
     loft_solid = cq.Solid.makeLoft([hub_wire, tip_wire])
     cq.exporters.export(loft_solid, str(solid_path))
+
+
+# OCCT's own working precision is ~1e-7 (mm, this codebase's convention);
+# a segment shorter than that is "degenerate" to it even when nonzero, and
+# silently corrupts downstream topology (wire mis-ordering, failed lofts)
+# instead of raising -- real blade data hits this routinely (e.g. a
+# trailing-edge/main-curve junction that's 0.0 by construction, or a
+# neighbour a few nanometers off after the 3D wrap's floating-point ops).
+# 1e-6 mm (1 nm) comfortably clears that floor while staying far below any
+# real geometric feature.
+_MIN_EDGE_LENGTH = 1e-6
+
+
+def _maybe_line_edge(cq, p1, p2, tol=_MIN_EDGE_LENGTH):
+    """A straight edge p1->p2, or None if the two points already coincide
+    (within tol) -- cq.Edge.makeLine raises on a zero-length line, which a
+    literal "closed" input curve (e.g. design_rotor_vortex_blade's "blade",
+    whose first and last points are identical by construction) triggers
+    every time otherwise."""
+    if sum((a - b) ** 2 for a, b in zip(p1, p2)) < tol ** 2:
+        return None
+    return cq.Edge.makeLine(cq.Vector(*p1), cq.Vector(*p2))
+
+
+def _dedupe_consecutive(pts, tol=_MIN_EDGE_LENGTH):
+    """Drop each point that coincides (within tol) with the one before it --
+    cq.Edge.makeSpline's underlying GeomAPI_Interpolate raises
+    Standard_ConstructionError on a duplicate/near-zero-length leading
+    segment, which real blade data hits routinely (a stator's trailing-edge
+    arc and its main curve share an exact junction point by construction).
+    Workplane's own .spline() tolerates this silently; raw cq.Edge.makeSpline
+    does not, hence this explicit pass before every use of it below."""
+    out = [pts[0]]
+    for p in pts[1:]:
+        if sum((a - b) ** 2 for a, b in zip(p, out[-1])) >= tol ** 2:
+            out.append(p)
+    return out
+
+
+def _closed_wire_3d(cq, curve_xyz, te_xyz=None):
+    """3D analog of _closed_wire_2d -- same TE-polyline + spline-curve
+    split, but built from raw (x, y, z) point lists via cq.Edge/cq.Wire
+    directly, since Workplane sketching (moveTo/spline/polyline) is
+    plane-locked and these span-station wires lie on a curved (cylindrical)
+    surface, not a flat plane.
+
+    Edges are added to the wire builder ONE AT A TIME, in known order, not
+    via cq.Wire.assembleEdges's batch add -- that method's underlying
+    BRepBuilderAPI_MakeWire.Add(TopTools_ListOfShape) auto-solves edge
+    connectivity order-independently, which a near-degenerate segment (see
+    _MIN_EDGE_LENGTH) was found to occasionally mis-solve into a
+    self-crossing wire (ShapeAnalysis_Wire.CheckOrder() confirmed this on
+    real blade data) even though every individual edge/vertex still passed
+    validity checks -- feeding edges in already-known sequence order avoids
+    that ambiguity entirely."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeWire
+
+    if te_xyz:
+        line_pts = [curve_xyz[-1], *te_xyz]
+        line_edges = [
+            e for i in range(len(line_pts) - 1)
+            if (e := _maybe_line_edge(cq, line_pts[i], line_pts[i + 1])) is not None
+        ]
+        spline_pts = _dedupe_consecutive([te_xyz[-1], *curve_xyz[:-1]])
+        spline_edge = cq.Edge.makeSpline([cq.Vector(*p) for p in spline_pts])
+        close_edge = _maybe_line_edge(cq, curve_xyz[-2], curve_xyz[-1])
+        edges = [*line_edges, spline_edge, *([close_edge] if close_edge is not None else [])]
+    else:
+        spline_pts = _dedupe_consecutive(curve_xyz)
+        spline_edge = cq.Edge.makeSpline([cq.Vector(*p) for p in spline_pts])
+        close_edge = _maybe_line_edge(cq, curve_xyz[-1], curve_xyz[0])
+        edges = [spline_edge, *([close_edge] if close_edge is not None else [])]
+
+    builder = BRepBuilderAPI_MakeWire()
+    for e in edges:
+        builder.Add(e.wrapped)
+    return cq.Wire(builder.Wire())
+
+
+def _cap_wire(cq, wire):
+    """A free-form (not necessarily planar) surface patch filling `wire`,
+    via BRepOffsetAPI_MakeFilling -- cq.Face.makeFromWires only builds
+    planar faces, but the hub/shroud boundary here curves around the
+    cylinder axis, so it needs a genuine filling surface instead."""
+    from OCP.BRepOffsetAPI import BRepOffsetAPI_MakeFilling
+    from OCP.GeomAbs import GeomAbs_C0
+
+    filler = BRepOffsetAPI_MakeFilling()
+    for e in wire.Edges():
+        filler.Add(e.wrapped, GeomAbs_C0)
+    filler.Build()
+    return cq.Face(filler.Shape())
+
+
+def _close_loft_solid(cq, wires):
+    """cq.Solid.makeLoft(wires) leaves the hub/shroud ends OPEN here (an
+    unfilled hole at each end, not a real solid) -- BRepOffsetAPI_
+    ThruSections's automatic end-capping only works for PLANAR boundary
+    sections, and both ends of this loft are the same curved-around-the-
+    cylinder, non-planar wires as every other span station. This caps
+    both ends explicitly (_cap_wire) and sews loft + caps into one
+    watertight shell, then builds a genuine closed Solid from it -- so
+    CAD software sees a real body, not a surface with holes at the ends."""
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeSolid, BRepBuilderAPI_Sewing
+    from OCP.TopoDS import TopoDS
+
+    loft_shell = cq.Solid.makeLoft(wires)
+    hub_cap = _cap_wire(cq, wires[0])
+    tip_cap = _cap_wire(cq, wires[-1])
+
+    sewing = BRepBuilderAPI_Sewing(1e-6)
+    for shape in (loft_shell, hub_cap, tip_cap):
+        sewing.Add(shape.wrapped)
+    sewing.Perform()
+    shell = TopoDS.Shell_s(sewing.SewedShape())
+
+    solid_maker = BRepBuilderAPI_MakeSolid(shell)
+    return cq.Solid(solid_maker.Solid())
+
+
+def export_annular_blade_step(blade_data, r_hub, r_shroud, face_path, solid_path=None,
+                               n_blades=1, flare="pitch_scale", n_span=13, theta0=0.0,
+                               source="stator", z_offset=0.0):
+    """
+    Export a TRUE annular 3D blade solid: the profile is wrapped
+    circumferentially at every span station from r_hub to r_shroud (see
+    turbo_moc.geometry.annular's module docstring for the wrap math), then
+    lofted through all n_span sections and capped at the hub/shroud ends
+    (_close_loft_solid) into one watertight body -- unlike export_flared_
+    blade_step's flat 2-wire loft between parallel planes, this actually
+    curves around the machine axis. Always exports a SINGLE blade;
+    n_blades only affects the pitch-scale flare physics (pitch =
+    2*pi*r/n_blades convention) and is not used to multiply the exported
+    solid.
+
+    Requires cadquery (not a core turbo_moc dependency -- import kept local
+    so the rest of turbo_moc.geometry works without it installed).
+
+    Unlike export_flared_blade_step's hub_face (flat, so a genuine planar
+    Face), the hub SECTION here is a non-planar 3D curve -- it curves
+    around the cylinder AND varies axially along the profile at the same
+    time -- so cq.Face.makeFromWires (planar faces only) can't build a
+    face from it. face_path therefore gets the hub WIRE itself (a valid
+    STEP curve, still useful as a reference/sketch import), not a face.
+
+    z_offset : float
+        Added to every axial (Z) coordinate -- positions this solid in a
+        shared global frame against an already-placed neighbor (e.g. a
+        rotor STEP file), same purpose as turbo_moc.geometry.
+        export_turbogrid_blade's x_offset. No sign/orientation logic is
+        applied here (unlike that function's axial_sign) -- a STEP solid
+        has no inherent "inlet/outlet" semantics, so z_offset is a plain
+        additive shift; figure out which end of THIS blade (its wrapped
+        curve/trailing_edge z-range) needs to land where before picking
+        a value.
+    """
+    import cadquery as cq
+
+    wires, solid = _build_annular_blade_solid(
+        cq, blade_data, r_hub, r_shroud, n_blades=n_blades,
+        flare=flare, n_span=n_span, theta0=theta0, source=source, z_offset=z_offset,
+        build_solid=solid_path is not None,
+    )
+    cq.exporters.export(wires[0], str(face_path))
+    if solid_path is None:
+        return
+    cq.exporters.export(solid, str(solid_path))
+
+
+def _build_annular_blade_solid(cq, blade_data, r_hub, r_shroud, n_blades=1, flare="pitch_scale",
+                                n_span=13, theta0=0.0, source="stator", z_offset=0.0, build_solid=True):
+    """Shared by export_annular_blade_step and export_annular_blade_stl --
+    builds the per-span wires and (optionally) the watertight lofted+capped
+    solid once, so both export formats come from the exact same body
+    instead of two independently-built shapes that could drift apart."""
+    wrapped = wrap_blade_annular(blade_data, r_hub, r_shroud, n_blades=n_blades,
+                                  flare=flare, n_span=n_span, theta0=theta0, source=source)
+    curve = wrapped["curve"]
+    te = wrapped["trailing_edge"]
+
+    wires = []
+    for i in range(wrapped["n_span"]):
+        curve_xyz = list(zip(curve["x"][0, i], curve["y"][0, i], curve["z"][0, i] + z_offset))
+        te_xyz = (list(zip(te["x"][0, i], te["y"][0, i], te["z"][0, i] + z_offset))
+                  if te is not None else None)
+        wires.append(_closed_wire_3d(cq, curve_xyz, te_xyz))
+
+    solid = _close_loft_solid(cq, wires) if build_solid else None
+    return wires, solid
+
+
+def export_annular_blade_stl(blade_data, r_hub, r_shroud, stl_path,
+                              n_blades=1, flare="pitch_scale", n_span=13, theta0=0.0,
+                              source="stator", z_offset=0.0):
+    """Export the same watertight annular blade solid as
+    export_annular_blade_step, but as an STL mesh -- for CAD-quality (true
+    solid, properly shaded) 3D preview in the app via dash-vtk, which reads
+    triangulated meshes, not BREP/STEP. Requires cadquery."""
+    import cadquery as cq
+
+    _, solid = _build_annular_blade_solid(
+        cq, blade_data, r_hub, r_shroud, n_blades=n_blades,
+        flare=flare, n_span=n_span, theta0=theta0, source=source, z_offset=z_offset,
+    )
+    cq.exporters.export(solid, str(stl_path))

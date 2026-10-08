@@ -23,7 +23,7 @@ dependencies = [
 [project.optional-dependencies]
 # Optional STEP export support. CadQuery may instead be installed through the
 # Conda environment defined in environment.yaml.
-cad = ["cadquery"]
+cad = ["cadquery", "dash-vtk"]
 
 [project.scripts]
 turbo_moc-app = "turbo_moc.app:main"
