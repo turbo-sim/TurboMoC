@@ -1,0 +1,81 @@
+# Stator design and Gmsh meshing of one periodic fluid passage.
+# Nozzle lengths are in metres; the blade and plotted passage use millimetres.
+nozzle:
+  fluid_name: Cyclopentane
+  P0: 251300.0                 # Stagnation pressure [Pa]
+  Q0: 0.025                   # Inlet vapour mass fraction [-]
+  p_back: 95000.0             # Exit pressure [Pa]
+  solver: conventional
+  use_true_sauer_line: true
+  y_t: 0.01                  # Throat half-height [m]
+  n: 15                      # Initial characteristic-line resolution
+  rho_t: 0.2                 # Throat radius [m]
+  rho_d: 0.1                 # Divergent radius [m]
+  delta_flow: 0.0             # Planar flow
+  tau_max: 90.0              # Conventional solver angular extent [deg]
+  tau_step: 1.0              # Angular increment [deg]
+
+blade:
+  metal_angle_in: 0.0         # [deg]
+  metal_angle_out: 65.0       # [deg]
+  r_trailing: 0.5             # Trailing-edge radius [mm]
+  inlet_opening_ratio: 1.3    # Pitch / inlet opening [-]
+  n_cp: 30
+  num_baseline_points: 500
+  num_curve_points: 500
+
+passage:
+  inlet_chords: 1.5           # Upstream extent / nominal axial chord
+  outlet_chords: 2.0          # Downstream extent / nominal axial chord
+  domain_shift_mode: auto     # manual: use domain_shift; auto: maximize minimum side clearance
+  domain_shift: 0.0           # Manual pitchwise shift / pitch [-]; positive moves domain toward +x
+  # Auto mode ignores domain_shift and searches within +/- half a pitch.
+  # Both boundaries and caps move together; the blade remains fixed.
+  # Cap distances reuse inlet_chords/outlet_chords above. Each cubic has
+  # four control points, with end handles parallel to the required tangents.
+  # Handle length [mm] = proportion below * extension axial length [mm].
+  # Increase a handle to maintain its endpoint direction farther into the blend.
+  # Proportions must be in (0, 1); axially overlapping handles are rejected.
+  smooth:
+    inlet_axial_tangent: 0.35   # Inlet P0->P1: downstream axial tangent handle
+    inlet_blade_tangent: 0.35   # Inlet P2->P3: convergent inlet metal-angle handle
+    outlet_blade_tangent: 0.15  # Outlet P0->P1: divergent exit metal-angle handle
+    outlet_axial_tangent: 0.55  # Outlet P2->P3: downstream axial tangent handle
+    num_points: 200            # Plot samples and convergent spline interpolation points (>=3); not mesh nodes
+
+mesh:
+  show_gui: true             # Open Gmsh after generating and saving the mesh
+  image:
+    filename: stator_mesh.png # Orange view of the actual generated mesh; saved even without a GUI
+    dpi: 200                 # PNG resolution in dots per inch
+  terminal_output: true
+  verbosity: 2              # Warnings/errors only; 5 restores progress and the banner
+  blade_size: 0.5            # Tangential element size near the blade [mm]
+  domain_size: 2.0           # Far-field element size [mm]
+  curvature_elements: 40    # Curvature sizing on smooth blade/periodic CAD: elements per 2*pi; 0 disables
+  algorithm: 8              # 8 prepares triangles for quadrilateral recombination
+  recombine: true           # Recombine the fluid surface, including the far field
+  recombination_algorithm: 1 # 0: simple (ParaBlade); 1: Blossom; 2/3: full-quad
+  smoothing_steps: 5
+  report:
+    enabled: true             # Write offline HTML, JSON summary, CSV cell metrics, and histogram PNG
+    histogram_bins: 30        # Histogram resolution in the quality report (>=2)
+    worst_cells: 10           # Number of worst cells listed for skewness and orthogonality
+    inflation_tolerance: 0.35 # Relative height tolerance for reconstructed layer membership (estimate)
+  cgns:
+    enabled: true
+    filename: stator_mesh.cgns
+    length_scale: 0.001      # Multiply Gmsh coordinates [mm] to export metres
+    boundary_types:
+      blade: BCWallViscous
+      inlet: BCInflowSubsonic
+      outlet: BCOutflowSubsonic
+      periodic_left: BCGeneral
+      periodic_right: BCGeneral
+  inflation:
+    enabled: true
+    first_height: 0.02       # First cell height normal to the blade [mm]
+    growth_ratio: 1.2        # Height ratio between successive layers [-]
+    thickness: 0.8           # Maximum total inflation thickness [mm]; layer count is derived
+    # Core start size and transition distance are calculated automatically
+    # from the last-layer height and local tangential blade spacing.

@@ -1,0 +1,77 @@
+# Full workflow settings. Paths resolve relative to this YAML file.
+# Inlet conditions and geometry/mesh parameters come from the shared Gmsh YAML.
+design_file: ../gmsh/stator_mesh.yaml
+output_dir: output
+moc_cache_file: output/gmsh/nozzle_solution.json
+save_geometry_figure: true
+prepare_only: false          # true: generate mesh/model and skip Fluent
+run_case: true               # false: create the configured case without initializing or solving
+force_moc_solve: false       # true: replace the cached nozzle design
+
+reporting:
+  level: INFO               # DEBUG adds detailed diagnostics; WARNING shows only warnings/errors
+  filename: workflow.log    # Console messages are also saved here, under output_dir; replaced each run
+
+barotropic:
+  # MoC uses equilibrium properties along an isentrope: efficiency = 1.
+  calculation_type: equilibrium
+  efficiency: 1.0
+  # Independent barotropic range: p_out = inlet pressure / pressure_ratio.
+  # Fluent outlet pressure still comes from nozzle.p_back in the shared YAML.
+  pressure_ratio: 8.0
+  polynomial_degree: 8
+  ODE_solver: LSODA
+  ODE_tolerance: 1.0e-9
+  save_figures: true
+
+fluent:
+  product_version: "24.2"     # Installed Fluent 2024 R2; null selects the newest installation
+  processor_count: 4
+  start_timeout: 90
+  ui_mode: hidden_gui
+  case_filename: stator_fluent.cas.h5
+  material_name: barotropic_fluid
+  turbulence_intensity: 0.05  # Fraction, not percent
+  turbulence_viscosity_ratio: 10.0
+  # Hybrid initialization runs once before the first solution stage.
+  density_relaxation: 1.0    # Keep density consistent with the pressure-dependent material
+  turbulence_relaxation: 0.5
+  # Each block stops at the residual tolerances or its iteration limit, then advances.
+  # Pressure/property and mass-balance reports run only after the final block.
+  # order: first or second changes pressure, density, momentum, k and omega together.
+  solution_strategy:
+    - {iterations: 200, time_scale_factor: 0.5, order: first}
+    - {iterations: 200, time_scale_factor: 1.0, order: first}
+    - {iterations: 200, time_scale_factor: 2.0, order: first}
+    - {iterations: 200, time_scale_factor: 4.0, order: first}
+    - {iterations: 200, time_scale_factor: 1.0, order: second}
+    - {iterations: 1000, time_scale_factor: 3.0, order: second}
+  high_order_relaxation_factor: 0.25  # HOTR is enabled for all flow variables
+  # Absolute convergence criteria for the normalized residuals.
+  residual_equations:
+    continuity: 1.0e-6
+    x-velocity: 1.0e-6
+    y-velocity: 1.0e-6
+    k: 1.0e-6
+    omega: 1.0e-6
+  plot_residuals: true         # Use barotropy.plot_residuals() to save residuals.png
+  print_transcript: true      # Stream Fluent's convergence table to the terminal
+  pressure_contour:
+    enabled: true
+    filename: contour_pressure.png
+    width: 1600
+    height: 1000
+  mach_contour:
+    enabled: true
+    filename: contour_mach.png
+    width: 1600
+    height: 1000
+  periodic_instancing:
+    enabled: true
+    repeats: 3                # Fluent's Number of Repeats: three blade instances
+  boundaries:                # Mesh-zone names; unique CGNS prefixes are detected automatically
+    inlet: inlet
+    outlet: outlet
+    blade: blade
+    periodic_left: periodic_left
+    periodic_right: periodic_right
