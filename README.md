@@ -24,7 +24,11 @@ TurboMoC is an open-source Python package for exploring nozzle and blade designs
 
 ## Installation instructions
 
-TurboMoC requires Python 3.11, 3.12, or 3.13. Install it with pip in your Python environment:
+TurboMoC requires Python 3.11, 3.12, or 3.13.
+
+### Install from PyPI
+
+Install with pip in your Python environment:
 
 ```bash
 python -m pip install --upgrade "turbo_moc[cad]"
@@ -32,13 +36,41 @@ python -m pip install --upgrade "turbo_moc[cad]"
 
 This also installs CadQuery for STEP geometry export and upgrades an existing TurboMoC installation.
 
-To install from source with [Poetry](https://python-poetry.org/docs/#installation), clone the repository and install the package with CAD support:
+To install TurboMoC from PyPI into an existing [Poetry](https://python-poetry.org/docs/cli/#add)
+project, use `poetry add` with bracket notation for optional extras:
+
+```bash
+poetry add "turbo_moc[cad]"
+```
+
+Include the `fluent` extra to install optional PyFluent support alongside CAD:
+
+```bash
+poetry add "turbo_moc[cad,fluent]"
+```
+
+Use `"turbo_moc[fluent]"` if you only need the Fluent extra. Poetry records the
+selected extras in your project's dependencies and installs them from PyPI.
+
+### Install from source
+
+With [Poetry](https://python-poetry.org/docs/#installation), clone the repository and install the package with CAD support:
 
 ```bash
 git clone https://github.com/turbo-sim/TurboMoC.git
 cd TurboMoC
 poetry install --extras cad
 ```
+
+For CAD and Fluent support in the source checkout, use:
+
+```bash
+poetry install --extras "cad fluent"
+```
+
+The `fluent` extra installs the Python interface; Fluent must be installed and
+licensed separately. See the [Fluent workflow README](examples/fluent/readme.md)
+for the companion barotropy installation and example configuration.
 
 Use `poetry run python` to run Python scripts in the Poetry environment.
 

@@ -14,6 +14,8 @@ dependencies = [
     "numpy",
     "scipy",
     "matplotlib",
+    "gmsh>=4.12,<5.0",
+    "PyYAML>=6.0,<7.0",
     "pandas",
     "plotly",
     "kaleido>=1",
@@ -24,6 +26,9 @@ dependencies = [
 # Optional STEP export support. CadQuery may instead be installed through the
 # Conda environment defined in environment.yaml.
 cad = ["cadquery"]
+# Fluent automation is opt-in: poetry install -E fluent / pip install .[fluent].
+# Install the companion barotropy checkout separately for fluid-model generation.
+fluent = ["ansys-fluent-core>=0.38,<0.43"]
 
 [project.scripts]
 turbo_moc-app = "turbo_moc.app:main"
