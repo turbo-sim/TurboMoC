@@ -14,25 +14,36 @@ plotting_mpl's module docstring. Used by turbo_moc.app's "pin as reference"
 workflow, but standalone too.
 """
 
+import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import jaxprop as jxp
 
 from turbo_moc._phase_diagram import get_saturation_dome
+from turbo_moc.geometry.annular import wrap_blade_annular
 
-COLOR_WALL = "black"
-COLOR_PRESSURE = jxp.COLORS_PYTHON[1]
-COLOR_MACH = jxp.COLORS_PYTHON[2]
-COLOR_C_PLUS = jxp.COLORS_PYTHON[0]
-COLOR_C_MINUS = jxp.COLORS_PYTHON[3]
-COLOR_CP_LINE = "#440154"  # deep purple (viridis/magma base) -- blade control-point connector
-COLOR_CP_FACE = "#f89441"  # plasma orange -- blade control-point marker fill
+# Curated palette (not matplotlib's default tab10 rainbow): a dark
+# navy/slate for the solved geometry itself, a cool blue vs. warm coral
+# pairing for the two characteristic families (and the pressure/Mach
+# property plots, kept on the same cool/warm split for visual consistency
+# across all five Phase 1 views), and a muted teal for the sonic line so it
+# reads as a third, distinct quantity rather than competing with either
+# characteristic family.
+COLOR_WALL = "#1b1b1b"
+COLOR_PRESSURE = "#ee6c4d"
+COLOR_MACH = "#3d5a80"
+COLOR_C_PLUS = "#3d5a80"
+COLOR_C_MINUS = "#ee6c4d"
+COLOR_SONIC = "#2a9d8f"
+COLOR_KERNEL = "#6c757d"
+COLOR_CP_LINE = "#293241"  # dark navy -- blade control-point connector
+COLOR_CP_FACE = "#ee6c4d"  # coral -- blade control-point marker fill
 
 __all__ = [
     "plot_nozzle_contour", "plot_characteristics_mesh",
     "plot_axis_properties", "plot_wall_properties", "plot_ts_diagram",
     "plot_blade", "plot_rotor_vortex_blade", "plot_radial_cascade",
-    "plot_meridional_view",
+    "plot_meridional_view", "plot_annular_blade_3d",
 ]
 
 
@@ -102,21 +113,21 @@ def plot_nozzle_contour(data, mirror=True, show_sauer=True, show_kernel=True,
         if show_sauer and d.get("sauer", {}).get("x"):
             sauer = d["sauer"]
             fig.add_trace(go.Scatter(x=sauer["x"], y=sauer["y"], mode="markers",
-                                      marker=dict(color=COLOR_C_PLUS, size=5), opacity=opacity,
+                                      marker=dict(color=COLOR_SONIC, size=5), opacity=opacity,
                                       showlegend=False))
             if mirror:
                 fig.add_trace(go.Scatter(x=sauer["x"], y=_mirror(sauer["y"]), mode="markers",
-                                          marker=dict(color=COLOR_C_PLUS, size=5), opacity=opacity,
+                                          marker=dict(color=COLOR_SONIC, size=5), opacity=opacity,
                                           showlegend=False))
 
         if show_kernel and d.get("kernel_wall", {}).get("x"):
             kernel = d["kernel_wall"]
             fig.add_trace(go.Scatter(x=kernel["x"], y=kernel["y"], mode="markers",
-                                      marker=dict(color=COLOR_WALL, size=5), opacity=opacity,
+                                      marker=dict(color=COLOR_KERNEL, size=5), opacity=opacity,
                                       showlegend=False))
             if mirror:
                 fig.add_trace(go.Scatter(x=kernel["x"], y=_mirror(kernel["y"]), mode="markers",
-                                          marker=dict(color=COLOR_WALL, size=5), opacity=opacity,
+                                          marker=dict(color=COLOR_KERNEL, size=5), opacity=opacity,
                                           showlegend=False))
 
     if reference is not None:
@@ -131,15 +142,19 @@ def plot_nozzle_contour(data, mirror=True, show_sauer=True, show_kernel=True,
     return _apply_journal_style(fig)
 
 
-def plot_characteristics_mesh(data, mirror=False, show_wall=True,
+def plot_characteristics_mesh(data, mirror=True, show_wall=True, show_kernel=True,
                                show_fronts=True, show_sauer=True, show_reflex=True,
                                reference=None, show_reference_mesh=False,
                                label="Current", reference_label="Reference"):
-    """The full characteristic grid -- see plotting_mpl.plot_characteristics_mesh
-    for why stage*_fronts (not just stage*_c_plus/minus/stage3_mesh) are
-    needed to actually look like a grid rather than a one-directional fan,
-    and why the reflex-zone connectors are reconstructed from IVP/div_wall
-    rather than read from mesh_data.
+    """The nozzle contour (wall + convergent inlet) together with the full
+    characteristic grid -- merges what used to be two separate plots
+    (plot_nozzle_contour + plot_characteristics_mesh) into one view, since
+    the mesh is drawn directly on top of the geometry it was solved from
+    anyway. See below for why stage*_fronts (not just
+    stage*_c_plus/minus/stage3_mesh) are needed to actually look like a
+    grid rather than a one-directional fan, and why the reflex-zone
+    connectors are reconstructed from IVP/div_wall rather than read from
+    mesh_data.
 
     reference=<data dict> overlays a second design's WALL only by default
     (dashed); its full characteristic mesh is skipped unless
@@ -202,13 +217,23 @@ def plot_characteristics_mesh(data, mirror=False, show_wall=True,
         if show_sauer and d.get("sauer", {}).get("x"):
             sauer = d["sauer"]
             fig.add_trace(go.Scatter(x=sauer["x"], y=sauer["y"], mode="lines+markers",
-                                      line=dict(color=COLOR_C_PLUS, width=2),
+                                      line=dict(color=COLOR_SONIC, width=2),
                                       marker=dict(size=4), opacity=opacity_scale,
                                       name="Sonic line", showlegend=showlegend))
             if mirror:
                 fig.add_trace(go.Scatter(x=sauer["x"], y=_mirror(sauer["y"]), mode="lines+markers",
-                                          line=dict(color=COLOR_C_PLUS, width=2),
+                                          line=dict(color=COLOR_SONIC, width=2),
                                           marker=dict(size=4), opacity=opacity_scale, showlegend=False))
+
+        if show_kernel and d.get("kernel_wall", {}).get("x"):
+            kernel = d["kernel_wall"]
+            fig.add_trace(go.Scatter(x=kernel["x"], y=kernel["y"], mode="markers",
+                                      marker=dict(color=COLOR_KERNEL, size=5), opacity=opacity_scale,
+                                      showlegend=False))
+            if mirror:
+                fig.add_trace(go.Scatter(x=kernel["x"], y=_mirror(kernel["y"]), mode="markers",
+                                          marker=dict(color=COLOR_KERNEL, size=5), opacity=opacity_scale,
+                                          showlegend=False))
 
     def _draw_wall(d, dash, opacity, lbl):
         wall = d["wall_final"]
@@ -219,6 +244,21 @@ def plot_characteristics_mesh(data, mirror=False, show_wall=True,
             fig.add_trace(go.Scatter(x=wall["x"], y=_mirror(wall["y"]), mode="lines",
                                       line=dict(color=COLOR_WALL, width=2, dash=dash),
                                       opacity=opacity, showlegend=False))
+
+        # Convergent inlet (see turbo_moc.core.classes.build_convergent_inlet):
+        # geometry only, computed live in app.py and stashed onto a COPY
+        # of `data` under this key -- not part of wall_final itself so the
+        # wall-property plots (which need p/M/rho/T per point) are
+        # unaffected.
+        conv = d.get("convergent_wall")
+        if conv and conv.get("x"):
+            fig.add_trace(go.Scatter(x=conv["x"], y=conv["y"], mode="lines",
+                                      line=dict(color=COLOR_WALL, width=2, dash=dash),
+                                      opacity=opacity, showlegend=False))
+            if mirror:
+                fig.add_trace(go.Scatter(x=conv["x"], y=_mirror(conv["y"]), mode="lines",
+                                          line=dict(color=COLOR_WALL, width=2, dash=dash),
+                                          opacity=opacity, showlegend=False))
 
     if reference is not None:
         if show_reference_mesh:
@@ -565,7 +605,6 @@ def plot_radial_cascade(radial_data, show_radius_circles=True, clip_quadrant=Tru
 
     r1, r2 = radial_data["r1"], radial_data["r2"]
     if show_radius_circles:
-        import numpy as np
         t = np.linspace(0, 2 * np.pi, 200)
         circles = [(r1, "r1")]
         if combined:
@@ -685,5 +724,104 @@ def plot_meridional_view(meridional_data, units="mm", z_range=None):
         yaxis=yaxis,
         height=380,
         margin=dict(l=50, r=20, t=20, b=40),
+    )
+    return fig
+
+
+def _quad_grid_triangles(n_span, n_pts, closed=True):
+    """Triangle (i, j, k) index arrays for a structured (n_span, n_pts)
+    point grid, flattened row-major (span-major). `closed` wraps the last
+    profile point back to the first (the blade contour is a closed loop)."""
+    i_idx, j_idx, k_idx = [], [], []
+    n_cols = n_pts if closed else n_pts - 1
+    for s in range(n_span - 1):
+        for p in range(n_cols):
+            p2 = (p + 1) % n_pts
+            a, b = s * n_pts + p, s * n_pts + p2
+            c, d = (s + 1) * n_pts + p, (s + 1) * n_pts + p2
+            i_idx += [a, b]
+            j_idx += [b, d]
+            k_idx += [c, c]
+    return i_idx, j_idx, k_idx
+
+
+def _add_annular_traces(fig, blade_data, r_hub, r_shroud, n_blades, flare, n_span,
+                         theta0, source, n_preview, z_offset, curve_color, te_color, legend_name):
+    """Wraps ONE row (stator or rotor) via wrap_blade_annular(...) and adds
+    its Mesh3d traces to fig -- factored out of plot_annular_blade_3d so a
+    stator + rotor pair can share one figure/one scene, each its own color."""
+    wrapped = wrap_blade_annular(blade_data, r_hub, r_shroud, n_blades=n_blades,
+                                  flare=flare, n_span=n_span, theta0=theta0, source=source,
+                                  n_preview=n_preview)
+    curve = wrapped["curve"]
+    te = wrapped["trailing_edge"]
+    n_span_actual = wrapped["n_span"]
+
+    for b in range(wrapped["n_drawn"]):
+        n_pts = curve["x"].shape[2]
+        i_idx, j_idx, k_idx = _quad_grid_triangles(n_span_actual, n_pts, closed=(te is None))
+        fig.add_trace(go.Mesh3d(
+            x=curve["x"][b].ravel(), y=curve["y"][b].ravel(), z=curve["z"][b].ravel() + z_offset,
+            i=i_idx, j=j_idx, k=k_idx,
+            color=curve_color, opacity=0.85, flatshading=False,
+            name=legend_name if b == 0 else None, showlegend=(b == 0),
+            lighting=dict(ambient=0.55, diffuse=0.7, specular=0.3, roughness=0.6),
+        ))
+        if te is not None:
+            n_te = te["x"].shape[2]
+            i_te, j_te, k_te = _quad_grid_triangles(n_span_actual, n_te, closed=False)
+            fig.add_trace(go.Mesh3d(
+                x=te["x"][b].ravel(), y=te["y"][b].ravel(), z=te["z"][b].ravel() + z_offset,
+                i=i_te, j=j_te, k=k_te,
+                color=te_color, opacity=0.85, flatshading=False, showlegend=False,
+            ))
+    return wrapped
+
+
+def plot_annular_blade_3d(blade_data, r_hub, r_shroud, n_blades=1, flare="pitch_scale",
+                           n_span=13, theta0=0.0, source="stator", n_preview=None,
+                           rotor=None):
+    """3D preview of turbo_moc.geometry.wrap_blade_annular(...): the blade
+    profile genuinely wrapped circumferentially at every span station from
+    r_hub to r_shroud (not the flat hub/tip loft of the "flared" STEP
+    export), rendered as one go.Mesh3d surface per previewed blade copy.
+    n_blades is the TRUE blade count (sets the angular spacing between
+    copies); n_preview optionally caps how many of them are actually drawn,
+    for a responsive preview, WITHOUT changing that spacing -- see
+    wrap_blade_annular's docstring.
+
+    rotor : dict or None
+        Optional second row (source="rotor") added to the SAME figure/scene,
+        e.g. from turbo_moc.app's rotor-store (already scaled to mm). Keys:
+        "blade_data" (required), "r_hub"/"r_shroud" (required), "n_blades"
+        (default 1), "flare" (default: same as the stator's own `flare`),
+        "n_span"/"theta0"/"n_preview" (default: same as the stator's own),
+        "z_offset" (default 0 -- the rotor's own axial start, e.g. the
+        stator's axial chord plus a row-to-row gap, same convention as
+        turbo_moc.geometry.build_meridional_view)."""
+    fig = go.Figure()
+    is_combined = rotor is not None
+    _add_annular_traces(
+        fig, blade_data, r_hub, r_shroud, n_blades, flare, n_span, theta0, source, n_preview,
+        z_offset=0.0,
+        curve_color=COLOR_RADIAL_STATOR if is_combined else COLOR_WALL,
+        te_color=COLOR_C_PLUS, legend_name="Stator" if is_combined else "Blade",
+    )
+    if is_combined:
+        _add_annular_traces(
+            fig, rotor["blade_data"], rotor["r_hub"], rotor["r_shroud"],
+            rotor.get("n_blades", 1), rotor.get("flare", flare), rotor.get("n_span", n_span),
+            rotor.get("theta0", theta0), "rotor", rotor.get("n_preview", n_preview),
+            z_offset=rotor.get("z_offset", 0.0),
+            curve_color=COLOR_RADIAL_ROTOR, te_color=COLOR_RADIAL_ROTOR, legend_name="Rotor",
+        )
+
+    fig.update_layout(
+        scene=dict(
+            aspectmode="data",
+            xaxis_title="X [mm]", yaxis_title="Y [mm]", zaxis_title="Z (axial) [mm]",
+        ),
+        margin=dict(l=0, r=0, t=30, b=0),
+        showlegend=True,
     )
     return fig

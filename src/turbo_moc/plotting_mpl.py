@@ -31,13 +31,19 @@ from turbo_moc._phase_diagram import get_fluid
 # self-contained regardless of what else has been imported.
 jxp.set_plot_options()
 
-COLOR_WALL = "black"
-COLOR_PRESSURE = jxp.COLORS_PYTHON[1]
-COLOR_MACH = jxp.COLORS_PYTHON[2]
-COLOR_C_PLUS = jxp.COLORS_PYTHON[0]
-COLOR_C_MINUS = jxp.COLORS_PYTHON[3]
-COLOR_CP_LINE = "#440154"  # deep purple (viridis/magma base) -- blade control-point connector
-COLOR_CP_FACE = "#f89441"  # plasma orange -- blade control-point marker fill
+# Curated palette (not matplotlib's default tab10 rainbow) -- see
+# turbo_moc.plotting_plotly's module-level comment for the rationale; both
+# halves of the plotly/mpl split use the same colors so interactive display
+# and downloaded figures read as one consistent visual language.
+COLOR_WALL = "#1b1b1b"
+COLOR_PRESSURE = "#ee6c4d"
+COLOR_MACH = "#3d5a80"
+COLOR_C_PLUS = "#3d5a80"
+COLOR_C_MINUS = "#ee6c4d"
+COLOR_SONIC = "#2a9d8f"
+COLOR_KERNEL = "#6c757d"
+COLOR_CP_LINE = "#293241"  # dark navy -- blade control-point connector
+COLOR_CP_FACE = "#ee6c4d"  # coral -- blade control-point marker fill
 
 __all__ = [
     "plot_nozzle_contour", "plot_characteristics_mesh",
@@ -77,15 +83,15 @@ def plot_nozzle_contour(data, ax=None, mirror=True, show_sauer=True, show_kernel
 
         if show_sauer and d.get("sauer", {}).get("x"):
             sauer = d["sauer"]
-            ax.plot(sauer["x"], sauer["y"], "o", color=COLOR_C_PLUS, ms=3, alpha=alpha)
+            ax.plot(sauer["x"], sauer["y"], "o", color=COLOR_SONIC, ms=3, alpha=alpha)
             if mirror:
-                ax.plot(sauer["x"], _mirror(sauer["y"]), "o", color=COLOR_C_PLUS, ms=3, alpha=alpha)
+                ax.plot(sauer["x"], _mirror(sauer["y"]), "o", color=COLOR_SONIC, ms=3, alpha=alpha)
 
         if show_kernel and d.get("kernel_wall", {}).get("x"):
             kernel = d["kernel_wall"]
-            ax.plot(kernel["x"], kernel["y"], "o", color=COLOR_WALL, ms=3, alpha=alpha)
+            ax.plot(kernel["x"], kernel["y"], "o", color=COLOR_KERNEL, ms=3, alpha=alpha)
             if mirror:
-                ax.plot(kernel["x"], _mirror(kernel["y"]), "o", color=COLOR_WALL, ms=3, alpha=alpha)
+                ax.plot(kernel["x"], _mirror(kernel["y"]), "o", color=COLOR_KERNEL, ms=3, alpha=alpha)
 
     if reference is not None:
         _draw(reference, "--", 0.5, reference_label)
@@ -101,11 +107,14 @@ def plot_nozzle_contour(data, ax=None, mirror=True, show_sauer=True, show_kernel
     return fig, ax
 
 
-def plot_characteristics_mesh(data, ax=None, mirror=False, show_wall=True,
+def plot_characteristics_mesh(data, ax=None, mirror=True, show_wall=True, show_kernel=True,
                                show_fronts=True, show_sauer=True, show_reflex=True,
                                reference=None, show_reference_mesh=False,
                                label="Current", reference_label="Reference"):
-    """The full characteristic grid -- both line families, not just one.
+    """The nozzle contour (wall + convergent inlet) together with the full
+    characteristic grid -- merges what used to be two separate plots
+    (plot_nozzle_contour + plot_characteristics_mesh) into one view. Both
+    line families, not just one.
 
     data['mesh_data']'s stage2_c_plus/stage2_c_minus/stage3_mesh are the
     individual characteristic SEGMENTS (radiating fan lines, one
@@ -158,16 +167,33 @@ def plot_characteristics_mesh(data, ax=None, mirror=False, show_wall=True,
 
         if show_sauer and d.get("sauer", {}).get("x"):
             sauer = d["sauer"]
-            ax.plot(sauer["x"], sauer["y"], "-o", color=COLOR_C_PLUS, lw=1.5, ms=3,
+            ax.plot(sauer["x"], sauer["y"], "-o", color=COLOR_SONIC, lw=1.5, ms=3,
                      alpha=alpha_scale, label="Sonic line" if alpha_scale == 1.0 else None)
             if mirror:
-                ax.plot(sauer["x"], _mirror(sauer["y"]), "-o", color=COLOR_C_PLUS, lw=1.5, ms=3, alpha=alpha_scale)
+                ax.plot(sauer["x"], _mirror(sauer["y"]), "-o", color=COLOR_SONIC, lw=1.5, ms=3, alpha=alpha_scale)
+
+        if show_kernel and d.get("kernel_wall", {}).get("x"):
+            kernel = d["kernel_wall"]
+            ax.plot(kernel["x"], kernel["y"], "o", color=COLOR_KERNEL, ms=3, alpha=alpha_scale)
+            if mirror:
+                ax.plot(kernel["x"], _mirror(kernel["y"]), "o", color=COLOR_KERNEL, ms=3, alpha=alpha_scale)
 
     def _draw_wall(d, ls, alpha, lbl):
         wall = d["wall_final"]
         ax.plot(wall["x"], wall["y"], ls, color=COLOR_WALL, lw=1.5, alpha=alpha, label=lbl)
         if mirror:
             ax.plot(wall["x"], _mirror(wall["y"]), ls, color=COLOR_WALL, lw=1.5, alpha=alpha)
+
+        # Convergent inlet (see turbo_moc.core.classes.build_convergent_inlet):
+        # geometry only, computed live in app.py and stashed onto a COPY
+        # of `data` under this key -- not part of wall_final itself so the
+        # wall-property plots (which need p/M/rho/T per point) are
+        # unaffected.
+        conv = d.get("convergent_wall")
+        if conv and conv.get("x"):
+            ax.plot(conv["x"], conv["y"], ls, color=COLOR_WALL, lw=1.5, alpha=alpha)
+            if mirror:
+                ax.plot(conv["x"], _mirror(conv["y"]), ls, color=COLOR_WALL, lw=1.5, alpha=alpha)
 
     if reference is not None:
         if show_reference_mesh:

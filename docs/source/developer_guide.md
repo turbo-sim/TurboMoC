@@ -57,10 +57,10 @@ poetry run python docs/build_docs.py --build-bib
 ## Running the tests
 
 The repository has a deliberately small smoke-test suite. It checks that the
-installed package exposes its basic public interface and executes every Python
-script under `examples/`.
+installed package exposes its basic public interface and executes the Python
+scripts directly under `examples/`.
 
-Run the complete suite from the repository root:
+Run the package and top-level example smoke checks from the repository root:
 
 ```bash
 poetry run python tests/run_tests.py
@@ -71,6 +71,18 @@ You can also invoke pytest directly or run one test module:
 ```bash
 poetry run pytest tests/test_examples.py
 ```
+
+The Gmsh and Fluent workflows have a separate fast smoke suite:
+
+```bash
+poetry run pytest tests/test_stator_mesh.py tests/test_stator_fluent.py -q
+```
+
+It generates one small real mesh, checks its exported artifacts and cache behavior,
+and tests Fluent orchestration with mocks. Figure rendering is mocked while mesh
+generation and CGNS export remain real; full quality-report generation is skipped.
+It uses no Fluent license and does not run a MoC solve or CFD iterations. A real EOS check covers
+the barotropic fit.
 
 The example checks set `TURBO_MOC_EXAMPLE_SMOKE_TEST=1` and use Matplotlib's
 non-interactive backend. The nozzle and rotor calculations still run and their

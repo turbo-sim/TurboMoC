@@ -25,7 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 # Optional STEP export support. CadQuery may instead be installed through the
 # Conda environment defined in environment.yaml.
-cad = ["cadquery"]
+cad = ["cadquery", "dash-vtk"]
 # Fluent automation is opt-in: poetry install -E fluent / pip install .[fluent].
 # Install the companion barotropy checkout separately for fluid-model generation.
 fluent = ["ansys-fluent-core>=0.38,<0.43"]
