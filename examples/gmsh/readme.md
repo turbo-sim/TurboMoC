@@ -364,8 +364,8 @@ belong to exactly one named boundary.
 The periodic translations point from the current interface to its donor:
 right-to-left is `(-pitch * length_scale, 0)` metres. Solver importers can differ
 in how they interpret periodic metadata. Inspect the imported boundary types
-and periodic pairing in the target solver. The Gmsh checks and CGNS export are covered by
-regression tests. `../fluent/run_fluent_case.py` has been validated with Fluent 2024 R2:
+and periodic pairing in the target solver. The smoke suite exercises a real mesh
+and reads its CGNS export. `../fluent/run_fluent_case.py` has been validated with Fluent 2024 R2:
 CGNS imports the periodic sides as wall zones, and the workflow explicitly
 creates the conformal translational pair after checking the imported vertices.
 
@@ -392,15 +392,23 @@ For reuse, import `build_geometry` and `plot_construction` from
 and `load_or_solve_nozzle` remain available from
 `examples.gmsh.run_mesh_generation` for the shared Fluent workflow.
 
-Regression tests cover manual/automatic placement, spline tangents and CAD
-transfer, curvature refinement, periodic nodes and edges, wall-layer coverage,
-mesh quality, physical groups, and CGNS topology/connectivity. Run:
+The small automation smoke suite uses two modules. It generates one
+small real mesh with inflation and automatic passage placement, reads its CGNS
+boundaries/connectivity, checks mesh/image export paths, and checks cache reuse and
+cleanup after invalid geometry. Figure rendering is mocked to keep the suite fast;
+Mesh generation and CGNS export are real. Detailed geometric checks remain in
+the workflow itself; the suite avoids parameter sweeps, full quality-report
+generation and separate tests of every metric.
+
+Run just the fast mesh and Fluent automation checks:
 
 ```powershell
-poetry run pytest tests/test_flow_domain.py tests/test_flow_domain_centering.py tests/test_stator_mesh_cache.py tests/test_stator_mesh_gmsh.py tests/test_mesh_report.py tests/test_stator_fluent.py
+poetry run pytest tests/test_stator_mesh.py tests/test_stator_fluent.py -q
 ```
 
-For a focused execution check, run the example with both viewers disabled,
+The Fluent cases use mocks without launching Fluent or importing the companion
+barotropy checkout; the thermodynamic fit check uses the existing jaxprop dependency.
+For a full execution check, run the example with both viewers disabled,
 then inspect `mesh_generation.log`, the CGNS mesh and the quality report.
 
 ## Shared Fluent workflow

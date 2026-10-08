@@ -675,7 +675,7 @@ def configure_stage(settings, stage, options):
 
 
 def run_stages(solver, options, output_dir, state):
-    """Run the YAML strategy and write data only for the final solution.
+    """Run the YAML strategy and save the final case and solution data together.
 
     Every block stops when Fluent meets all configured normalized residual
     criteria or exhausts its iteration budget, then advances to the next block.
@@ -685,6 +685,7 @@ def run_stages(solver, options, output_dir, state):
     output_dir.mkdir(parents=True, exist_ok=True)
     stages = solution_stages(options)
     output_stem = options["case_filename"].removesuffix(".cas.h5")
+    case_file = output_dir / options["case_filename"]
     transcript_file = output_dir / f"{output_stem}.trn"
     data_file = output_dir / f"{output_stem}.dat.h5"
     summary_file = output_dir / "run_summary.json"
@@ -779,9 +780,13 @@ def run_stages(solver, options, output_dir, state):
             )
             and diagnostics["relative_mass_imbalance"] < 1e-3
         )
-        # Keep the original setup case and write one matching data file only.
-        logger.info("  Save the final solution data: %s", display_path(data_file))
-        solver.settings.file.write_data(file_name=str(data_file))
+        # Replace the initial setup case with the final solver settings and
+        # write its matching data in the same Fluent command. This runs once,
+        # including when the last stage reaches convergence before its limit.
+        summary["status"] = "saving_final_solution"
+        logger.info("  Save the final case and data: %s", display_path(case_file))
+        solver.settings.file.write_case_data(file_name=str(case_file))
+        summary["case_file"] = str(case_file)
         summary["data_file"] = str(data_file)
         summary["status"] = "completed"
         if not summary["converged"]:
@@ -901,7 +906,7 @@ def export_contours(solver, options, output_dir):
 
 
 def save_fluent_case(pyfluent, workflow, mesh_file, state, expressions, pitch_m):
-    """Save the setup, optionally solve in stages, and close the session."""
+    """Save the setup, optionally solve and save final case/data, then close."""
     options = workflow["fluent"]
     output_dir = workflow["output_dir"] / "fluent"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1001,7 +1006,9 @@ def save_fluent_case(pyfluent, workflow, mesh_file, state, expressions, pitch_m)
             else:
                 solver.exit()
     logger.info(
-        "  Fluent session closed; setup case available: %s", display_path(case_file)
+        "  Fluent session closed; %s case available: %s",
+        "final solution" if workflow["run_case"] else "setup",
+        display_path(case_file),
     )
     return case_file
 
@@ -1098,7 +1105,9 @@ def main():
                 expressions,
                 float(blade["pitch"]) * 0.001,
             )
-            results["Setup case"] = display_path(case_file)
+            results["Final solution case" if workflow["run_case"] else "Setup case"] = (
+                display_path(case_file)
+            )
             results["Fluent transcript"] = display_path(
                 case_file.with_name(case_file.name.removesuffix(".cas.h5") + ".trn")
             )

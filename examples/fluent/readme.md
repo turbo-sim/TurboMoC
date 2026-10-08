@@ -46,7 +46,7 @@ disabled, regardless of the mesh-only example's viewer switches.
 | `save_geometry_figure` | Export the blade/passage construction PNG and SVG |
 | `prepare_only: true` | Generate the mesh and barotropic model, then stop before Fluent |
 | `run_case: false` | Create and save the configured Fluent case without initializing or solving |
-| `run_case: true` | Create the case, solve using the strategy below, and export the final data and figures |
+| `run_case: true` | Create the case, solve using the strategy below, and save the final case, data and figures |
 | `barotropic.pressure_ratio: 8.0` | Barotropic exit pressure = actual inlet pressure / 8 |
 | `barotropic.polynomial_degree` | Polynomial degree within each pressure/phase segment |
 | `fluent.solution_strategy` | List of dictionaries with `iterations`, `time_scale_factor` and `order: first` or `second` |
@@ -200,7 +200,7 @@ Fluent shutdown. Its filename is configurable under `reporting`.
 | --- | --- |
 | `barotropy/` | Fluent expressions (safe text/JSON and raw comparison), inlet state, fit validation, phase diagram and property-fit figures |
 | `gmsh/` | Nozzle cache, geometry PNG/SVG, CGNS mesh, mesh PNG, quality report HTML/JSON/CSV/PNG |
-| `fluent/` | Original `stator_fluent.cas.h5`, final `stator_fluent.dat.h5`, overall `stator_fluent.trn`, setup/run summaries, residual CSV and optional PNG, `contour_pressure.png`, `contour_mach.png` |
+| `fluent/` | Final `stator_fluent.cas.h5` and matching `stator_fluent.dat.h5`, overall `stator_fluent.trn`, setup/run summaries, residual CSV and optional PNG, `contour_pressure.png`, `contour_mach.png` |
 
 The table describes a complete run with the current enabled export settings.
 Geometry figures, barotropic figures, mesh reports and each Fluent contour have
@@ -208,12 +208,19 @@ their own switches. `prepare_only: true` generates mesh/model artifacts and the
 workflow log without launching Fluent; it takes precedence over `run_case` and
 does not require PyFluent, but still requires barotropy and valid workflow settings.
 
-The case is saved once before initialization; it contains the original setup and
-the first block's discretization. The matching data file is saved once after the
-final block and contains the final solution. To view it in Fluent, read the case,
-then read its data file. If you continue iterating after loading them, select the
-desired discretization from the YAML strategy. With `run_case: false`, this run
-produces only the setup case, setup summary and overall transcript in this folder.
+The setup case is saved before initialization. After the final block and solution
+checks, Fluent writes the final case and matching data together, replacing the
+setup case at the same filename. The case retains the final block's discretization,
+timescale and solver settings; the data contain the final solution. This also
+happens when convergence stops the final block early. To view or resume the
+solution in Fluent, read the case and its matching data file.
+With `run_case: false`, this run produces only the setup case, setup summary
+and overall transcript in this folder.
+
+A run that reaches its iteration limit with valid fields also saves the final
+case/data pair; `run_summary.json` reports `converged: false`. Solver failures
+or invalid final fields prevent this final save. The summary records the saved
+`case_file` and `data_file` paths after the paired write succeeds.
 
 The run summary records requested and actual iterations for each stage, spatial
 order, timescale factors, hybrid initialization, final residuals, pressure/property
@@ -245,7 +252,20 @@ counts include only the current run.
 | `stator_fluent.yaml` | Workflow, thermodynamic range, solver, iteration and image settings |
 | `../workflow_logging.py` | Shared console/file reporting, numbered sections, summaries and failure tracebacks |
 
-For a focused check, run the current example using the command above, then inspect
+For the fast mesh/Fluent automation smoke suite, run:
+
+```powershell
+poetry run pytest tests/test_stator_mesh.py tests/test_stator_fluent.py -q
+```
+
+The Fluent module checks inlet/fit consistency, case-only creation and cleanup,
+hybrid startup, stage transitions after early convergence, final-only checks and
+case/data saving, numerical failures and both contour exports. Fluent sessions and
+the barotropy residual reader are mocked; no Fluent installation/license or companion
+barotropy checkout is needed. The fit check uses jaxprop and real equilibrium EOS
+states. These checks do not validate the live Fluent settings API or rendering.
+
+For a full execution check, run the current example using the command above, then inspect
 `setup_summary.json`, `run_summary.json`, the overall transcript and the images.
 
 The Python files use Black formatting, descriptive helper functions, docstrings
