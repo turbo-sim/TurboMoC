@@ -707,6 +707,60 @@ rotor_sizing_plots = html.Div(
 )
 
 
+# --------------------------------------------------------------------------
+# Phase 6: Cascade -- stator (Phase 3) and rotor (Phase 5) rows shown
+# together, axially positioned one after another. No new sizing math: just
+# combines the two already-sized solids with an axial gap, reusing the
+# exact z_offset mechanism export_annular_blade_step/stl already expose. Z
+# is each row's own chordwise coordinate, unchanged by the annular wrap
+# (see turbo_moc.geometry.annular's module docstring) -- the stator's own
+# blade_curve.y span gives its [z_min, z_max], the rotor's own blade.x
+# span gives its own, NEGATED (confirmed by this app's earlier annular
+# cascade work: the rotor's local chordwise axis runs the opposite way
+# from the stator's, so the raw x needs flipping to land downstream
+# rather than mirrored/upstream).
+# --------------------------------------------------------------------------
+cascade_controls = html.Div(
+    [
+        html.H4("Cascade (stator + rotor)"),
+        html.Div(id="cascade-assembly-readout", style={"fontSize": "12px", "marginBottom": "8px"}),
+        _field(r"$\Delta z_{\text{gap}}$ (mm, stator TE to rotor LE)", "cascade_axial_gap", 5.0),
+
+        html.H4("2D cascade (mid-span)", style={"marginTop": "16px"}),
+        _field(r"$N_{\text{stator}}$ (blades to plot)", "cascade_2d_n_stator", 3, step=1, min=1),
+        _field(r"$N_{\text{rotor}}$ (blades to plot)", "cascade_2d_n_rotor", 3, step=1, min=1),
+
+        html.H4("Export", style={"marginTop": "16px"}),
+        html.Button("Download stator STEP (assembly position)", id="download-cascade-stator-step-btn",
+                     n_clicks=0, style={"width": "100%", "padding": "8px", "marginBottom": "6px"}),
+        dcc.Download(id="download-cascade-stator-step"),
+        html.Button("Download rotor STEP (assembly position)", id="download-cascade-rotor-step-btn",
+                     n_clicks=0, style={"width": "100%", "padding": "8px"}),
+        dcc.Download(id="download-cascade-rotor-step"),
+        html.Div(id="cascade-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
+    ],
+    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+           "overflowY": "auto"},
+)
+
+cascade_plots = html.Div(
+    [
+        dcc.Loading(
+            type="circle",
+            children=html.Div(
+                id="cascade-vtk-container",
+                children=_vtk_placeholder("Run Phase 3 and Phase 5 sizing first to see the assembly."),
+                style={"height": "600px", "width": "100%", "border": "1px solid #ddd",
+                       "borderRadius": "4px"},
+            ),
+        ),
+        dcc.Graph(id="fig-cascade-2d", config={"displaylogo": False},
+                   style={"height": "500px", "marginTop": "16px"}),
+    ],
+    style={"flex": "1", "padding": "16px"},
+)
+
+
 app.layout = html.Div(
     [
         html.H2("TurboMoC", style={"padding": "16px 16px 0 16px"}),
@@ -716,14 +770,32 @@ app.layout = html.Div(
             children=[
                 dcc.Tab(label="Phase 1: Nozzle design", value="phase1",
                          children=html.Div([controls, plots], style={"display": "flex"})),
-                dcc.Tab(label="Phase 2: Stator blade", value="phase2",
-                         children=html.Div([blade_controls, blade_plots], style={"display": "flex"})),
-                dcc.Tab(label="Phase 3: Stator sizing", value="phase3_sizing",
-                         children=html.Div([sizing_controls, sizing_plots], style={"display": "flex"})),
-                dcc.Tab(label="Phase 4: 2D rotor design", value="phase3",
-                         children=html.Div([rotor_controls, rotor_plots], style={"display": "flex"})),
-                dcc.Tab(label="Phase 5: 3D rotor design", value="phase5_sizing",
-                         children=html.Div([rotor_sizing_controls, rotor_sizing_plots], style={"display": "flex"})),
+                dcc.Tab(label="Phase 2: Stator design", value="phase2",
+                         children=dcc.Tabs(
+                             id="stator-subtabs", value="stator2d",
+                             children=[
+                                 dcc.Tab(label="2D", value="stator2d",
+                                          children=html.Div([blade_controls, blade_plots],
+                                                             style={"display": "flex"})),
+                                 dcc.Tab(label="3D", value="stator3d",
+                                          children=html.Div([sizing_controls, sizing_plots],
+                                                             style={"display": "flex"})),
+                             ],
+                         )),
+                dcc.Tab(label="Phase 3: Rotor design", value="phase3",
+                         children=dcc.Tabs(
+                             id="rotor-subtabs", value="rotor2d",
+                             children=[
+                                 dcc.Tab(label="2D", value="rotor2d",
+                                          children=html.Div([rotor_controls, rotor_plots],
+                                                             style={"display": "flex"})),
+                                 dcc.Tab(label="3D", value="rotor3d",
+                                          children=html.Div([rotor_sizing_controls, rotor_sizing_plots],
+                                                             style={"display": "flex"})),
+                             ],
+                         )),
+                dcc.Tab(label="Phase 4: Cascade", value="phase4_cascade",
+                         children=html.Div([cascade_controls, cascade_plots], style={"display": "flex"})),
             ],
         ),
         dcc.Store(id="result-store"),
@@ -1882,6 +1954,254 @@ def download_rotor_sizing_step(n_clicks, sizing_result):
 
     return dcc.send_bytes(content, "rotor_sized_blade.step"), html.Div(
         "Sized rotor STEP ready (1 blade).", style={"color": "#1a7a1a"})
+
+
+# --------------------------------------------------------------------------
+# Phase 6 callbacks: cascade (stator + rotor shown together)
+# --------------------------------------------------------------------------
+def _rotor_z_offset(stator_sizing, rotor_sizing, gap):
+    """Axial offset [mm] for the rotor row so its LE sits `gap` downstream
+    of the stator's own TE. Z is each row's own chordwise coordinate,
+    unchanged by the annular wrap -- stator: blade_curve.y, rotor: blade.x
+    NEGATED (see module-level comment above cascade_controls)."""
+    stator_y = stator_sizing["scaled_blade"]["blade_curve"]["y"]
+    stator_z_min = min(stator_y)
+    rotor_z_raw = [-v for v in rotor_sizing["scaled_blade"]["blade"]["x"]]
+    return stator_z_min - float(gap) - max(rotor_z_raw)
+
+
+@app.callback(
+    Output("cascade-assembly-readout", "children"),
+    Input("stator-sizing-store", "data"),
+    Input("rotor-sizing-store", "data"),
+)
+def _update_cascade_readout(stator_sizing, rotor_sizing):
+    missing = []
+    if not stator_sizing:
+        missing.append("Phase 3 (stator sizing)")
+    if not rotor_sizing:
+        missing.append("Phase 5 (rotor sizing)")
+    if missing:
+        return html.Div(f"Run {' and '.join(missing)} first.", style={"color": "#b00020"})
+    return html.Div(
+        f"Stator: r_hub={stator_sizing['r_hub']:.2f} mm, N={stator_sizing['n_blades']}. "
+        f"Rotor: r_hub={rotor_sizing['r_hub']:.2f} mm, N={rotor_sizing['n_blades']}.")
+
+
+@app.callback(
+    Output("fig-cascade-2d", "figure"),
+    Input("stator-sizing-store", "data"),
+    Input("rotor-sizing-store", "data"),
+    Input("cascade_axial_gap", "value"),
+    Input("cascade_2d_n_stator", "value"),
+    Input("cascade_2d_n_rotor", "value"),
+)
+def _update_cascade_2d_plot(stator_sizing, rotor_sizing, gap, n_stator, n_rotor):
+    """A flat 'blade-to-blade' cascade view at mid-span (r_mid = (r_hub +
+    r_shroud)/2, the two rows share one annulus): N_stator/N_rotor copies
+    of each row's already-sized 2D blade shape, tiled at the mid-span
+    pitch and positioned axially with the same gap as the 3D view -- the
+    annular wrap's own "pitch_scale" convention only stretches the
+    PITCHWISE coordinate with radius (the chordwise/axial one is
+    unchanged across span, see turbo_moc.geometry.annular's docstring),
+    so this is genuinely "the same as putting together the 2D shapes" at
+    a different pitch, not a 3D slice."""
+    fig = go.Figure()
+    if not stator_sizing or not rotor_sizing:
+        fig.update_layout(annotations=[dict(text="Run Phase 3 and Phase 5 sizing first.",
+                                              showarrow=False, font=dict(size=14))])
+        return fig
+
+    r_hub = stator_sizing["r_hub"]
+    r_mid = 0.5 * (r_hub + stator_sizing["r_shroud"])
+
+    stator_blade = stator_sizing["scaled_blade"]
+    pitch_mid_s = stator_blade["pitch"] * (r_mid / r_hub)
+    rotor_blade = rotor_sizing["scaled_blade"]
+    pitch_mid_r = rotor_blade["pitch"] * (r_mid / rotor_sizing["r_hub"])
+
+    z_offset = _rotor_z_offset(stator_sizing, rotor_sizing, gap or 0.0)
+
+    n_stator = int(n_stator or 1)
+    n_rotor = int(n_rotor or 1)
+
+    # Stator: x = pitchwise, y = chordwise/axial (unchanged).
+    curve, te = stator_blade["blade_curve"], stator_blade["trailing_edge"]
+    for i in range(n_stator):
+        dx = i * pitch_mid_s
+        showlegend = (i == 0)
+        fig.add_trace(go.Scatter(x=[v + dx for v in curve["x"]], y=curve["y"], mode="lines",
+                                  line=dict(color="#3d5a80", width=2), name="Stator",
+                                  legendgroup="stator", showlegend=showlegend))
+        fig.add_trace(go.Scatter(x=[v + dx for v in te["x"]], y=te["y"], mode="lines",
+                                  line=dict(color="#3d5a80", width=2),
+                                  legendgroup="stator", showlegend=False))
+
+    # Rotor: local axes are chordwise=x, pitchwise=y -- remapped onto the
+    # SAME plot axes as the stator (plot_x = pitchwise, plot_y = axial),
+    # with the chordwise value negated + shifted by z_offset, matching
+    # the 3D view's own axial-orientation convention exactly.
+    blade = rotor_blade["blade"]
+    for i in range(n_rotor):
+        dy = i * pitch_mid_r
+        showlegend = (i == 0)
+        plot_x = [v + dy for v in blade["y"]]
+        plot_y = [-v + z_offset for v in blade["x"]]
+        fig.add_trace(go.Scatter(x=plot_x, y=plot_y, mode="lines",
+                                  line=dict(color="#ee6c4d", width=2), name="Rotor",
+                                  legendgroup="rotor", showlegend=showlegend))
+
+    fig.update_layout(
+        xaxis_title="Pitchwise (mm)", yaxis_title="Axial (mm)",
+        yaxis=dict(scaleanchor="x", scaleratio=1),
+        title=f"Mid-span cascade (r_mid={r_mid:.1f} mm)",
+    )
+    return fig
+
+
+@app.callback(
+    Output("cascade-vtk-container", "children"),
+    Input("stator-sizing-store", "data"),
+    Input("rotor-sizing-store", "data"),
+    Input("cascade_axial_gap", "value"),
+)
+def _update_cascade_vtk_preview(stator_sizing, rotor_sizing, gap):
+    if not stator_sizing or not rotor_sizing:
+        return _vtk_placeholder("Run Phase 3 and Phase 5 sizing first to see the assembly.")
+    if not DASH_VTK_AVAILABLE:
+        return _vtk_placeholder(
+            "dash-vtk is not installed -- 3D solid preview unavailable "
+            "(pip install \"turbo_moc[cad]\").")
+    try:
+        import vtk
+        from turbo_moc.geometry import export_annular_blade_stl
+    except ImportError:
+        return _vtk_placeholder(
+            "cadquery / vtk are not installed -- 3D solid preview unavailable "
+            "(pip install \"turbo_moc[cad]\").")
+
+    n_render_cap = 200
+
+    def _row_mesh_state(sizing_result, source, z_offset, tmpdir, name):
+        n_blades = int(sizing_result["n_blades"])
+        n_render = min(n_blades, n_render_cap)
+        stl_path = os.path.join(tmpdir, name)
+        export_annular_blade_stl(
+            sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
+            stl_path, n_blades=n_blades, flare="pitch_scale", source=source, z_offset=z_offset,
+        )
+        reader = vtk.vtkSTLReader()
+        reader.SetFileName(stl_path)
+        reader.Update()
+        base_mesh = reader.GetOutput()
+
+        append = vtk.vtkAppendPolyData()
+        for i in range(n_render):
+            transform = vtk.vtkTransform()
+            transform.RotateZ(i * 360.0 / n_blades)
+            tf = vtk.vtkTransformPolyDataFilter()
+            tf.SetTransform(transform)
+            tf.SetInputData(base_mesh)
+            tf.Update()
+            append.AddInputData(tf.GetOutput())
+        append.Update()
+        return to_mesh_state(append.GetOutput())
+
+    try:
+        z_offset = _rotor_z_offset(stator_sizing, rotor_sizing, gap or 0.0)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stator_mesh_state = _row_mesh_state(stator_sizing, "stator", 0.0, tmpdir, "stator.stl")
+            rotor_mesh_state = _row_mesh_state(rotor_sizing, "rotor", z_offset, tmpdir, "rotor.stl")
+    except Exception as e:
+        return _vtk_placeholder(f"Error building 3D solid preview: {e}")
+
+    return dash_vtk.View(
+        background=[0.93, 0.95, 0.97],
+        style={"height": "100%", "width": "100%"},
+        children=[
+            dash_vtk.GeometryRepresentation(
+                children=[dash_vtk.Mesh(state=stator_mesh_state)],
+                property={
+                    "color": [0.55, 0.63, 0.75], "edgeVisibility": False,
+                    "interpolation": "Phong",
+                    "ambient": 0.12, "diffuse": 0.8, "specular": 0.45, "specularPower": 30,
+                },
+                showCubeAxes=True,
+                cubeAxesStyle={"axisLabels": ["X [mm]", "Y [mm]", "Z (axial) [mm]"]},
+            ),
+            dash_vtk.GeometryRepresentation(
+                children=[dash_vtk.Mesh(state=rotor_mesh_state)],
+                property={
+                    "color": [0.85, 0.55, 0.45], "edgeVisibility": False,
+                    "interpolation": "Phong",
+                    "ambient": 0.12, "diffuse": 0.8, "specular": 0.45, "specularPower": 30,
+                },
+            ),
+        ],
+    )
+
+
+@app.callback(
+    Output("download-cascade-stator-step", "data"),
+    Output("cascade-step-status", "children", allow_duplicate=True),
+    Input("download-cascade-stator-step-btn", "n_clicks"),
+    State("stator-sizing-store", "data"),
+    prevent_initial_call=True,
+)
+def download_cascade_stator_step(n_clicks, stator_sizing):
+    if not stator_sizing:
+        return dash.no_update, html.Div("Run Phase 3 (stator sizing) first.", style={"color": "#b00020"})
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from turbo_moc.geometry import export_annular_blade_step
+            face_path = os.path.join(tmpdir, "face.step")
+            solid_path = os.path.join(tmpdir, "solid.step")
+            export_annular_blade_step(
+                stator_sizing["scaled_blade"], stator_sizing["r_hub"], stator_sizing["r_shroud"],
+                face_path, solid_path, n_blades=int(stator_sizing["n_blades"]),
+                flare="pitch_scale", source="stator", z_offset=0.0,
+            )
+            with open(solid_path, "rb") as f:
+                content = f.read()
+    except ImportError:
+        return dash.no_update, html.Div(
+            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
+
+    return dcc.send_bytes(content, "cascade_stator.step"), html.Div(
+        "Stator STEP ready (assembly position).", style={"color": "#1a7a1a"})
+
+
+@app.callback(
+    Output("download-cascade-rotor-step", "data"),
+    Output("cascade-step-status", "children", allow_duplicate=True),
+    Input("download-cascade-rotor-step-btn", "n_clicks"),
+    State("stator-sizing-store", "data"),
+    State("rotor-sizing-store", "data"),
+    State("cascade_axial_gap", "value"),
+    prevent_initial_call=True,
+)
+def download_cascade_rotor_step(n_clicks, stator_sizing, rotor_sizing, gap):
+    if not stator_sizing or not rotor_sizing:
+        return dash.no_update, html.Div("Run Phase 3 and Phase 5 sizing first.", style={"color": "#b00020"})
+    try:
+        z_offset = _rotor_z_offset(stator_sizing, rotor_sizing, gap or 0.0)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from turbo_moc.geometry import export_annular_blade_step
+            face_path = os.path.join(tmpdir, "face.step")
+            solid_path = os.path.join(tmpdir, "solid.step")
+            export_annular_blade_step(
+                rotor_sizing["scaled_blade"], rotor_sizing["r_hub"], rotor_sizing["r_shroud"],
+                face_path, solid_path, n_blades=int(rotor_sizing["n_blades"]),
+                flare="pitch_scale", source="rotor", z_offset=z_offset,
+            )
+            with open(solid_path, "rb") as f:
+                content = f.read()
+    except ImportError:
+        return dash.no_update, html.Div(
+            "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
+
+    return dcc.send_bytes(content, "cascade_rotor.step"), html.Div(
+        "Rotor STEP ready (assembly position).", style={"color": "#1a7a1a"})
 
 
 def main():
