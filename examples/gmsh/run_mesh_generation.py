@@ -61,8 +61,10 @@ LOG_FILENAME = "mesh_generation.log"  # Replaced on every run, like mesh outputs
 # =============================================================================
 
 
-def load_or_solve_nozzle(parameters, cache_file, use_cache=True, force_solve=False):
-    """Load a validated MoC nozzle solution from cache, or solve and save a new one."""
+def load_or_solve_nozzle(
+    parameters, cache_file, use_cache=True, force_solve=False, *, cache_only=False
+):
+    """Load or solve a validated MoC design; cache_only returns None on a cache miss."""
 
     def cache_signature():
         # Solver inputs, source files and dependency versions identify a result.
@@ -142,6 +144,9 @@ def load_or_solve_nozzle(parameters, cache_file, use_cache=True, force_solve=Fal
         result = read_cached_result(signature)
         if result is not None:
             return result
+
+    if cache_only:
+        return None
 
     logger.info("  Calculating a new MoC solution (solver output follows).")
     result = turbo_moc.design_nozzle(**parameters)

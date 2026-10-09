@@ -23,6 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mesh-viz = ["pyvista>=0.46,<1.0", "dash-vtk>=0.0.9,<1.0"]
 # Optional STEP export support. CadQuery may instead be installed through the
 # Conda environment defined in environment.yaml.
 cad = ["cadquery", "dash-vtk"]

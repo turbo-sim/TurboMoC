@@ -1,0 +1,99 @@
+# MoC inputs use SI units; machine dimensions and mesh targets are mm.
+# Radii/chords locate blade LE and TE, not the extended mesh inlet/outlet.
+# Numerical sizes refer to the conformal plane at the reference radius.
+# Physical layer heights vary with the conformal metric; see readme.md.
+# mesh.matplotlib.num_blades controls display copies, not physical pitch.
+workflow:
+  save_figures: true
+  show_gmsh: true           # Also requires mesh.show_gui: true.
+  show_pyvista: true        # Optional: pip install ".[mesh-viz]".
+  log_level: INFO
+nozzle:
+  fluid_name: Cyclopentane
+  P0: 251300.0
+  Q0: 0.025
+  p_back: 95000.0
+  solver: conventional
+  use_true_sauer_line: true
+  y_t: 0.01
+  n: 15
+  rho_t: 0.2
+  rho_d: 0.1
+  delta_flow: 0.0
+  tau_max: 90.0
+  tau_step: 1.0
+blade:
+  metal_angle_in: 0.0
+  metal_angle_out: 65.0
+  r_trailing: 0.5
+  inlet_opening_ratio: 1.3
+  n_cp: 30
+  num_baseline_points: 500
+  num_curve_points: 500
+passage:
+  inlet_chords: 1.5
+  outlet_chords: 2.0
+  domain_shift_mode: auto
+  domain_shift: 0.0
+  smooth:
+    inlet_axial_tangent: 0.35
+    inlet_blade_tangent: 0.35
+    outlet_blade_tangent: 0.15
+    outlet_axial_tangent: 0.55
+    num_points: 120
+machine:
+  type: axial
+  hub_radius: 100.0
+  blade_height: 10.0
+  hub_chord: 20.0
+  tip_chord: 20.0
+  num_blades: 31
+mesh:
+  show_gui: false
+  numerics:
+    terminal_output: true
+    verbosity: 2
+    blade_size: 0.25
+    domain_size: 1.0
+    curvature_elements: 50
+    algorithm: 8
+    recombine: true
+    recombination_algorithm: 1
+    smoothing_steps: 5
+    inflation_layers:
+      enabled: true
+      first_height: 0.03
+      growth_ratio: 1.2
+      thickness: 1.0
+    span_layers: 25
+    span_stretch: 1.5
+  matplotlib:
+    num_blades: 3
+    annotate_boundaries: true
+    mesh_color: orange
+    edge_color: black
+    domain_color: lightgrey
+    dpi: 500
+    rasterize_mesh: true
+  pyvista:
+    show_mesh_edges: true
+    surfaces:              # Selection applies to both interactive panels.
+      blade: true
+      hub: true
+      shroud: false
+      inlet: false
+      outlet: false
+      periodic_left: false
+      periodic_right: false
+  cgns:
+    enabled: true
+    filename: stator_mesh_3d.cgns
+    length_scale: 0.001
+    boundary_types:
+      blade: BCWallViscous
+      inlet: BCInflowSubsonic
+      outlet: BCOutflowSubsonic
+      periodic_left: BCGeneral
+      periodic_right: BCGeneral
+      hub: BCWallViscous
+      shroud: BCWallViscous
