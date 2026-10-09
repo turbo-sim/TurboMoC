@@ -196,6 +196,95 @@ def _vtk_placeholder(message):
                                       "textAlign": "center"})
 
 
+def _dedupe_closed_loop(x, y, tol=1e-6):
+    """Drop consecutive near-duplicate points from a closed 2D loop,
+    INCLUDING the wraparound last-vs-first pair -- e.g. a stator's
+    blade_curve + trailing_edge concatenated this way has an EXACT
+    duplicate at the seam (trailing_edge's own endpoints coincide with
+    blade_curve's start/end, by construction, to bridge the gap a direct
+    closure would leave). A naive closed polygon built straight from that
+    (implicitly closing last point back to first) gets a zero-length
+    closing edge, which is a degenerate, effectively self-intersecting
+    polygon -- confirmed directly: a point-in-polygon self-intersection
+    check found exactly one crossing before this dedup, zero after.
+    Robust polygon capping (vtkPolygon) handles a non-convex but SIMPLE
+    polygon fine; it does not handle a degenerate one, which is what was
+    producing the "blanket" mis-triangulated end caps."""
+    pts = list(zip(x, y))
+    cleaned = [pts[0]]
+    for p in pts[1:]:
+        if np.hypot(p[0] - cleaned[-1][0], p[1] - cleaned[-1][1]) > tol:
+            cleaned.append(p)
+    if np.hypot(cleaned[-1][0] - cleaned[0][0], cleaned[-1][1] - cleaned[0][1]) <= tol:
+        cleaned.pop()
+    return [p[0] for p in cleaned], [p[1] for p in cleaned]
+
+
+def _triangulate_vtk(vtk, polydata):
+    """Run polydata through vtkTriangleFilter server-side (VTK's own
+    robust, compiled triangulator) before it ever reaches the browser.
+    Needed for any mesh built from multi-point vtkPolygon cells (e.g.
+    _extrude_polygon_vtk's end caps): dash-vtk's client-side renderer
+    (vtk.js) triangulates a raw vtkPolygon cell with a naive fan from its
+    first vertex, which breaks badly on non-convex polygons like these
+    blade cross-sections -- confirmed visually (cap triangles cutting
+    straight across the shape's concave regions, producing a "cone"
+    instead of the true outline). Pre-triangulating here sends only plain
+    triangles to the client, so there is no client-side ambiguity left to
+    get wrong. Harmless/idempotent on meshes that are already all
+    triangles (e.g. cadquery's own STL export)."""
+    tri = vtk.vtkTriangleFilter()
+    tri.SetInputData(polydata)
+    tri.Update()
+    return tri.GetOutput()
+
+
+def _extrude_polygon_vtk(vtk, x, y, depth):
+    """A single closed 2D polygon (x, y, already positioned in the global
+    X/Y plane -- e.g. one radial-wrapped blade copy) extruded by `depth`
+    along Z into a watertight vtkPolyData (bottom cap + side quads + top
+    cap). Pure vtk/numpy, no cadquery -- the radial wrap has no inherent
+    axial-depth dimension (see turbo_moc.geometry.radial's module
+    docstring), so this is a flat, constant-depth preview/export
+    extrusion, not a true spanwise-varying solid like the axial wrap's
+    _build_annular_blade_solid."""
+    x, y = _dedupe_closed_loop(x, y)
+    n = len(x)
+    points = vtk.vtkPoints()
+    for xi, yi in zip(x, y):
+        points.InsertNextPoint(xi, yi, 0.0)
+    for xi, yi in zip(x, y):
+        points.InsertNextPoint(xi, yi, depth)
+
+    polys = vtk.vtkCellArray()
+    for i in range(n):
+        j = (i + 1) % n
+        quad = vtk.vtkPolygon()
+        quad.GetPointIds().SetNumberOfIds(4)
+        quad.GetPointIds().SetId(0, i)
+        quad.GetPointIds().SetId(1, j)
+        quad.GetPointIds().SetId(2, j + n)
+        quad.GetPointIds().SetId(3, i + n)
+        polys.InsertNextCell(quad)
+
+    bottom = vtk.vtkPolygon()
+    bottom.GetPointIds().SetNumberOfIds(n)
+    for i in range(n):
+        bottom.GetPointIds().SetId(i, n - 1 - i)
+    polys.InsertNextCell(bottom)
+
+    top = vtk.vtkPolygon()
+    top.GetPointIds().SetNumberOfIds(n)
+    for i in range(n):
+        top.GetPointIds().SetId(i, i + n)
+    polys.InsertNextCell(top)
+
+    polydata = vtk.vtkPolyData()
+    polydata.SetPoints(points)
+    polydata.SetPolys(polys)
+    return polydata
+
+
 controls = html.Div(
     [
         html.Div(
@@ -366,12 +455,6 @@ blade_controls = html.Div(
         _field(r"$s / o_1$ (pitch / inlet opening)", "inlet_opening_ratio",
                BLADE_DEFAULTS["inlet_opening_ratio"]),
         _field(r"$n_{cp}$ (B-spline control points)", "n_cp", BLADE_DEFAULTS["n_cp"], step=1, min=6),
-        dcc.Checklist(
-            id="blade_mirror",
-            options=[{"label": " Mirror (flip concavity)", "value": "on"}],
-            value=[],
-            labelStyle={"fontSize": "13px"},
-        ),
 
         html.Button("Compute blade", id="compute-blade-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px",
@@ -490,49 +573,93 @@ SIZING_DEFAULTS = dict(
     r_hub_b=13.391, H_b=2.9367, n_blades_b=15, mdot_b=0.52353,
 )
 
+# r1/r2 are NOT reused from Phase 3's axial sizing defaults -- those are
+# post-k-scaled (k~=0.03 for the app's own Novec649 default), ~13-29 mm,
+# while the RAW Phase 2 blade fed into the radial map here is still at its
+# native size (pitch ~171 mm, chord ~37-114 mm). Feeding that native-size
+# blade into a 13-29 mm target annulus compresses it violently and
+# non-uniformly (confirmed visually -- distorted, scattered-looking
+# blades, not a clean radial sweep). r1/r2 here are instead picked to be
+# the same order of magnitude as the blade's own native chord extent.
+# n_blades=6 is this (r1, r2)'s own implied_n_blades_radial (not a
+# coincidence -- a default N picked without checking that number overlaps
+# badly, confirmed visually: 15 blades crammed into a ~6-blade-wide
+# annulus at this r1/r2 looks like a pinwheel/sawblade, not a cascade).
+RADIAL_DEFAULTS = dict(r1=150.0, r2=300.0, n_blades=6, depth=5.0)
+
 sizing_controls = html.Div(
     [
         html.H4("Stator sizing"),
-        dcc.RadioItems(
-            id="sizing_mode",
+        dcc.Dropdown(
+            id="stator_wrap_type",
             options=[
-                {"label": " Case A (cycle-level: mass flow target)", "value": "A"},
-                {"label": " Case B (full meanline: all given)", "value": "B"},
+                {"label": "Axial", "value": "axial"},
+                {"label": "Radial", "value": "radial"},
             ],
-            value="A",
-            labelStyle={"display": "block", "fontSize": "13px"},
+            value="axial", clearable=False,
+            style={"marginBottom": "8px"},
         ),
+
         html.Div(
-            id="sizing_mode_a_fields",
+            id="stator_axial_fields",
             children=[
-                _field(r"$\dot{m}$ (kg/s)", "sizing_mdot_a", SIZING_DEFAULTS["mdot_a"]),
-                _field(r"$N_{\text{blades}}$", "sizing_n_blades_a", SIZING_DEFAULTS["n_blades_a"], step=1, min=1),
-                _field(r"$r_{\text{hub}}$ (mm)", "sizing_r_hub_a", SIZING_DEFAULTS["r_hub_a"]),
+                dcc.RadioItems(
+                    id="sizing_mode",
+                    options=[
+                        {"label": " Case A (cycle-level: mass flow target)", "value": "A"},
+                        {"label": " Case B (full meanline: all given)", "value": "B"},
+                    ],
+                    value="A",
+                    labelStyle={"display": "block", "fontSize": "13px"},
+                ),
+                html.Div(
+                    id="sizing_mode_a_fields",
+                    children=[
+                        _field(r"$\dot{m}$ (kg/s)", "sizing_mdot_a", SIZING_DEFAULTS["mdot_a"]),
+                        _field(r"$N_{\text{blades}}$", "sizing_n_blades_a", SIZING_DEFAULTS["n_blades_a"], step=1, min=1),
+                        _field(r"$r_{\text{hub}}$ (mm)", "sizing_r_hub_a", SIZING_DEFAULTS["r_hub_a"]),
+                    ],
+                ),
+                html.Div(
+                    id="sizing_mode_b_fields",
+                    children=[
+                        _field(r"$r_{\text{hub}}$ (mm)", "sizing_r_hub_b", SIZING_DEFAULTS["r_hub_b"]),
+                        _field(r"$H$ (blade height, mm)", "sizing_H_b", SIZING_DEFAULTS["H_b"]),
+                        _field(r"$N_{\text{blades}}$", "sizing_n_blades_b", SIZING_DEFAULTS["n_blades_b"], step=1, min=1),
+                        _field(r"$\dot{m}$ (kg/s)", "sizing_mdot_b", SIZING_DEFAULTS["mdot_b"]),
+                    ],
+                    style={"display": "none"},
+                ),
+                html.Button("Compute sizing", id="compute-sizing-btn", n_clicks=0,
+                             style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                                    "fontWeight": "600"}),
+                html.Div(id="sizing-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+
+                html.H4("Export", style={"marginTop": "16px"}),
+                html.Button("Download scaled blade (JSON)", id="download-sizing-json-btn", n_clicks=0,
+                             style={"width": "100%", "padding": "8px"}),
+                dcc.Download(id="download-sizing-json"),
+                html.Button("Download blade solid (STEP)", id="download-sizing-step-btn", n_clicks=0,
+                             style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+                dcc.Download(id="download-sizing-step"),
+                html.Div(id="sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
             ],
         ),
+
         html.Div(
-            id="sizing_mode_b_fields",
+            id="stator_radial_fields",
             children=[
-                _field(r"$r_{\text{hub}}$ (mm)", "sizing_r_hub_b", SIZING_DEFAULTS["r_hub_b"]),
-                _field(r"$H$ (blade height, mm)", "sizing_H_b", SIZING_DEFAULTS["H_b"]),
-                _field(r"$N_{\text{blades}}$", "sizing_n_blades_b", SIZING_DEFAULTS["n_blades_b"], step=1, min=1),
-                _field(r"$\dot{m}$ (kg/s)", "sizing_mdot_b", SIZING_DEFAULTS["mdot_b"]),
+                _field(r"$r_1$ (mm, hub)", "radial_r1", RADIAL_DEFAULTS["r1"]),
+                _field(r"$r_2$ (mm, shroud)", "radial_r2", RADIAL_DEFAULTS["r2"]),
+                _field(r"$N_{\text{blades}}$", "radial_n_blades", RADIAL_DEFAULTS["n_blades"], step=1, min=1),
+                _field(r"Depth (mm, preview/export only)", "radial_depth", RADIAL_DEFAULTS["depth"]),
+                html.Button("Compute radial wrap", id="compute-radial-btn", n_clicks=0,
+                             style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                                    "fontWeight": "600"}),
+                html.Div(id="radial-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
             ],
             style={"display": "none"},
         ),
-        html.Button("Compute sizing", id="compute-sizing-btn", n_clicks=0,
-                     style={"width": "100%", "marginTop": "8px", "padding": "8px",
-                            "fontWeight": "600"}),
-        html.Div(id="sizing-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
-
-        html.H4("Export", style={"marginTop": "16px"}),
-        html.Button("Download scaled blade (JSON)", id="download-sizing-json-btn", n_clicks=0,
-                     style={"width": "100%", "padding": "8px"}),
-        dcc.Download(id="download-sizing-json"),
-        html.Button("Download blade solid (STEP)", id="download-sizing-step-btn", n_clicks=0,
-                     style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
-        dcc.Download(id="download-sizing-step"),
-        html.Div(id="sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
     ],
     style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
@@ -540,16 +667,37 @@ sizing_controls = html.Div(
 
 sizing_plots = html.Div(
     [
-        dcc.Loading(
-            type="circle",
-            children=html.Div(
-                id="sizing-vtk-container",
-                children=_vtk_placeholder("Compute a sizing (Case A or B) to see the 3D solid preview."),
-                style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
-                       "borderRadius": "4px"},
-            ),
+        html.Div(
+            id="stator_axial_plots",
+            children=[
+                dcc.Loading(
+                    type="circle",
+                    children=html.Div(
+                        id="sizing-vtk-container",
+                        children=_vtk_placeholder("Compute a sizing (Case A or B) to see the 3D solid preview."),
+                        style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                               "borderRadius": "4px"},
+                    ),
+                ),
+                html.Div(id="sizing-info-table", style={"marginTop": "12px"}),
+            ],
         ),
-        html.Div(id="sizing-info-table", style={"marginTop": "12px"}),
+        html.Div(
+            id="stator_radial_plots",
+            children=[
+                dcc.Loading(
+                    type="circle",
+                    children=html.Div(
+                        id="radial-vtk-container",
+                        children=_vtk_placeholder("Compute a radial wrap to see the 3D preview."),
+                        style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                               "borderRadius": "4px"},
+                    ),
+                ),
+                html.Div(id="radial-info-table", style={"marginTop": "12px"}),
+            ],
+            style={"display": "none"},
+        ),
     ],
     style={"flex": "1", "padding": "16px"},
 )
@@ -668,23 +816,66 @@ rotor_plots = html.Div(
 # turbo_moc.geometry.sizing.size_rotor_from_pitch).
 # --------------------------------------------------------------------------
 ROTOR_SIZING_DEFAULTS = dict(n_blades=34)  # EMPOWER_DTU Novec649 meanline rotor blade_count
+# Same reasoning as RADIAL_DEFAULTS above: r1/r2 picked to match the raw
+# Phase 4 rotor blade's own native size, not the axially-scaled Phase 5
+# ones. The rotor blade is nondimensional-by-r* (no r_star passed at
+# compute time), so `scale` (mm per r*) also needs to be large enough to
+# bring it up near that same order of magnitude -- 1.0 mm/r* left it
+# under 2 mm, the opposite mismatch (blade far smaller than the target
+# annulus this time). n_blades=30 is this (r1, r2, scale)'s own
+# implied_n_blades_radial (see RADIAL_DEFAULTS' own comment for why that
+# matters).
+ROTOR_RADIAL_DEFAULTS = dict(r1=100.0, r2=200.0, n_blades=30, scale=50.0, depth=5.0)
 
 rotor_sizing_controls = html.Div(
     [
         html.H4("3D rotor design"),
-        html.Div(id="rotor-sizing-annulus-readout", style={"fontSize": "12px", "marginBottom": "8px"}),
-        _field(r"$N_{\text{blades}}$ (rotor)", "rotor_sizing_n_blades",
-               ROTOR_SIZING_DEFAULTS["n_blades"], step=1, min=1),
-        html.Button("Compute sizing", id="compute-rotor-sizing-btn", n_clicks=0,
-                     style={"width": "100%", "marginTop": "8px", "padding": "8px",
-                            "fontWeight": "600"}),
-        html.Div(id="rotor-sizing-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+        dcc.Dropdown(
+            id="rotor_wrap_type",
+            options=[
+                {"label": "Axial", "value": "axial"},
+                {"label": "Radial", "value": "radial"},
+            ],
+            value="axial", clearable=False,
+            style={"marginBottom": "8px"},
+        ),
 
-        html.H4("Export", style={"marginTop": "16px"}),
-        html.Button("Download blade solid (STEP)", id="download-rotor-sizing-step-btn", n_clicks=0,
-                     style={"width": "100%", "padding": "8px"}),
-        dcc.Download(id="download-rotor-sizing-step"),
-        html.Div(id="rotor-sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
+        html.Div(
+            id="rotor_axial_fields",
+            children=[
+                html.Div(id="rotor-sizing-annulus-readout", style={"fontSize": "12px", "marginBottom": "8px"}),
+                _field(r"$N_{\text{blades}}$ (rotor)", "rotor_sizing_n_blades",
+                       ROTOR_SIZING_DEFAULTS["n_blades"], step=1, min=1),
+                html.Button("Compute sizing", id="compute-rotor-sizing-btn", n_clicks=0,
+                             style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                                    "fontWeight": "600"}),
+                html.Div(id="rotor-sizing-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+
+                html.H4("Export", style={"marginTop": "16px"}),
+                html.Button("Download blade solid (STEP)", id="download-rotor-sizing-step-btn", n_clicks=0,
+                             style={"width": "100%", "padding": "8px"}),
+                dcc.Download(id="download-rotor-sizing-step"),
+                html.Div(id="rotor-sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
+            ],
+        ),
+
+        html.Div(
+            id="rotor_radial_fields",
+            children=[
+                _field(r"$r_1$ (mm, hub)", "rotor_radial_r1", ROTOR_RADIAL_DEFAULTS["r1"]),
+                _field(r"$r_2$ (mm, shroud)", "rotor_radial_r2", ROTOR_RADIAL_DEFAULTS["r2"]),
+                _field(r"$N_{\text{blades}}$", "rotor_radial_n_blades",
+                       ROTOR_RADIAL_DEFAULTS["n_blades"], step=1, min=1),
+                _field(r"Scale (mm per r*)", "rotor_radial_scale", ROTOR_RADIAL_DEFAULTS["scale"]),
+                _field(r"Depth (mm, preview/export only)", "rotor_radial_depth",
+                       ROTOR_RADIAL_DEFAULTS["depth"]),
+                html.Button("Compute radial wrap", id="compute-rotor-radial-btn", n_clicks=0,
+                             style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                                    "fontWeight": "600"}),
+                html.Div(id="rotor-radial-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+            ],
+            style={"display": "none"},
+        ),
     ],
     style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
@@ -692,16 +883,37 @@ rotor_sizing_controls = html.Div(
 
 rotor_sizing_plots = html.Div(
     [
-        dcc.Loading(
-            type="circle",
-            children=html.Div(
-                id="rotor-sizing-vtk-container",
-                children=_vtk_placeholder("Compute a sizing to see the 3D solid preview."),
-                style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
-                       "borderRadius": "4px"},
-            ),
+        html.Div(
+            id="rotor_axial_plots",
+            children=[
+                dcc.Loading(
+                    type="circle",
+                    children=html.Div(
+                        id="rotor-sizing-vtk-container",
+                        children=_vtk_placeholder("Compute a sizing to see the 3D solid preview."),
+                        style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                               "borderRadius": "4px"},
+                    ),
+                ),
+                html.Div(id="rotor-sizing-info-table", style={"marginTop": "12px"}),
+            ],
         ),
-        html.Div(id="rotor-sizing-info-table", style={"marginTop": "12px"}),
+        html.Div(
+            id="rotor_radial_plots",
+            children=[
+                dcc.Loading(
+                    type="circle",
+                    children=html.Div(
+                        id="rotor-radial-vtk-container",
+                        children=_vtk_placeholder("Compute a radial wrap to see the 3D preview."),
+                        style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                               "borderRadius": "4px"},
+                    ),
+                ),
+                html.Div(id="rotor-radial-info-table", style={"marginTop": "12px"}),
+            ],
+            style={"display": "none"},
+        ),
     ],
     style={"flex": "1", "padding": "16px"},
 )
@@ -805,9 +1017,11 @@ app.layout = html.Div(
         dcc.Store(id="blade-edited-store"),
         dcc.Store(id="blade-reference-store"),
         dcc.Store(id="stator-sizing-store"),
+        dcc.Store(id="stator-radial-store"),
         dcc.Store(id="rotor-store"),
         dcc.Store(id="rotor-reference-store"),
         dcc.Store(id="rotor-sizing-store"),
+        dcc.Store(id="rotor-radial-store"),
     ],
     style={"fontFamily": "Helvetica, Arial, sans-serif"},
 )
@@ -1096,11 +1310,10 @@ def download_wall_csv(n_clicks, data, conv_enable, conv_length):
     State("r_trailing", "value"),
     State("inlet_opening_ratio", "value"),
     State("n_cp", "value"),
-    State("blade_mirror", "value"),
     prevent_initial_call=True,
 )
 def run_blade(n_clicks, nozzle_data, method, metal_angle_in, metal_angle_out, r_trailing,
-              inlet_opening_ratio, n_cp, mirror_vals):
+              inlet_opening_ratio, n_cp):
     if not nozzle_data:
         return None, html.Div("Run Phase 1 Compute first -- no nozzle wall to build a blade from.",
                                 style={"color": "#b00020"}), None
@@ -1113,7 +1326,6 @@ def run_blade(n_clicks, nozzle_data, method, metal_angle_in, metal_angle_out, r_
             metal_angle_in=metal_angle_in, metal_angle_out=metal_angle_out,
             r_trailing=r_trailing,
             inlet_opening_ratio=inlet_opening_ratio, n_cp=int(n_cp),
-            mirror=bool(mirror_vals and "on" in mirror_vals),
         )
     except Exception as e:
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
@@ -1152,6 +1364,18 @@ def _effective_blade(base_blade, edited_blade):
 def _toggle_sizing_mode(mode):
     shown, hidden = {"display": "block"}, {"display": "none"}
     return (shown, hidden) if mode == "A" else (hidden, shown)
+
+
+@app.callback(
+    Output("stator_axial_fields", "style"),
+    Output("stator_radial_fields", "style"),
+    Output("stator_axial_plots", "style"),
+    Output("stator_radial_plots", "style"),
+    Input("stator_wrap_type", "value"),
+)
+def _toggle_stator_wrap_type(wrap_type):
+    shown, hidden = {"display": "block"}, {"display": "none"}
+    return (shown, hidden, shown, hidden) if wrap_type == "axial" else (hidden, shown, hidden, shown)
 
 
 @app.callback(
@@ -1230,6 +1454,142 @@ def run_stator_sizing(n_clicks, mode, base_blade, edited_blade, nozzle_data,
 
 
 @app.callback(
+    Output("stator-radial-store", "data"),
+    Output("radial-status-message", "children"),
+    Output("radial-info-table", "children"),
+    Input("compute-radial-btn", "n_clicks"),
+    State("blade-store", "data"),
+    State("blade-edited-store", "data"),
+    State("result-store", "data"),
+    State("radial_r1", "value"),
+    State("radial_r2", "value"),
+    State("radial_n_blades", "value"),
+    State("radial_depth", "value"),
+    prevent_initial_call=True,
+)
+def run_radial_stator(n_clicks, base_blade, edited_blade, nozzle_data, r1, r2, n_blades, depth):
+    """Diagnostic-only radial sizing (see turbo_moc.geometry.radial's
+    module docstring): N_blades is a direct input, not solved -- the
+    conformal map's pitch consistency has no free scale lever the way the
+    axial Case A's k does (uniform rescale cancels out of the mapped
+    pitch once r1/r2 are fixed), so this reports the implied mass flow
+    from the given N rather than deriving N from a target mdot."""
+    from turbo_moc.geometry import (
+        compute_throat_sonic_state, implied_n_blades_radial, mapped_pitch_width,
+        mapped_throat_width,
+    )
+
+    stator = _effective_blade(base_blade, edited_blade)
+    if not stator:
+        return None, html.Div("Run Phase 2 first -- no stator blade to wrap.",
+                                style={"color": "#b00020"}), None
+    if not nozzle_data:
+        return None, html.Div("Run Phase 1 first -- the mass-flow diagnostic needs the "
+                                "throat sonic state.", style={"color": "#b00020"}), None
+
+    r1, r2, n_blades, depth = float(r1), float(r2), int(n_blades), float(depth)
+    try:
+        mapped_throat = mapped_throat_width(stator, r1, r2, source="stator")
+        mapped_pitch = mapped_pitch_width(stator, r1, r2, source="stator")
+        n_implied = implied_n_blades_radial(stator, r1, r2, source="stator")
+        rho_star, a_star = compute_throat_sonic_state(nozzle_data)
+        mdot_implied = rho_star * a_star * mapped_throat * depth * n_blades * 1e-6
+    except Exception as e:
+        return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
+
+    result = {
+        "r1": r1, "r2": r2, "n_blades": n_blades, "depth": depth,
+        "mapped_throat": mapped_throat, "rho_star": rho_star, "a_star": a_star,
+        "mdot_implied": mdot_implied,
+        "blade": stator,
+    }
+    table_data = [
+        {"Quantity": "2D throat_opening", "Value": f"{stator['throat_opening']:.2f}", "Unit": "mm"},
+        {"Quantity": "Mapped throat (radial)", "Value": f"{mapped_throat:.4f}", "Unit": "mm"},
+        {"Quantity": "r1 (hub)", "Value": f"{r1:.2f}", "Unit": "mm"},
+        {"Quantity": "r2 (shroud)", "Value": f"{r2:.2f}", "Unit": "mm"},
+        {"Quantity": "N_blades (entered)", "Value": str(n_blades), "Unit": "-"},
+        {"Quantity": "Mapped pitch (at N entered)", "Value": f"{mapped_pitch:.2f}", "Unit": "mm"},
+        {"Quantity": "Implied N_blades (no overlap/gaps)", "Value": f"{n_implied:.1f}", "Unit": "-"},
+        {"Quantity": "Depth", "Value": f"{depth:.2f}", "Unit": "mm"},
+        {"Quantity": "Implied mass flow", "Value": f"{mdot_implied:.4f}", "Unit": "kg/s"},
+    ]
+    ratio = n_blades / n_implied
+    if ratio > 1.15:
+        msg = (f"Radial wrap computed -- N_blades ({n_blades}) is {ratio:.1f}x the implied "
+               f"count ({n_implied:.1f}): blades will visibly OVERLAP. Lower N_blades.")
+        color = "#b00020"
+    elif ratio < 0.85:
+        msg = (f"Radial wrap computed -- N_blades ({n_blades}) is only {ratio:.1f}x the "
+               f"implied count ({n_implied:.1f}): large GAPS between blades. Raise N_blades.")
+        color = "#b00020"
+    else:
+        msg = "Radial wrap computed -- N_blades is close to the implied (no-overlap) count."
+        color = "#1a7a1a"
+    status = html.Div(msg, style={"color": color, "fontWeight": "600"})
+    return result, status, make_table(table_data, ["Quantity", "Value", "Unit"])
+
+
+@app.callback(
+    Output("radial-vtk-container", "children"),
+    Input("stator-radial-store", "data"),
+)
+def _update_radial_vtk_preview(radial_result):
+    if not radial_result:
+        return _vtk_placeholder("Compute a radial wrap to see the 3D preview.")
+    if not DASH_VTK_AVAILABLE:
+        return _vtk_placeholder(
+            "dash-vtk is not installed -- 3D solid preview unavailable "
+            "(pip install \"turbo_moc[cad]\").")
+    try:
+        import vtk
+        from turbo_moc.geometry import wrap_blade_radial
+    except ImportError:
+        return _vtk_placeholder("vtk is not installed -- 3D solid preview unavailable.")
+
+    try:
+        wrapped = wrap_blade_radial(
+            radial_result["blade"], radial_result["r1"], radial_result["r2"],
+            radial_result["n_blades"])
+        append = vtk.vtkAppendPolyData()
+        for blade_copy, te_copy in zip(wrapped["blades"], wrapped["trailing_edges"]):
+            x = blade_copy["x"] + te_copy["x"]
+            y = blade_copy["y"] + te_copy["y"]
+            append.AddInputData(_extrude_polygon_vtk(vtk, x, y, radial_result["depth"]))
+        append.Update()
+        mesh_state = to_mesh_state(_triangulate_vtk(vtk, append.GetOutput()))
+    except Exception as e:
+        return _vtk_placeholder(f"Error building 3D solid preview: {e}")
+
+    return html.Div(
+        [
+            html.Div(f"Showing all {radial_result['n_blades']} blades (radial wrap).",
+                      style={"position": "absolute", "top": "8px", "left": "8px",
+                             "fontSize": "12px", "color": "#666", "zIndex": 1,
+                             "backgroundColor": "rgba(255,255,255,0.85)",
+                             "padding": "2px 8px", "borderRadius": "4px"}),
+            dash_vtk.View(
+                background=[0.93, 0.95, 0.97],
+                style={"height": "100%", "width": "100%"},
+                children=[
+                    dash_vtk.GeometryRepresentation(
+                        children=[dash_vtk.Mesh(state=mesh_state)],
+                        property={
+                            "color": [0.55, 0.63, 0.75], "edgeVisibility": False,
+                            "interpolation": "Phong",
+                            "ambient": 0.12, "diffuse": 0.8, "specular": 0.45, "specularPower": 30,
+                        },
+                        showCubeAxes=True,
+                        cubeAxesStyle={"axisLabels": ["X [mm]", "Y [mm]", "Z (axial) [mm]"]},
+                    ),
+                ],
+            ),
+        ],
+        style={"position": "relative", "height": "100%", "width": "100%"},
+    )
+
+
+@app.callback(
     Output("download-sizing-json", "data"),
     Input("download-sizing-json-btn", "n_clicks"),
     State("stator-sizing-store", "data"),
@@ -1302,7 +1662,7 @@ def _update_sizing_vtk_preview(sizing_result):
                 tf.Update()
                 append.AddInputData(tf.GetOutput())
             append.Update()
-            mesh_state = to_mesh_state(append.GetOutput())
+            mesh_state = to_mesh_state(_triangulate_vtk(vtk, append.GetOutput()))
     except Exception as e:
         return _vtk_placeholder(f"Error building 3D solid preview: {e}")
 
@@ -1794,6 +2154,18 @@ def download_rotor_plot(n_clicks, data, reference, display_options, fmt):
 # (see those for the pattern this repeats almost line for line).
 # --------------------------------------------------------------------------
 @app.callback(
+    Output("rotor_axial_fields", "style"),
+    Output("rotor_radial_fields", "style"),
+    Output("rotor_axial_plots", "style"),
+    Output("rotor_radial_plots", "style"),
+    Input("rotor_wrap_type", "value"),
+)
+def _toggle_rotor_wrap_type(wrap_type):
+    shown, hidden = {"display": "block"}, {"display": "none"}
+    return (shown, hidden, shown, hidden) if wrap_type == "axial" else (hidden, shown, hidden, shown)
+
+
+@app.callback(
     Output("rotor-sizing-annulus-readout", "children"),
     Input("stator-sizing-store", "data"),
 )
@@ -1870,7 +2242,7 @@ def _update_rotor_sizing_vtk_preview(sizing_result):
         with tempfile.TemporaryDirectory() as tmpdir:
             stl_path = os.path.join(tmpdir, "blade.stl")
             export_annular_blade_stl(
-                sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
+                _mirrored_rotor_blade(sizing_result["scaled_blade"]), sizing_result["r_hub"], sizing_result["r_shroud"],
                 stl_path, n_blades=n_blades, flare="pitch_scale", source="rotor",
             )
             reader = vtk.vtkSTLReader()
@@ -1888,7 +2260,7 @@ def _update_rotor_sizing_vtk_preview(sizing_result):
                 tf.Update()
                 append.AddInputData(tf.GetOutput())
             append.Update()
-            mesh_state = to_mesh_state(append.GetOutput())
+            mesh_state = to_mesh_state(_triangulate_vtk(vtk, append.GetOutput()))
     except Exception as e:
         return _vtk_placeholder(f"Error building 3D solid preview: {e}")
 
@@ -1927,6 +2299,135 @@ def _update_rotor_sizing_vtk_preview(sizing_result):
 
 
 @app.callback(
+    Output("rotor-radial-store", "data"),
+    Output("rotor-radial-status-message", "children"),
+    Output("rotor-radial-info-table", "children"),
+    Input("compute-rotor-radial-btn", "n_clicks"),
+    State("rotor-store", "data"),
+    State("rotor_radial_r1", "value"),
+    State("rotor_radial_r2", "value"),
+    State("rotor_radial_n_blades", "value"),
+    State("rotor_radial_scale", "value"),
+    State("rotor_radial_depth", "value"),
+    prevent_initial_call=True,
+)
+def run_radial_rotor(n_clicks, rotor_data, r1, r2, n_blades, scale, depth):
+    """Geometric-only radial wrap (see run_radial_stator's docstring for
+    why N_blades is a direct input, not solved, for the rotor too)."""
+    from turbo_moc.geometry import implied_n_blades_radial, mapped_pitch_width
+
+    if not rotor_data:
+        return None, html.Div("Run Phase 4 first -- no rotor blade to wrap.",
+                                style={"color": "#b00020"}), None
+
+    r1, r2 = float(r1), float(r2)
+    n_blades, scale, depth = int(n_blades), float(scale), float(depth)
+
+    # implied_n_blades_radial/mapped_pitch_width read blade.x/y and pitch
+    # directly, with no separate scale factor -- apply `scale` first so
+    # the diagnostic matches the geometry that actually gets wrapped/
+    # rendered (same scaled copy _update_rotor_radial_vtk_preview builds).
+    scaled_rotor = dict(rotor_data)
+    scaled_rotor["blade"] = {
+        "x": [v * scale for v in rotor_data["blade"]["x"]],
+        "y": [v * scale for v in rotor_data["blade"]["y"]],
+    }
+    scaled_rotor["pitch"] = float(rotor_data["pitch"]) * scale
+
+    try:
+        mapped_pitch = mapped_pitch_width(scaled_rotor, r1, r2, source="rotor")
+        n_implied = implied_n_blades_radial(scaled_rotor, r1, r2, source="rotor")
+    except Exception as e:
+        return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
+
+    result = {
+        "r1": r1, "r2": r2, "n_blades": n_blades, "scale": scale, "depth": depth,
+        "rotor_data": rotor_data,
+    }
+    table_data = [
+        {"Quantity": "r1 (hub)", "Value": f"{r1:.2f}", "Unit": "mm"},
+        {"Quantity": "r2 (shroud)", "Value": f"{r2:.2f}", "Unit": "mm"},
+        {"Quantity": "N_blades (entered)", "Value": str(n_blades), "Unit": "-"},
+        {"Quantity": "Scale", "Value": f"{scale:.4f}", "Unit": "mm / r*"},
+        {"Quantity": "Mapped pitch (at N entered)", "Value": f"{mapped_pitch:.2f}", "Unit": "mm"},
+        {"Quantity": "Implied N_blades (no overlap/gaps)", "Value": f"{n_implied:.1f}", "Unit": "-"},
+        {"Quantity": "Depth", "Value": f"{depth:.2f}", "Unit": "mm"},
+    ]
+    ratio = n_blades / n_implied
+    if ratio > 1.15:
+        msg = (f"Radial wrap computed -- N_blades ({n_blades}) is {ratio:.1f}x the implied "
+               f"count ({n_implied:.1f}): blades will visibly OVERLAP. Lower N_blades.")
+        color = "#b00020"
+    elif ratio < 0.85:
+        msg = (f"Radial wrap computed -- N_blades ({n_blades}) is only {ratio:.1f}x the "
+               f"implied count ({n_implied:.1f}): large GAPS between blades. Raise N_blades.")
+        color = "#b00020"
+    else:
+        msg = "Radial wrap computed -- N_blades is close to the implied (no-overlap) count."
+        color = "#1a7a1a"
+    status = html.Div(msg, style={"color": color, "fontWeight": "600"})
+    return result, status, make_table(table_data, ["Quantity", "Value", "Unit"])
+
+
+@app.callback(
+    Output("rotor-radial-vtk-container", "children"),
+    Input("rotor-radial-store", "data"),
+)
+def _update_rotor_radial_vtk_preview(radial_result):
+    if not radial_result:
+        return _vtk_placeholder("Compute a radial wrap to see the 3D preview.")
+    if not DASH_VTK_AVAILABLE:
+        return _vtk_placeholder(
+            "dash-vtk is not installed -- 3D solid preview unavailable "
+            "(pip install \"turbo_moc[cad]\").")
+    try:
+        import vtk
+        from turbo_moc.geometry import wrap_rotor_blade_radial
+    except ImportError:
+        return _vtk_placeholder("vtk is not installed -- 3D solid preview unavailable.")
+
+    try:
+        wrapped = wrap_rotor_blade_radial(
+            radial_result["rotor_data"], radial_result["r1"], radial_result["r2"],
+            radial_result["n_blades"], scale=radial_result["scale"])
+        append = vtk.vtkAppendPolyData()
+        for blade_copy in wrapped["blades"]:
+            append.AddInputData(_extrude_polygon_vtk(
+                vtk, blade_copy["x"], blade_copy["y"], radial_result["depth"]))
+        append.Update()
+        mesh_state = to_mesh_state(_triangulate_vtk(vtk, append.GetOutput()))
+    except Exception as e:
+        return _vtk_placeholder(f"Error building 3D solid preview: {e}")
+
+    return html.Div(
+        [
+            html.Div(f"Showing all {radial_result['n_blades']} blades (radial wrap).",
+                      style={"position": "absolute", "top": "8px", "left": "8px",
+                             "fontSize": "12px", "color": "#666", "zIndex": 1,
+                             "backgroundColor": "rgba(255,255,255,0.85)",
+                             "padding": "2px 8px", "borderRadius": "4px"}),
+            dash_vtk.View(
+                background=[0.93, 0.95, 0.97],
+                style={"height": "100%", "width": "100%"},
+                children=[
+                    dash_vtk.GeometryRepresentation(
+                        children=[dash_vtk.Mesh(state=mesh_state)],
+                        property={
+                            "color": [0.85, 0.55, 0.45], "edgeVisibility": False,
+                            "interpolation": "Phong",
+                            "ambient": 0.12, "diffuse": 0.8, "specular": 0.45, "specularPower": 30,
+                        },
+                        showCubeAxes=True,
+                        cubeAxesStyle={"axisLabels": ["X [mm]", "Y [mm]", "Z (axial) [mm]"]},
+                    ),
+                ],
+            ),
+        ],
+        style={"position": "relative", "height": "100%", "width": "100%"},
+    )
+
+
+@app.callback(
     Output("download-rotor-sizing-step", "data"),
     Output("rotor-sizing-step-status", "children"),
     Input("download-rotor-sizing-step-btn", "n_clicks"),
@@ -1942,7 +2443,7 @@ def download_rotor_sizing_step(n_clicks, sizing_result):
             face_path = os.path.join(tmpdir, "face.step")
             solid_path = os.path.join(tmpdir, "solid.step")
             export_annular_blade_step(
-                sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
+                _mirrored_rotor_blade(sizing_result["scaled_blade"]), sizing_result["r_hub"], sizing_result["r_shroud"],
                 face_path, solid_path, n_blades=int(sizing_result["n_blades"]),
                 flare="pitch_scale", source="rotor",
             )
@@ -1960,14 +2461,51 @@ def download_rotor_sizing_step(n_clicks, sizing_result):
 # Phase 6 callbacks: cascade (stator + rotor shown together)
 # --------------------------------------------------------------------------
 def _rotor_z_offset(stator_sizing, rotor_sizing, gap):
-    """Axial offset [mm] for the rotor row so its LE sits `gap` downstream
-    of the stator's own TE. Z is each row's own chordwise coordinate,
-    unchanged by the annular wrap -- stator: blade_curve.y, rotor: blade.x
-    NEGATED (see module-level comment above cascade_controls)."""
+    """Axial offset [mm] for the rotor row so its INLET sits `gap`
+    downstream of the stator's own OUTLET (TE).
+
+    Verified directly (not by eye) from design_rotor_vortex_blade's own
+    internal construction: a debug print of _surface()'s x_inlet_far/
+    x_outlet_far (added temporarily, then removed) showed the rotor's
+    local x INCREASES from inlet (negative x) to outlet (positive x).
+    The stator's blade_curve.y runs the opposite way -- suction[0] (the
+    actual inlet, start of the camberline-from-inlet-to-throat
+    integration) sits at the LARGE-y end, suction[-1]/the TE (outlet) at
+    the very-negative-y end -- so this app's shared Z convention is
+    "increasing coordinate = upstream" and stator_z_min = min(blade_curve.y)
+    is the stator's own OUTLET, the correct anchor point. Negating rotor
+    x before using it (rotor_z_raw below) makes the rotor's inlet land at
+    rotor_z_raw's MAX, consistent with that same convention -- anchoring
+    on max(rotor_z_raw) is therefore correct, and was NOT the bug.
+
+    The actual bug (two min/max flip-flops never touched it): this
+    negation only happens here and in the 2D cascade plot -- the 3D
+    solid pipeline (wrap_blade_annular/_build_annular_blade_solid) uses
+    blade.x RAW, unnegated, then just adds z_offset with no sign logic
+    (by design, see export_annular_blade_step's z_offset docstring). Any
+    caller that feeds this function's return value into that 3D pipeline
+    MUST first negate the rotor blade's x the same way, via
+    _mirrored_rotor_blade, or the two halves disagree and the rotor's
+    OUTLET lands next to the stator instead of its inlet -- exactly the
+    symptom reported."""
     stator_y = stator_sizing["scaled_blade"]["blade_curve"]["y"]
     stator_z_min = min(stator_y)
     rotor_z_raw = [-v for v in rotor_sizing["scaled_blade"]["blade"]["x"]]
     return stator_z_min - float(gap) - max(rotor_z_raw)
+
+
+def _mirrored_rotor_blade(scaled_blade):
+    """Copy of a rotor's scaled_blade with blade.x negated -- needed
+    anywhere a z_offset from _rotor_z_offset feeds the 3D annular-wrap
+    pipeline (wrap_blade_annular/_build_annular_blade_solid), since that
+    pipeline uses blade.x raw/unnegated for Z while _rotor_z_offset (and
+    the 2D cascade plot) compute in -x space. See _rotor_z_offset's
+    docstring for the full explanation. Only blade.x/y are read by the
+    wrap, so copying just "blade" is sufficient."""
+    blade = scaled_blade["blade"]
+    mirrored = dict(scaled_blade)
+    mirrored["blade"] = {**blade, "x": [-v for v in blade["x"]]}
+    return mirrored
 
 
 @app.callback(
@@ -2105,13 +2643,14 @@ def _update_cascade_vtk_preview(stator_sizing, rotor_sizing, gap):
             tf.Update()
             append.AddInputData(tf.GetOutput())
         append.Update()
-        return to_mesh_state(append.GetOutput())
+        return to_mesh_state(_triangulate_vtk(vtk, append.GetOutput()))
 
     try:
         z_offset = _rotor_z_offset(stator_sizing, rotor_sizing, gap or 0.0)
+        rotor_sizing_3d = {**rotor_sizing, "scaled_blade": _mirrored_rotor_blade(rotor_sizing["scaled_blade"])}
         with tempfile.TemporaryDirectory() as tmpdir:
             stator_mesh_state = _row_mesh_state(stator_sizing, "stator", 0.0, tmpdir, "stator.stl")
-            rotor_mesh_state = _row_mesh_state(rotor_sizing, "rotor", z_offset, tmpdir, "rotor.stl")
+            rotor_mesh_state = _row_mesh_state(rotor_sizing_3d, "rotor", z_offset, tmpdir, "rotor.stl")
     except Exception as e:
         return _vtk_placeholder(f"Error building 3D solid preview: {e}")
 
@@ -2190,7 +2729,7 @@ def download_cascade_rotor_step(n_clicks, stator_sizing, rotor_sizing, gap):
             face_path = os.path.join(tmpdir, "face.step")
             solid_path = os.path.join(tmpdir, "solid.step")
             export_annular_blade_step(
-                rotor_sizing["scaled_blade"], rotor_sizing["r_hub"], rotor_sizing["r_shroud"],
+                _mirrored_rotor_blade(rotor_sizing["scaled_blade"]), rotor_sizing["r_hub"], rotor_sizing["r_shroud"],
                 face_path, solid_path, n_blades=int(rotor_sizing["n_blades"]),
                 flare="pitch_scale", source="rotor", z_offset=z_offset,
             )

@@ -280,6 +280,13 @@ def parametrize_stator_blade(
     x_rot, y_rot = _rotate_points(x_convergent, y_convergent, metal_angle_out)
     x_rot = x_rot - x_rot.max()
     y_rot = y_rot + abs(y_rot.min()) + throat_opening
+    # Index of the throat point (wall_x/wall_y's own index 0, the nozzle
+    # throat) within suction_x/suction_y -- the convergent-camberline
+    # prefix (x_rot/y_rot) comes first, so the throat is the FIRST point
+    # of the appended wall segment. Every later transform below (translate/
+    # rotate) is a whole-array operation preserving order/length, so this
+    # index stays valid all the way to the final returned "suction" arrays.
+    idx_throat = len(x_rot)
 
     # --- Suction side: convergent camberline + divergent nozzle wall.
     x_vals, y_vals = _translate_points(x_vals, y_vals, dx=0, dy=(throat_opening - min(y_vals)))
@@ -360,6 +367,7 @@ def parametrize_stator_blade(
         "trailing_edge": {"x": trailing_x.tolist(), "y": trailing_y.tolist()},
         "pitch": float(pitch),
         "throat_opening": float(throat_opening),
+        "throat_point": {"x": float(suction_x[idx_throat]), "y": float(suction_y[idx_throat])},
         "inlet_opening": float(inlet_opening),
         "axial_chord_convergent": float(axial_chord_convergent),
         "axial_chord_divergent": float(axial_chord_divergent),
@@ -444,6 +452,10 @@ def parametrize_stator_blade_semi(
     x_rot, y_rot = _rotate_points(x_convergent, y_convergent, metal_angle_out)
     x_rot = x_rot - x_rot.max()
     y_rot = y_rot + abs(y_rot.min()) + throat_opening
+    # See parametrize_stator_blade's matching comment: index of the throat
+    # point within suction_x/suction_y, valid all the way to the final
+    # returned "suction" arrays (only whole-array transforms follow).
+    idx_throat = len(x_rot)
 
     # --- Suction side: convergent camberline + divergent nozzle wall.
     x_vals, y_vals = _translate_points(x_vals, y_vals, dx=0, dy=(throat_opening - min(y_vals)))
@@ -523,6 +535,7 @@ def parametrize_stator_blade_semi(
         "trailing_edge": {"x": trailing_x.tolist(), "y": trailing_y.tolist()},
         "pitch": float(pitch),
         "throat_opening": float(throat_opening),
+        "throat_point": {"x": float(suction_x[idx_throat]), "y": float(suction_y[idx_throat])},
         "inlet_opening": float(inlet_opening),
         "axial_chord_convergent": float(axial_chord_convergent),
         "axial_chord_divergent": float(axial_chord_divergent),

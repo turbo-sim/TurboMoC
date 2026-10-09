@@ -27,6 +27,7 @@ import numpy as np
 __all__ = [
     "apply_conformal_mapping", "rotate_radial_points",
     "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial",
+    "conformal_length_scale", "mapped_throat_width",
 ]
 
 
@@ -111,6 +112,115 @@ def _wrap_with_shared_reference(x, y, x1, y1, c_axial, r1, r2, n_blades, theta0,
         xi, yi = rotate_radial_points(x_mapped, y_mapped, i * d_theta)
         copies.append({"x": xi.tolist(), "y": yi.tolist()})
     return copies
+
+
+def conformal_length_scale(chord, x1, r1, r2, c_axial):
+    """Exact local length-magnification factor of the log-spiral conformal
+    map at a given chordwise coordinate.
+
+    w = X + iY, as a function of u = chordwise + i*pitchwise, is
+    w = C * exp(a*u) with a = log(r2/r1)/c_axial and C a constant complex
+    number -- a holomorphic (complex-differentiable) function of u. For any
+    holomorphic map, the local length-magnification factor is exactly
+    |dw/du| = |a| * |w| = |a| * r (the map's own r-formula, at this
+    chordwise coordinate; the absolute value matters here -- this module's
+    own _reference_point_and_scale anchors x1 at the chord MAXIMUM, which
+    makes c_axial = min(chord)-max(chord), hence a, negative by
+    convention, even though the magnification itself is always positive).
+    A length measured in the 2D cascade plane at this chordwise location
+    is scaled by exactly this factor once mapped onto the annulus -- not
+    an approximation, and no numerical search needed.
+
+    The conformal map preserves ANGLES (that's what "conformal" means),
+    not lengths -- e.g. the 2D-plane throat_opening is not the actual
+    radial-passage throat width; see mapped_throat_width."""
+    a = np.log(r2 / r1) / c_axial
+    r = r1 * np.exp(a * (chord - x1))
+    return float(abs(a) * r)
+
+
+def _eval_reference(blade_data, r1, r2, source):
+    """Shared by mapped_throat_width/mapped_pitch_width/
+    implied_n_blades_radial: the (x1, c_axial) the actual wrap derives
+    from the main contour (so results stay consistent with the rendered/
+    exported geometry), the EVALUATION point's own chordwise coordinate,
+    and the radius the map puts it at.
+
+    The evaluation point is the natural "critical section" to check pitch/
+    throat consistency at: for a stator, its own throat_point (the
+    narrowest passage section). The rotor method has no equivalent
+    critical-section concept, so x1 itself (the hub reference point,
+    r=r1 by construction -- see _reference_point_and_scale) is used
+    instead, a reasonable single representative location in the absence
+    of a better one."""
+    if source == "stator":
+        curve = blade_data["blade_curve"]
+        chord_vals, pitch_vals = np.asarray(curve["y"], dtype=float), np.asarray(curve["x"], dtype=float)
+        x1, y1, c_axial = _reference_point_and_scale(chord_vals, pitch_vals)
+        eval_chord = blade_data["throat_point"]["y"]
+    elif source == "rotor":
+        blade = blade_data["blade"]
+        chord_vals, pitch_vals = np.asarray(blade["x"], dtype=float), np.asarray(blade["y"], dtype=float)
+        x1, y1, c_axial = _reference_point_and_scale(chord_vals, pitch_vals)
+        eval_chord = x1  # hub reference point (r=r1) -- no throat concept for the rotor method
+    else:
+        raise ValueError(f"source must be 'stator' or 'rotor', got {source!r}")
+    a = np.log(r2 / r1) / c_axial
+    r_eval = r1 * np.exp(a * (eval_chord - x1))
+    return x1, c_axial, eval_chord, float(r_eval)
+
+
+def mapped_throat_width(blade_data, r1, r2, source="stator"):
+    """The 2D-plane throat_opening, rescaled by the EXACT local conformal
+    length factor at the throat's own (chordwise, pitchwise) location --
+    see conformal_length_scale. Uses the SAME reference (x1, c_axial) the
+    actual wrap (wrap_blade_radial/wrap_rotor_blade_radial) derives from
+    the main blade contour, so the result is consistent with the geometry
+    that actually gets rendered/exported.
+
+    blade_data : dict
+        Stator: needs "blade_curve" ({"x","y"}) and "throat_point"
+        ({"x","y"}, see parametrize_stator_blade/_semi) and
+        "throat_opening". Rotor: this tool's rotor method has no
+        throat_opening/throat_point -- not supported here (its sizing is
+        pitch-consistency only to begin with, see
+        turbo_moc.geometry.sizing.size_rotor_from_pitch).
+    """
+    if source != "stator":
+        raise ValueError(f"mapped_throat_width only supports source='stator', got {source!r}")
+    x1, c_axial, eval_chord, _ = _eval_reference(blade_data, r1, r2, source)
+    scale = conformal_length_scale(eval_chord, x1, r1, r2, c_axial)
+    return float(blade_data["throat_opening"] * scale)
+
+
+def mapped_pitch_width(blade_data, r1, r2, source="stator"):
+    """The 2D-plane pitch, rescaled by the exact local conformal length
+    factor at the evaluation point's chordwise location (the stator's own
+    throat, or the rotor's hub reference point -- see _eval_reference) --
+    i.e. the actual circumferential footprint ONE mapped blade copy
+    occupies there. Unlike the axial wrap, nothing here guarantees this
+    matches 2*pi*r/n_blades for whatever n_blades you pick (see this
+    module's docstring and implied_n_blades_radial) -- adjacent copies
+    will overlap if n_blades is too large for this footprint."""
+    x1, c_axial, eval_chord, _ = _eval_reference(blade_data, r1, r2, source)
+    scale = conformal_length_scale(eval_chord, x1, r1, r2, c_axial)
+    return float(blade_data["pitch"] * scale)
+
+
+def implied_n_blades_radial(blade_data, r1, r2, source="stator"):
+    """The blade count that makes the copy-to-copy spacing
+    (2*pi*r_eval/n_blades) match this blade's own mapped pitch at the
+    evaluation point (stator: its throat; rotor: its hub reference point,
+    see _eval_reference) -- i.e. the n_blades that actually tiles the
+    annulus without overlap or gaps, AT THAT RADIUS (pitch still varies
+    with span under this map, so this is a single representative value,
+    same role as the axial wrap's own pitch-consistency check, not an
+    exact guarantee everywhere along the blade). A default N_blades
+    chosen far from this will visibly overlap (too large) or leave gaps
+    (too small) in the 3D preview."""
+    x1, c_axial, eval_chord, r_eval = _eval_reference(blade_data, r1, r2, source)
+    mapped_pitch = mapped_pitch_width(blade_data, r1, r2, source=source)
+    return float(2.0 * np.pi * r_eval / mapped_pitch)
 
 
 def wrap_blade_radial(blade_data, r1, r2, n_blades, theta0=0.0):

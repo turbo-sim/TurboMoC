@@ -12,6 +12,10 @@ from .meridional import build_meridional_view
 from .passage import extract_axial_passage_2d, extract_radial_passage_2d
 from .radial import (
     apply_conformal_mapping,
+    conformal_length_scale,
+    implied_n_blades_radial,
+    mapped_pitch_width,
+    mapped_throat_width,
     rotate_radial_points,
     wrap_blade_radial,
     wrap_curve_radial,
@@ -35,6 +39,8 @@ __all__ = [
     "move_control_point_along_normal", "BSplineTool",
     "apply_conformal_mapping", "rotate_radial_points",
     "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial",
+    "conformal_length_scale", "mapped_throat_width", "mapped_pitch_width",
+    "implied_n_blades_radial",
     "build_meridional_view",
     "extract_axial_passage_2d",
     "extract_radial_passage_2d",
