@@ -3,7 +3,8 @@
 This example designs a planar nozzle with the method of characteristics (MoC),
 parametrizes one stator blade, constructs a smooth periodic flow domain, and
 creates a 2D Gmsh fluid mesh with optional inflation layers. It exports the mesh
-as CGNS/ADF for downstream CFD tools and saves an orange PNG view of the mesh.
+as CGNS/ADF for downstream CFD tools and saves one styled mesh view
+as PNG and SVG, with a selectable number of blades.
 
 ## Run and configure
 
@@ -17,10 +18,24 @@ poetry run python examples/gmsh/run_mesh_generation.py
 Gmsh is a regular package dependency. This example does not require the optional
 `cad` or `fluent` extras: its CAD construction uses Gmsh, not CadQuery.
 
+This example also uses the companion `barotropy` package for Matplotlib styling
+and multi-format figure saving. If it is not installed, install the adjacent
+checkout into the same environment:
+
+```powershell
+poetry run python -m pip install -e ../barotropy
+```
+
 Edit `stator_mesh.yaml` to set the `nozzle`, `blade`, `passage`, and `mesh`
 parameters. Lengths in the nozzle inputs are metres; blade geometry, passage
 geometry, mesh sizes, and plots use millimetres. In the cascade frame, x is
 pitchwise, y is axial, and flow proceeds toward decreasing y.
+
+`main()` calls `barotropy.set_plot_options()` before plotting. All visible axes
+retain their complete box. Geometry figures use `barotropy.savefig_in_formats()`
+with `.png` and `.svg`; the mesh view also exports PNG and SVG with fixed formats.
+Construction PNGs default to 300 DPI. Matplotlib settings are scoped to the run
+and restored afterward.
 
 Paths, caching, plotting, and mesh-generation switches are defined near the top
 of `run_mesh_generation.py`. Paths resolve relative to the script. `GENERATE_MESH = False`
@@ -41,12 +56,12 @@ With the current globals and YAML, outputs are written to the flat directory
 | --- | --- |
 | `nozzle_solution.json` | Cached MoC solution and cache signature |
 | `stator_geometry.png` / `.svg` | Blade construction and flow-domain plots |
-| `stator_mesh.png` | Orange view of the generated triangles/quadrilaterals |
+| `stator_mesh.png` / `.svg` | One mesh view with the configured blade count and optional physical-group labels |
 | `stator_mesh.cgns` | Optional 2D CGNS/ADF mesh with named boundaries and periodic connectivity |
 | `mesh_report.html` | Self-contained quality report with quantiles, histograms, and inflation diagnostics |
 | `mesh_report.json` | Machine-readable summary |
 | `mesh_cells.csv` | Per-cell metrics, original Gmsh tags, centroids, and reconstructed layer indices |
-| `mesh_quality.png` | Exportable quality histograms |
+| `mesh_quality.png` / `.svg` | Exportable quality histograms |
 | `mesh_generation.log` | Workflow progress, summaries, warnings and failure tracebacks |
 
 The cache requires `USE_MOC_CACHE`; geometry figures require `SAVE_FIGURES`.
@@ -72,7 +87,7 @@ configured by the entry point. The shared implementation is
 
 The execution log records messages from these example scripts. MoC's native
 console output is unchanged. Gmsh's native warnings and errors remain controlled
-by `mesh.terminal_output` and `mesh.verbosity`; they are not redirected into this
+by `mesh.numerics.terminal_output` and `mesh.numerics.verbosity`; they are not redirected into this
 log. There are no timing decorators, elapsed-time measurements or viewer timings.
 
 ## Nozzle and blade geometry
@@ -153,39 +168,70 @@ fits between neighboring blades.
 ## Mesh sizing, curvature, and inflation
 
 Gmsh meshes the smooth CAD curves in 1D before filling the fluid surface in 2D.
-`mesh.curvature_elements` enables its curvature-based sizing on both the blade
+`mesh.numerics.curvature_elements` enables its curvature-based sizing on both the blade
 and periodic boundaries. The value is the target number of elements per full
 circle (2*pi radians). For local curvature kappa, the associated size is
 approximately `2*pi / (curvature_elements * abs(kappa))`: tighter bends receive
 smaller elements. Zero disables this curvature criterion.
 
 The final local size combines curvature, point sizes, and an automatic core
-sizing callback, bounded above by `domain_size`. Straight periodic portions
+sizing callback, bounded above by `numerics.domain_size`. Straight periodic portions
 are governed by those other size controls. Plotting resolution does not fix
 1D mesh resolution. See the [Gmsh sizing documentation](https://gmsh.info/doc/texinfo/gmsh.html#Specifying-mesh-element-sizes).
 
-| `mesh` setting | Purpose |
-| --- | --- |
-| `blade_size` / `domain_size` | Tangential blade / far-field target element sizes [mm] |
-| `curvature_elements` | Curvature resolution in elements per 2*pi radians |
-| `algorithm` | 2D meshing algorithm; default 8 prepares triangles for recombination |
-| `recombine` | Convert suitable fluid triangles to quadrilaterals |
-| `recombination_algorithm` | Recombination method; default 1 is Blossom |
-| `smoothing_steps` | Mesh smoothing iterations |
-| `inflation.enabled` | Enable quadrilateral wall layers |
-| `inflation.first_height` | First wall-normal layer height [mm] |
-| `inflation.growth_ratio` | Ratio between successive layer heights |
-| `inflation.thickness` | Maximum total layer thickness [mm] |
-| `verbosity` / `terminal_output` | Gmsh logging level and console output |
-| `show_gui` | Open the Gmsh viewer after mesh export |
-| `image.filename` / `image.dpi` | PNG filename and resolution; default `stator_mesh.png`, 200 dpi |
+`mesh.numerics`, immediately after `show_gui`, groups all Gmsh numerical
+controls and the nested `inflation_layers` mapping. The sibling `matplotlib`,
+`report`, and `cgns` mappings control visualization, diagnostics, and export.
 
-Gmsh displays both triangles and quadrilaterals in orange. The PNG uses the
-actual Gmsh node coordinates and element connectivity, rendered with
-Matplotlib's Agg backend so it is also saved when the viewer is disabled.
+| `mesh` parameter | Purpose |
+| --- | --- |
+| `numerics.blade_size` / `numerics.domain_size` | Tangential blade / far-field target element sizes [mm] |
+| `numerics.curvature_elements` | Curvature resolution in elements per 2*pi radians |
+| `numerics.algorithm` | 2D meshing algorithm; default 8 prepares triangles for recombination |
+| `numerics.recombine` | Convert suitable fluid triangles to quadrilaterals |
+| `numerics.recombination_algorithm` | Recombination method; default 1 is Blossom |
+| `numerics.smoothing_steps` | Mesh smoothing iterations |
+| `numerics.inflation_layers.enabled` | Enable quadrilateral wall layers |
+| `numerics.inflation_layers.first_height` | First wall-normal layer height [mm] |
+| `numerics.inflation_layers.growth_ratio` | Ratio between successive layer heights |
+| `numerics.inflation_layers.thickness` | Maximum total layer thickness [mm] |
+| `numerics.verbosity` / `numerics.terminal_output` | Gmsh logging level and console output |
+| `show_gui` | Open the Gmsh viewer after mesh export |
+| `matplotlib.num_blades` | Number of blades in the single exported view; set 1 for one passage |
+| `matplotlib.annotate_boundaries` | Show physical-group labels for any blade count |
+| `matplotlib.mesh_color` | Cell-edge color |
+| `matplotlib.edge_color` | Blade and flow-domain boundary color |
+| `matplotlib.domain_color` | Fluid-region fill color; default light grey |
+| `matplotlib.dpi` | Figure, PNG, and rasterized SVG resolution; the same DPI is used throughout |
+| `matplotlib.rasterize_mesh` | Rasterize dense cells/edges while retaining vector boundaries and text in SVG |
+
+The `mesh.matplotlib` mapping controls one figure, always written as
+`stator_mesh.png` and `stator_mesh.svg`. The current YAML selects three blades;
+set `num_blades: 1` for one passage. Additional blades are centered,
+pitch-translated copies of the actual mesh for visualization; they do not change
+the CFD domain. Shared edges and periodic interfaces are drawn once.
+
+Figure dimensions, thin line widths, Times New Roman fonts and font sizes are
+fixed internally. All plot colors are fully opaque, including colors supplied
+with an alpha channel. Mesh edges, boundary lines, and the fluid-region fill follow
+`mesh_color`, `edge_color`, and `domain_color`; blade interiors are white. Axes, labels, annotations, and their leader lines
+remain black independently of `edge_color`. Equal-axis scaling,
+a complete axes box, and `$x$ coordinate (mm)` /
+`$y$ coordinate (mm)` labels are always used. The interactive Gmsh viewer retains
+its orange color scheme.
+
+With annotations enabled, the view labels `blade`, `periodic_left`,
+`periodic_right`, `inlet`, and `outlet` once each. Multi-blade views label a
+central blade, the outer periodic sides and the combined inlet/outlet spans.
+For a single blade, all labels sit outside the flow domain, with leader lines
+to the corresponding boundaries and no background boxes.
+Set `annotate_boundaries: false` to suppress every boundary annotation.
+
 The mesh is exported only as CGNS; no native Gmsh mesh file is written.
-`create_mesh` returns the PNG path under `image_file` and the CGNS path under
-`mesh_file` when CGNS export is enabled.
+`create_mesh` returns the PNG/SVG paths under `image_files["png"]` and
+`image_files["svg"]`; `image_file` retains the PNG path for existing callers.
+`mesh_file` contains the CGNS path when export is enabled. The runner needs no
+additional plotting switches.
 See [Gmsh's mesh color options](https://gmsh.info/doc/texinfo/gmsh.html#Mesh-options).
 
 Inflation uses Gmsh's 2D `BoundaryLayer` field. Layer heights grow from
@@ -206,10 +252,10 @@ N   = floor(log(1 + thickness*(growth_ratio-1)/first_height) / log(growth_ratio)
 
 The current inputs give 12 nominal layers, a stack thickness of 0.79161 mm,
 and a last-layer height of 0.14860 mm. Gmsh receives the original three inputs;
-they are not adjusted to force the last height to equal `blade_size`. Geometry
+they are not adjusted to force the last height to equal `numerics.blade_size`. Geometry
 can shorten/merge local stacks, so the nominal count is not an exact layer label.
 
-`blade_size` controls spacing **along** the blade; inflation height controls
+`numerics.blade_size` controls spacing **along** the blade; inflation height controls
 spacing **normal** to it. Before 1D meshing, CAD curvature estimates local
 tangential spacing. After 1D meshing, actual blade-edge lengths replace those
 estimates for sizing the 2D core. Small trailing-edge cells therefore get a
@@ -236,7 +282,7 @@ size(d) = min(domain_size,
 ```
 
 The gradient gives roughly `R` area growth per successive regular core cell.
-The distance to reach `domain_size` follows from this expression and is no
+The distance to reach `numerics.domain_size` follows from this expression and is no
 longer a user setting: **`refinement_distance` has been removed** (old YAML
 entries are ignored). With `s = 0.5 mm`, the starting size is approximately
 0.178 mm and the far-field distance is approximately 19.9 mm. Actual local
@@ -388,9 +434,12 @@ the nozzle cache. Only the entry point configures the logging handlers.
 
 For reuse, import `build_geometry` and `plot_construction` from
 `examples.gmsh.geometry_source`, and `create_mesh`, `analyze_mesh`, or
-`compute_mesh_report` from `examples.gmsh.meshing_source`. The geometry wrappers
-and `load_or_solve_nozzle` remain available from
-`examples.gmsh.run_mesh_generation` for the shared Fluent workflow.
+`compute_mesh_report` from `examples.gmsh.meshing_source`. The runner uses the
+module aliases `geo`, `msh`, and `log` throughout. Only three top-level functions
+remain: `load_or_solve_nozzle`, `read_configuration`, and `main`. Cache signature,
+validation, read and write subtasks are nested inside `load_or_solve_nozzle`.
+The shared Fluent workflow imports the YAML/cache entry points from the runner
+and calls the geometry module directly.
 
 The small automation smoke suite uses two modules. It generates one
 small real mesh with inflation and automatic passage placement, reads its CGNS
@@ -406,8 +455,8 @@ Run just the fast mesh and Fluent automation checks:
 poetry run pytest tests/test_stator_mesh.py tests/test_stator_fluent.py -q
 ```
 
-The Fluent cases use mocks without launching Fluent or importing the companion
-barotropy checkout; the thermodynamic fit check uses the existing jaxprop dependency.
+The Fluent cases use mocks without launching Fluent; the thermodynamic fit check
+uses jaxprop. The runner imports the installed barotropy plotting helpers.
 For a full execution check, run the example with both viewers disabled,
 then inspect `mesh_generation.log`, the CGNS mesh and the quality report.
 

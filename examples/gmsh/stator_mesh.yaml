@@ -45,18 +45,31 @@ passage:
 
 mesh:
   show_gui: true             # Open Gmsh after generating and saving the mesh
-  image:
-    filename: stator_mesh.png # Orange view of the actual generated mesh; saved even without a GUI
-    dpi: 200                 # PNG resolution in dots per inch
-  terminal_output: true
-  verbosity: 2              # Warnings/errors only; 5 restores progress and the banner
-  blade_size: 0.5            # Tangential element size near the blade [mm]
-  domain_size: 2.0           # Far-field element size [mm]
-  curvature_elements: 40    # Curvature sizing on smooth blade/periodic CAD: elements per 2*pi; 0 disables
-  algorithm: 8              # 8 prepares triangles for quadrilateral recombination
-  recombine: true           # Recombine the fluid surface, including the far field
-  recombination_algorithm: 1 # 0: simple (ParaBlade); 1: Blossom; 2/3: full-quad
-  smoothing_steps: 5
+  numerics:
+    terminal_output: true
+    verbosity: 2              # Warnings/errors only; 5 restores progress and the banner
+    blade_size: 0.5            # Tangential element size near the blade [mm]
+    domain_size: 2.0           # Far-field element size [mm]
+    curvature_elements: 40    # Curvature sizing on smooth blade/periodic CAD: elements per 2*pi; 0 disables
+    algorithm: 8              # 8 prepares triangles for quadrilateral recombination
+    recombine: true           # Recombine the fluid surface, including the far field
+    recombination_algorithm: 1 # 0: simple (ParaBlade); 1: Blossom; 2/3: full-quad
+    smoothing_steps: 5
+    inflation_layers:
+      enabled: true
+      first_height: 0.02       # First cell height normal to the blade [mm]
+      growth_ratio: 1.2        # Height ratio between successive layers [-]
+      thickness: 0.8           # Maximum total inflation thickness [mm]; layer count is derived
+      # Core start size and transition distance are calculated automatically
+      # from the last-layer height and local tangential blade spacing.
+  matplotlib:
+    num_blades: 1            # One exported view; set 1 for a single passage
+    annotate_boundaries: true # Label physical groups for any number of blades
+    mesh_color: orange       # Cell edges
+    edge_color: black        # Blade and flow-domain boundaries only
+    domain_color: white      # Fluid-region fill; blade interiors remain white
+    dpi: 600                 # PNG and rasterized SVG mesh resolution
+    rasterize_mesh: true     # Rasterize dense mesh; SVG boundaries/text remain vector
   report:
     enabled: true             # Write offline HTML, JSON summary, CSV cell metrics, and histogram PNG
     histogram_bins: 30        # Histogram resolution in the quality report (>=2)
@@ -72,10 +85,3 @@ mesh:
       outlet: BCOutflowSubsonic
       periodic_left: BCGeneral
       periodic_right: BCGeneral
-  inflation:
-    enabled: true
-    first_height: 0.02       # First cell height normal to the blade [mm]
-    growth_ratio: 1.2        # Height ratio between successive layers [-]
-    thickness: 0.8           # Maximum total inflation thickness [mm]; layer count is derived
-    # Core start size and transition distance are calculated automatically
-    # from the last-layer height and local tangential blade spacing.

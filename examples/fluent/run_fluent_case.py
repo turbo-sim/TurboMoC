@@ -18,12 +18,10 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from examples.fluent.barotropic_model import generate_barotropic_model, positive
-from examples.gmsh.geometry_source import assess_clearance
+import examples.gmsh.geometry_source as geo
 from examples.gmsh.meshing_source import create_mesh
 from examples.gmsh.run_mesh_generation import (
-    build_geometry,
     load_or_solve_nozzle,
-    plot_construction,
     read_configuration,
 )
 from examples.workflow_logging import (
@@ -1066,8 +1064,8 @@ def main():
             force_solve=workflow["force_moc_solve"],
         )
         step(logger, 3, total_steps, "Build blade geometry and periodic passage")
-        blade, curves = build_geometry(nozzle, config)
-        if not assess_clearance(blade, curves)["contained"]:
+        blade, curves = geo.build_geometry(nozzle, config)
+        if not geo.assess_clearance(blade, curves)["contained"]:
             raise ValueError("Cannot mesh: a periodic boundary intersects the blade.")
         log_summary(
             logger,
@@ -1080,7 +1078,7 @@ def main():
         )
         if workflow["save_geometry_figure"]:
             logger.info("  Export the blade and passage construction figures.")
-            figure, _ = plot_construction(blade, curves)
+            figure, _ = geo.plot_construction(blade, curves)
             try:
                 for extension in ("png", "svg"):
                     filename = mesh_dir / f"stator_geometry.{extension}"

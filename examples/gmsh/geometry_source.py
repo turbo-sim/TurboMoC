@@ -441,6 +441,8 @@ def plot_construction(blade, curves, *, figure_size=(14, 8)):
         )
         ax.set_xlabel("Pitchwise x (mm)")
         ax.set_ylabel("Axial y (mm); flow toward decreasing y")
+        for spine in ax.spines.values():
+            spine.set_visible(True)
 
     for name, color in (("suction", "tab:green"), ("pressure", "tab:orange")):
         detail.plot(*curves[name].T, color=color, lw=1, label=f"Raw {name} surface")

@@ -35,21 +35,21 @@ def mesh_example():
                 "y": (0.002 + 0.001 * (x / x[-1]) ** 2).tolist(),
             },
         }
-        blade, curves = runner.build_geometry(nozzle, config)
+        blade, curves = runner.geo.build_geometry(nozzle, config)
         settings = copy.deepcopy(config["mesh"])
-        settings.update(
-            show_gui=False,
+        settings["show_gui"] = False
+        settings["numerics"].update(
             terminal_output=False,
             blade_size=0.4,
             domain_size=2,
             curvature_elements=16,
             smoothing_steps=1,
         )
-        settings["inflation"].update(
+        settings["numerics"]["inflation_layers"].update(
             enabled=True, first_height=0.01, growth_ratio=1.5, thickness=0.2
         )
-        settings["recombine"] = True
-        settings["image"]["dpi"] = 40
+        settings["numerics"]["recombine"] = True
+        settings["matplotlib"].update(dpi=40, num_blades=3, annotate_boundaries=True)
         # Full quality-report generation belongs to the example execution check.
         settings["report"]["enabled"] = False
         yield runner, meshing, blade, curves, settings
@@ -62,11 +62,41 @@ def test_mesh_workflow_exports_a_usable_periodic_mesh(
 
     # Keep mesh generation/export real, but skip slow figure drawing.
     # Visual output is checked by running the examples, not by this smoke suite.
+    plotted = {}
+
     def save_figure(figure, filename, **options):
+        ax = figure.axes[0]
+        plotted[Path(filename).name] = {
+            "labels": {text.get_text() for text in ax.texts},
+            "cells": len(ax.collections[0].get_paths()),
+            "xlabel": ax.get_xlabel(),
+            "ylabel": ax.get_ylabel(),
+            "boxed": all(spine.get_visible() for spine in ax.spines.values()),
+            "opaque": all(collection.get_alpha() == 1 for collection in ax.collections),
+            "font": ax.xaxis.label.get_fontfamily(),
+        }
         Path(filename).write_bytes(b"mock figure")
 
     monkeypatch.setattr(Figure, "savefig", save_figure)
     _, meshing, blade, curves, settings = mesh_example
+    save_requested_image = meshing.save_mesh_image
+
+    def check_other_views(filename, surface, **kwargs):
+        result = save_requested_image(filename, surface, **kwargs)
+        for count, annotate in ((1, True), (2, True), (3, False)):
+            view_file = tmp_path / f"check_{count}_{annotate}.png"
+            options = kwargs["settings"] | {
+                "num_blades": count,
+                "annotate_boundaries": annotate,
+            }
+            save_requested_image(view_file, surface, **(kwargs | {"settings": options}))
+            view = plotted[view_file.name]
+            assert bool(view["labels"]) == annotate
+            if annotate:
+                assert view["labels"] == set(settings["cgns"]["boundary_types"])
+        return result
+
+    monkeypatch.setattr(meshing, "save_mesh_image", check_other_views)
     result = meshing.create_mesh(blade, curves, settings, tmp_path, show_gui=False)
 
     assert sum(result["cells"].values()) > 0
@@ -90,6 +120,17 @@ def test_mesh_workflow_exports_a_usable_periodic_mesh(
         Path(result["image_file"]).name,
     ):
         assert (tmp_path / filename).stat().st_size > 0
+    images = result["image_files"]
+    assert set(images) == {"png", "svg"}
+    for path in images.values():
+        assert Path(path).stat().st_size > 0
+        view = plotted[Path(path).name]
+        assert view["cells"] == 3 * sum(result["cells"].values())
+        assert view["xlabel"] == r"$x$ coordinate (mm)"
+        assert view["ylabel"] == r"$y$ coordinate (mm)"
+        assert view["boxed"] and view["opaque"]
+        assert view["font"] == ["serif"]
+        assert view["labels"] == set(settings["cgns"]["boundary_types"])
     assert not gmsh.isInitialized()
 
 

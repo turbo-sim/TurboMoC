@@ -34,39 +34,38 @@ MESH_ORANGE = (255, 140, 0)
 
 
 def validate_mesh_settings(settings):
-    """Check mesh sizes before entering Gmsh."""
+    """Check the numerical, figure, export and report controls before Gmsh."""
+    numerics = settings.get("numerics")
+    if not isinstance(numerics, dict):
+        raise ValueError("mesh.numerics must be a mapping.")
+    if not isinstance(numerics.get("inflation_layers"), dict):
+        raise ValueError("mesh.numerics.inflation_layers must be a mapping.")
     for name in ("blade_size", "domain_size"):
-        if not np.isfinite(settings[name]) or settings[name] <= 0:
-            raise ValueError(f"mesh.{name} must be finite and positive.")
-    if settings["domain_size"] < settings["blade_size"]:
-        raise ValueError("mesh.domain_size must be at least mesh.blade_size.")
-    if settings["algorithm"] not in (1, 2, 5, 6, 8, 9):
+        if not np.isfinite(numerics[name]) or numerics[name] <= 0:
+            raise ValueError(f"mesh.numerics.{name} must be finite and positive.")
+    if numerics["domain_size"] < numerics["blade_size"]:
+        raise ValueError(
+            "mesh.numerics.domain_size must be at least mesh.numerics.blade_size."
+        )
+    if numerics["algorithm"] not in (1, 2, 5, 6, 8, 9):
         raise ValueError("Unsupported 2D mesh algorithm.")
-    verbosity = settings.get("verbosity", 2)
+    verbosity = numerics.get("verbosity", 2)
     if type(verbosity) is not int or not 0 <= verbosity <= 99:
-        raise ValueError("mesh.verbosity must be an integer from 0 to 99.")
-    if not isinstance(settings.get("recombine", True), bool):
-        raise ValueError("mesh.recombine must be true or false.")
-    recombination_algorithm = settings.get("recombination_algorithm", 1)
+        raise ValueError("mesh.numerics.verbosity must be an integer from 0 to 99.")
+    if not isinstance(numerics.get("recombine", True), bool):
+        raise ValueError("mesh.numerics.recombine must be true or false.")
+    recombination_algorithm = numerics.get("recombination_algorithm", 1)
     if type(recombination_algorithm) is not int or recombination_algorithm not in (
         0,
         1,
         2,
         3,
     ):
-        raise ValueError("mesh.recombination_algorithm must be 0, 1, 2, or 3.")
+        raise ValueError("mesh.numerics.recombination_algorithm must be 0, 1, 2, or 3.")
     for name in ("smoothing_steps", "curvature_elements"):
-        if not isinstance(settings[name], int) or settings[name] < 0:
-            raise ValueError(f"mesh.{name} must be a nonnegative integer.")
-    image = settings.get("image", {})
-    image_name = image.get("filename", "stator_mesh.png")
-    if Path(image_name).suffix.lower() != ".png" or Path(image_name).name != image_name:
-        raise ValueError(
-            "mesh.image.filename must be a PNG filename within the output directory."
-        )
-    dpi = image.get("dpi", 200)
-    if type(dpi) is not int or dpi <= 0:
-        raise ValueError("mesh.image.dpi must be a positive integer.")
+        if not isinstance(numerics[name], int) or numerics[name] < 0:
+            raise ValueError(f"mesh.numerics.{name} must be a nonnegative integer.")
+    mesh_figure_options(settings.get("matplotlib", {}))
     cgns = settings.get("cgns", {})
     if cgns.get("enabled", False):
         if Path(cgns["filename"]).suffix.lower() != ".cgns":
@@ -91,13 +90,17 @@ def validate_mesh_settings(settings):
             raise ValueError("CGNS boundary_types must specify all five boundaries.")
         if not set(cgns["boundary_types"].values()) <= supported:
             raise ValueError("Unsupported CGNS boundary type.")
-    inflation = settings["inflation"]
+    inflation = numerics["inflation_layers"]
     if inflation["enabled"]:
         for name in ("first_height", "thickness", "growth_ratio"):
             if not np.isfinite(inflation[name]) or inflation[name] <= 0:
-                raise ValueError(f"mesh.inflation.{name} must be finite and positive.")
+                raise ValueError(
+                    f"mesh.numerics.inflation_layers.{name} must be finite and positive."
+                )
         if inflation["growth_ratio"] <= 1:
-            raise ValueError("mesh.inflation.growth_ratio must exceed 1.")
+            raise ValueError(
+                "mesh.numerics.inflation_layers.growth_ratio must exceed 1."
+            )
         if inflation["thickness"] < inflation["first_height"]:
             raise ValueError(
                 "Inflation thickness must be at least the first-layer height."
@@ -318,7 +321,7 @@ def core_mesh_size(distance, tangent_size, profile, domain_size, recombine=True)
 
 
 def configure_core_transition(
-    blade_curves, settings, profile, pitch=None, use_mesh=False
+    blade_curves, numerics, profile, pitch=None, use_mesh=False
 ):
     """Install local, periodic sizing; refresh from actual wall edges after 1D.
 
@@ -346,8 +349,8 @@ def configure_core_transition(
                 -1, 3
             )[:, :2]
             start, end = points[:-1], points[1:]
-            tangent = np.full(len(start), settings["blade_size"])
-            if settings["curvature_elements"]:
+            tangent = np.full(len(start), numerics["blade_size"])
+            if numerics["curvature_elements"]:
                 curvature = np.abs(
                     gmsh.model.getCurvature(
                         1, curve, (parameters[:-1] + parameters[1:]) / 2
@@ -357,7 +360,7 @@ def configure_core_transition(
                     tangent,
                     2
                     * np.pi
-                    / (settings["curvature_elements"] * np.maximum(curvature, 1e-12)),
+                    / (numerics["curvature_elements"] * np.maximum(curvature, 1e-12)),
                 )
         starts.append(start)
         ends.append(end)
@@ -386,7 +389,7 @@ def configure_core_transition(
         if dim == 0:
             return current_size
         if dim == 1 and tag in blade_tags:
-            return min(current_size, settings["blade_size"])
+            return min(current_size, numerics["blade_size"])
         if pitch is not None:
             x = centre_x + (x - centre_x + pitch / 2) % pitch - pitch / 2
         point = np.array([x, y])
@@ -407,17 +410,17 @@ def configure_core_transition(
             distances[nearest],
             tangents[candidates[nearest]],
             profile,
-            settings["domain_size"],
-            settings.get("recombine", True),
+            numerics["domain_size"],
+            numerics.get("recombine", True),
         )
         # Keep Gmsh's curvature and point-size constraints when they are finer.
         return float(min(current_size, size))
 
     gmsh.model.mesh.setSizeCallback(size_callback)
     start_sizes = core_mesh_size(
-        0.0, tangents, profile, settings["domain_size"], settings.get("recombine", True)
+        0.0, tangents, profile, numerics["domain_size"], numerics.get("recombine", True)
     )
-    distances = profile["stack_thickness"] + (settings["domain_size"] - start_sizes) / (
+    distances = profile["stack_thickness"] + (numerics["domain_size"] - start_sizes) / (
         np.sqrt(CORE_AREA_GROWTH) - 1
     )
     return {
@@ -434,48 +437,48 @@ def configure_core_transition(
     }
 
 
-def set_mesh_sizes(blade_curves, settings, profile=None, pitch=None):
+def set_mesh_sizes(blade_curves, numerics, profile=None, pitch=None):
     """Set blade resolution and automatically grade the surrounding core."""
     if profile is None:
-        profile = calculate_inflation_profile(settings["inflation"])
-    gmsh.option.setNumber("Mesh.Algorithm", settings["algorithm"])
-    gmsh.option.setNumber("Mesh.Smoothing", settings["smoothing_steps"])
-    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", settings["curvature_elements"])
+        profile = calculate_inflation_profile(numerics["inflation_layers"])
+    gmsh.option.setNumber("Mesh.Algorithm", numerics["algorithm"])
+    gmsh.option.setNumber("Mesh.Smoothing", numerics["smoothing_steps"])
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", numerics["curvature_elements"])
     gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 1)
     gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-    gmsh.option.setNumber("Mesh.MeshSizeMax", settings["domain_size"])
+    gmsh.option.setNumber("Mesh.MeshSizeMax", numerics["domain_size"])
     gmsh.option.setNumber("Mesh.RecombineAll", 0)
     background = gmsh.model.mesh.field.add("MathEval")
-    gmsh.model.mesh.field.setString(background, "F", str(settings["domain_size"]))
+    gmsh.model.mesh.field.setString(background, "F", str(numerics["domain_size"]))
     gmsh.model.mesh.field.setAsBackgroundMesh(background)
-    return configure_core_transition(blade_curves, settings, profile, pitch)
+    return configure_core_transition(blade_curves, numerics, profile, pitch)
 
 
-def add_inflation_layers(blade_curves, settings):
+def add_inflation_layers(blade_curves, numerics):
     """Create quadrilateral layers normal to every blade-boundary curve."""
-    inflation = settings["inflation"]
+    inflation = numerics["inflation_layers"]
     if not inflation["enabled"]:
         return
     field = gmsh.model.mesh.field.add("BoundaryLayer")
     gmsh.model.mesh.field.setNumbers(field, "CurvesList", blade_curves)
     gmsh.model.mesh.field.setNumber(field, "Size", inflation["first_height"])
-    gmsh.model.mesh.field.setNumber(field, "SizeFar", settings["domain_size"])
+    gmsh.model.mesh.field.setNumber(field, "SizeFar", numerics["domain_size"])
     gmsh.model.mesh.field.setNumber(field, "Ratio", inflation["growth_ratio"])
     gmsh.model.mesh.field.setNumber(field, "Thickness", inflation["thickness"])
     gmsh.model.mesh.field.setNumber(field, "Quads", 1)
     gmsh.model.mesh.field.setAsBoundaryLayer(field)
 
 
-def configure_recombination(fluid_surface, settings):
+def configure_recombination(fluid_surface, numerics):
     """Recombine the fluid surface, as in ParaBlade's 2D mesh builder.
 
     Algorithm 8 prepares triangles for recombination; setRecombine actually
     enables their conversion to quadrilaterals outside the inflation layers.
     """
     gmsh.option.setNumber(
-        "Mesh.RecombinationAlgorithm", settings.get("recombination_algorithm", 1)
+        "Mesh.RecombinationAlgorithm", numerics.get("recombination_algorithm", 1)
     )
-    if settings.get("recombine", True):
+    if numerics.get("recombine", True):
         gmsh.model.mesh.setRecombine(2, fluid_surface)
 
 
@@ -830,16 +833,43 @@ def configure_mesh_display():
     gmsh.option.setNumber("Mesh.SurfaceFaces", 1)
 
 
-def save_mesh_image(filename, fluid_surface, *, dpi=200):
-    """Render the actual Gmsh cells in orange without opening a GUI window.
+# Fixed publication styling; colors and view controls are configurable below.
+MESH_LINEWIDTH = 0.12
+BOUNDARY_LINEWIDTH = 0.9
+MESH_FONT_SIZE = 11.0
 
-    Agg keeps PNG output available in unattended CFD workflows. Shared edges
-    are drawn once; unused CAD/control-point nodes are excluded.
-    """
-    from matplotlib.backends.backend_agg import FigureCanvasAgg
-    from matplotlib.collections import LineCollection
-    from matplotlib.figure import Figure
 
+def mesh_figure_options(settings):
+    """Validate the small set of user controls for one exported mesh view."""
+    from matplotlib.colors import is_color_like
+
+    defaults = {
+        "num_blades": 3,
+        "annotate_boundaries": True,
+        "mesh_color": "orange",
+        "edge_color": "black",
+        "domain_color": "lightgrey",
+        "dpi": 300,
+        "rasterize_mesh": True,
+    }
+    if not isinstance(settings, dict) or set(settings) - set(defaults):
+        raise ValueError("Unknown option or invalid mapping in mesh.matplotlib.")
+    options = defaults | settings
+    if type(options["num_blades"]) is not int or options["num_blades"] < 1:
+        raise ValueError("mesh.matplotlib.num_blades must be a positive integer.")
+    if type(options["dpi"]) is not int or options["dpi"] <= 0:
+        raise ValueError("mesh.matplotlib.dpi must be a positive integer.")
+    for key in ("annotate_boundaries", "rasterize_mesh"):
+        if type(options[key]) is not bool:
+            raise ValueError(f"mesh.matplotlib.{key} must be true or false.")
+    for key in ("mesh_color", "edge_color", "domain_color"):
+        if not is_color_like(options[key]):
+            raise ValueError(f"mesh.matplotlib.{key} must be a Matplotlib color.")
+    return options
+
+
+def collect_mesh_plot_data(fluid_surface, boundaries=None):
+    """Read actual cells and named 1D physical groups; omit unused CAD nodes."""
     kinds, _, arrays = gmsh.model.mesh.getElements(2, fluid_surface)
     if not len(kinds) or any(kind not in (2, 3) for kind in kinds):
         raise ValueError("Mesh images require first-order triangles/quadrilaterals.")
@@ -848,33 +878,281 @@ def save_mesh_image(filename, fluid_surface, *, dpi=200):
     xyz = dict(zip(tags, np.asarray(coordinates).reshape(-1, 3)))
     local = {tag: index for index, tag in enumerate(used)}
     xy = np.array([xyz[tag][:2] for tag in used])
-    edges = []
+    cells, edges = [], []
     for kind, nodes in zip(kinds, arrays):
-        cells = np.array([local[tag] for tag in nodes], dtype=int).reshape(
+        group = np.array([local[tag] for tag in nodes], dtype=int).reshape(
             -1, 3 if kind == 2 else 4
         )
+        cells.extend(group)
         edges.append(
-            np.stack((cells, np.roll(cells, -1, axis=1)), axis=-1).reshape(-1, 2)
+            np.stack((group, np.roll(group, -1, axis=1)), axis=-1).reshape(-1, 2)
         )
     edges = np.unique(np.sort(np.concatenate(edges), axis=1), axis=0)
-    fig = Figure(figsize=(10, 10), layout="constrained", facecolor="white")
+    if boundaries is None:
+        boundaries = {
+            gmsh.model.getPhysicalName(
+                dim, tag
+            ): gmsh.model.getEntitiesForPhysicalGroup(dim, tag)
+            for dim, tag in gmsh.model.getPhysicalGroups(1)
+        }
+    boundary_edges = {}
+    for name, curves in boundaries.items():
+        lines = []
+        for curve in curves:
+            types, _, nodes = gmsh.model.mesh.getElements(1, curve)
+            if any(kind != 1 for kind in types):
+                raise ValueError("Mesh images require first-order boundary lines.")
+            lines.extend(
+                [local[tag] for tag in edge]
+                for array in nodes
+                for edge in array.reshape(-1, 2)
+            )
+        if lines:
+            boundary_edges[name] = np.asarray(lines, dtype=int)
+    # Physical boundaries use their own line color instead of a second mesh edge.
+    physical = {
+        tuple(sorted(edge)) for lines in boundary_edges.values() for edge in lines
+    }
+    edges = np.asarray(
+        [edge for edge in edges if tuple(edge) not in physical], dtype=int
+    ).reshape(-1, 2)
+    return {"xy": xy, "cells": cells, "edges": edges, "boundaries": boundary_edges}
+
+
+def unique_plot_segments(segments):
+    """Deduplicate coincident edges, including interfaces of pitchwise copies."""
+    if not len(segments):
+        return np.empty((0, 2, 2))
+    points, indices = np.unique(
+        np.round(np.asarray(segments).reshape(-1, 2), 9), axis=0, return_inverse=True
+    )
+    edges = np.unique(np.sort(indices.reshape(-1, 2), axis=1), axis=0)
+    return points[edges]
+
+
+def annotate_mesh_boundaries(ax, data, options, shifts):
+    """Label outer passage boundaries and a central blade for any blade count."""
+    # A cascade labels each group once. Its periodic sides are the outermost
+    # copies; inlet/outlet span all copies and the blade label uses the middle.
+    count = len(shifts)
+    nodes_per_copy = len(data["xy"])
+    xy = np.vstack([data["xy"] + shift for shift in shifts])
+    groups = {}
+    for name, edges in data["boundaries"].items():
+        copies = {
+            "periodic_left": [0],
+            "periodic_right": [count - 1],
+            "blade": [count // 2],
+        }.get(name, range(count))
+        groups[name] = np.concatenate(
+            [edges + copy * nodes_per_copy for copy in copies]
+        )
+    lo, hi = xy.min(axis=0), xy.max(axis=0)
+    width, height = hi - lo
+    for name, edges in groups.items():
+        midpoints = xy[edges].mean(axis=1)
+        vertical_align = "center"
+        if name in ("inlet", "outlet"):
+            anchor = midpoints[np.argmin(abs(midpoints[:, 0] - midpoints[:, 0].mean()))]
+            label = (
+                anchor[0],
+                anchor[1] + (0.045 if name == "inlet" else -0.045) * height,
+            )
+            align = "center"
+            if count == 1:
+                # Use the domain extent, rather than the local boundary height,
+                # so text stays outside even when the inlet/outlet is curved.
+                label = (
+                    anchor[0],
+                    hi[1] + 0.045 * height
+                    if name == "inlet"
+                    else lo[1] - 0.045 * height,
+                )
+                vertical_align = "bottom" if name == "inlet" else "top"
+        elif name.startswith("periodic_"):
+            left = name == "periodic_left"
+            y = lo[1] + (0.64 if left else 0.34) * height
+            anchor = midpoints[np.argmin(abs(midpoints[:, 1] - y))]
+            label = (
+                lo[0] - 0.06 * width if left else hi[0] + 0.06 * width,
+                anchor[1] + 0.025 * height,
+            )
+            align = "right" if left else "left"
+        elif name == "blade":
+            # A short leader above the leading edge avoids crossing other blades.
+            anchor = midpoints[np.argmax(midpoints[:, 1])]
+            label = (anchor[0], anchor[1] + 0.13 * height)
+            align = "center"
+            if count == 1:
+                # Point to the upper blade surface near the leading edge.
+                # Place text locally above/right, in the open space beside the
+                # curved passage, rather than beyond the entire domain width.
+                blade_width = np.ptp(midpoints[:, 0])
+                target_x = midpoints[:, 0].min() + 0.30 * blade_width
+                distance = abs(midpoints[:, 0] - target_x)
+                near_target = midpoints[
+                    distance <= distance.min() + 0.02 * blade_width
+                ]
+                anchor = near_target[np.argmax(near_target[:, 1])]
+                label = tuple(anchor + np.array([0.22 * width, 0.20 * height]))
+                align = "left"
+        else:
+            continue
+        ax.annotate(
+            name,
+            xy=anchor,
+            xytext=label,
+            ha=align,
+            va=vertical_align,
+            fontsize=MESH_FONT_SIZE * 0.85,
+            color="black",
+            bbox=(
+                None
+                if count == 1
+                else {"facecolor": "white", "edgecolor": "none", "pad": 1.5}
+            ),
+            arrowprops={
+                "arrowstyle": "-",
+                "color": "black",
+                "lw": 0.65,
+                "shrinkA": 3,
+                "shrinkB": 2,
+            },
+            zorder=5,
+        )
+
+
+def plot_mesh_figure(data, *, pitch, options):
+    """Draw the selected number of pitch-translated blades in one boxed figure."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.collections import LineCollection, PolyCollection
+    from matplotlib.colors import to_rgba
+    from matplotlib.figure import Figure
+
+    blade_count = options["num_blades"]
+    if blade_count > 1 and (pitch is None or not np.isfinite(pitch) or pitch <= 0):
+        raise ValueError(
+            "A positive blade pitch is required for a cascade mesh figure."
+        )
+    # Force full opacity even when a user supplies an RGBA color or hex alpha.
+    mesh_color = to_rgba(options["mesh_color"], alpha=1)
+    edge_color = to_rgba(options["edge_color"], alpha=1)
+    domain_color = to_rgba(options["domain_color"], alpha=1)
+    xy = data["xy"]
+    offsets = (np.arange(blade_count) - (blade_count - 1) / 2) * (pitch or 0)
+    shifts = [np.array([offset, 0.0]) for offset in offsets]
+    fig = Figure(
+        figsize=(8.5 if blade_count == 1 else 10.0, 5.5),
+        layout="constrained",
+        dpi=options["dpi"],
+        facecolor="white",
+    )
     FigureCanvasAgg(fig)
     ax = fig.subplots()
+    ax.set_facecolor("white")
     ax.add_collection(
-        LineCollection(xy[edges], colors=np.array(MESH_ORANGE) / 255, linewidths=0.35)
+        PolyCollection(
+            [xy[cell] + shift for shift in shifts for cell in data["cells"]],
+            facecolors=domain_color,
+            edgecolors="none",
+            antialiased=False,
+            alpha=1,
+            rasterized=options["rasterize_mesh"],
+            zorder=1,
+        )
     )
+    mesh_segments = unique_plot_segments(
+        np.concatenate([xy[data["edges"]] + shift for shift in shifts])
+    )
+    ax.add_collection(
+        LineCollection(
+            mesh_segments,
+            colors=mesh_color,
+            linewidths=MESH_LINEWIDTH,
+            alpha=1,
+            rasterized=options["rasterize_mesh"],
+            zorder=2,
+        )
+    )
+    if data["boundaries"]:
+        lines = np.concatenate(list(data["boundaries"].values()))
+        boundary_segments = unique_plot_segments(
+            np.concatenate([xy[lines] + shift for shift in shifts])
+        )
+        ax.add_collection(
+            LineCollection(
+                boundary_segments,
+                colors=edge_color,
+                linewidths=BOUNDARY_LINEWIDTH,
+                alpha=1,
+                zorder=3,
+            )
+        )
     ax.autoscale_view()
-    ax.margins(0.025)
+    annotate = options["annotate_boundaries"]
+    ax.margins(
+        x=(0.30 if blade_count == 1 else 0.18) if annotate else 0.035,
+        y=0.085 if annotate else 0.035,
+    )
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("Pitchwise x (mm)")
-    ax.set_ylabel("Axial y (mm)")
-    ax.set_title("Stator passage mesh")
+    ax.set_xlabel(r"$x$ coordinate (mm)", fontsize=MESH_FONT_SIZE, color="black")
+    ax.set_ylabel(r"$y$ coordinate (mm)", fontsize=MESH_FONT_SIZE, color="black")
+    ax.tick_params(
+        direction="in", labelsize=MESH_FONT_SIZE * 0.9, width=0.7, colors="black"
+    )
+    ax.tick_params(which="both", top=True, right=True)
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_linewidth(0.7)
+        spine.set_color("black")
+    ax.grid(False)
+    if annotate:
+        annotate_mesh_boundaries(ax, data, options, shifts)
+    return fig, ax
+
+
+def save_mesh_image(
+    filename, fluid_surface, *, boundaries=None, pitch=None, settings=None
+):
+    """Export one Times-styled mesh view to PNG and SVG without opening a GUI."""
+    from matplotlib import rc_context
+
+    options = mesh_figure_options(settings or {})
+    data = collect_mesh_plot_data(fluid_surface, boundaries)
     filename = Path(filename)
     filename.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(filename, dpi=dpi)
-    fig.clear()
-    logger.info("  Mesh image saved: %s", display_path(filename))
-    return filename
+    paths = {}
+    with rc_context(
+        {
+            "font.family": "serif",
+            "font.serif": ["Times New Roman"],
+            "font.size": MESH_FONT_SIZE,
+            "mathtext.fontset": "stix",
+            "text.usetex": False,
+            "svg.fonttype": "none",
+        }
+    ):
+        fig, _ = plot_mesh_figure(data, pitch=pitch, options=options)
+        try:
+            for format in ("png", "svg"):
+                path = filename.with_suffix(f".{format}")
+                fig.savefig(
+                    path,
+                    # Also sets the resolution of rasterized collections in SVG.
+                    dpi=options["dpi"],
+                    facecolor="white",
+                    bbox_inches="tight",
+                    pad_inches=0.08,
+                )
+                paths[format] = str(path)
+                logger.info(
+                    "  Mesh figure (%d blades): %s",
+                    options["num_blades"],
+                    display_path(path),
+                )
+        finally:
+            fig.clear()
+    return paths
 
 
 # =============================================================================
@@ -1554,9 +1832,10 @@ def write_mesh_report(
             transform=axes.flat[-1].transAxes,
         )
         axes.flat[-1].set_axis_off()
-    fig.savefig(output_dir / "mesh_quality.png", dpi=160)
+    fig.savefig(output_dir / "mesh_quality.png", dpi=300)
     svg = StringIO()
     fig.savefig(svg, format="svg")
+    (output_dir / "mesh_quality.svg").write_text(svg.getvalue(), encoding="utf-8")
     svg_text = svg.getvalue()[svg.getvalue().index("<svg") :]
 
     columns = ("min", "p01", "p05", "p25", "p50", "p75", "p95", "p99", "max", "mean")
@@ -1703,7 +1982,8 @@ svg{{width:100%;height:auto}}dt{{font-weight:600;margin-top:12px}}dd{{margin-lef
 def create_mesh(blade, curves, settings, output_dir, show_gui=True):
     """Generate, check, export and report a mesh using the caller's logging setup."""
     validate_mesh_settings(settings)
-    profile = calculate_inflation_profile(settings["inflation"])
+    numerics = settings["numerics"]
+    profile = calculate_inflation_profile(numerics["inflation_layers"])
     if gmsh.isInitialized():
         raise RuntimeError(
             "Finish the existing Gmsh session before creating this mesh."
@@ -1711,28 +1991,28 @@ def create_mesh(blade, curves, settings, output_dir, show_gui=True):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info("  Initialize Gmsh.")
-    gmsh.initialize(["stator_mesh", "-v", str(settings.get("verbosity", 2))])
+    gmsh.initialize(["stator_mesh", "-v", str(numerics.get("verbosity", 2))])
     try:
-        gmsh.option.setNumber("General.Terminal", int(settings["terminal_output"]))
+        gmsh.option.setNumber("General.Terminal", int(numerics["terminal_output"]))
         # Level 2 keeps warnings/errors and hides progress and the GUI banner.
-        gmsh.option.setNumber("General.Verbosity", settings.get("verbosity", 2))
+        gmsh.option.setNumber("General.Verbosity", numerics.get("verbosity", 2))
         gmsh.option.setNumber("Geometry.NumSubEdges", 500)
         gmsh.model.add("stator_passage")
         logger.info("  Build blade CAD, fluid surface and periodic boundaries.")
-        blade_curves = add_blade_boundary(blade, settings["blade_size"])
+        blade_curves = add_blade_boundary(blade, numerics["blade_size"])
         surface, boundaries = add_periodic_passage(
-            curves, blade_curves, blade["pitch"], settings["domain_size"]
+            curves, blade_curves, blade["pitch"], numerics["domain_size"]
         )
         logger.info("  Configure mesh sizes, recombination and inflation layers.")
-        set_mesh_sizes(blade_curves, settings, profile, blade["pitch"])
-        add_inflation_layers(blade_curves, settings)
-        configure_recombination(surface, settings)
+        set_mesh_sizes(blade_curves, numerics, profile, blade["pitch"])
+        add_inflation_layers(blade_curves, numerics)
+        configure_recombination(surface, numerics)
         logger.info("  Generate the 1D mesh and check periodic conformity.")
         gmsh.model.mesh.generate(1)
         check_periodic_conformity(boundaries)
         logger.info("  Match core sizing to the measured blade spacing.")
         transition = configure_core_transition(
-            blade_curves, settings, profile, blade["pitch"], use_mesh=True
+            blade_curves, numerics, profile, blade["pitch"], use_mesh=True
         )
         if profile["enabled"]:
             summary(
@@ -1758,12 +2038,12 @@ def create_mesh(blade, curves, settings, output_dir, show_gui=True):
         statistics = mesh_statistics(surface, boundaries)
         statistics["inflation_profile"] = profile
         statistics["core_transition"] = transition
-        if settings["inflation"]["enabled"] and not any(
+        if numerics["inflation_layers"]["enabled"] and not any(
             name.startswith("Quadrilateral") for name in statistics["cells"]
         ):
             raise RuntimeError("Gmsh generated no inflation-layer quadrilaterals.")
         if (
-            settings.get("recombine", True)
+            numerics.get("recombine", True)
             and statistics["quadrilateral_fraction"] == 0
         ):
             raise RuntimeError("Gmsh recombination generated no quadrilaterals.")
@@ -1778,15 +2058,17 @@ def create_mesh(blade, curves, settings, output_dir, show_gui=True):
             },
         )
         logger.debug("Element counts by type: %s", statistics["cells"])
-        logger.info("  Export the mesh image and named-boundary CGNS.")
+        logger.info("  Export the mesh figure and named-boundary CGNS.")
         configure_mesh_display()
-        image = settings.get("image", {})
-        image_path = save_mesh_image(
-            output_dir / image.get("filename", "stator_mesh.png"),
+        image_files = save_mesh_image(
+            output_dir / "stator_mesh.png",
             surface,
-            dpi=image.get("dpi", 200),
+            boundaries=boundaries,
+            pitch=blade["pitch"],
+            settings=settings.get("matplotlib", {}),
         )
-        statistics["image_file"] = str(image_path)
+        statistics["image_files"] = image_files
+        statistics["image_file"] = image_files["png"]
         if settings.get("cgns", {}).get("enabled", False):
             mesh_file = export_fluent_cgns(
                 output_dir / settings["cgns"]["filename"],
@@ -1803,7 +2085,7 @@ def create_mesh(blade, curves, settings, output_dir, show_gui=True):
             report = compute_mesh_report(
                 surface,
                 boundaries,
-                inflation=settings["inflation"],
+                inflation=numerics["inflation_layers"],
                 worst_cells=reporting.get("worst_cells", 10),
                 inflation_tolerance=reporting.get("inflation_tolerance", 0.35),
             )
