@@ -1,4 +1,4 @@
-"""Swept 3D volume mesh of the app's sized axial stator.
+"""Swept 3D volume mesh of the app's sized axial stator (and rotor).
 
 The app's annular stator (turbo_moc.geometry.annular, flare "pitch_scale")
 puts every blade point at theta = -x / r_hub and z = y at EVERY radius: the
@@ -16,7 +16,10 @@ station (stator_mesh_2d.section_coordinates, "cylinder") is an exact sweep:
 Spanwise, the hub and shroud endwalls get the blade's inflation settings
 (first height from the y+ estimate, number of layers, growth ratio), then
 cells keep growing at the transition ratio up to a uniform core size.
-Volume assembly, checks and CGNS export: turbo_moc.meshing.passage_volume.
+The rotor's hub mesh (turbo_moc.meshing.rotor_mesh_2d) is built in the same
+(X pitchwise, Y axial) frame, so it sweeps onto the app's rotor solid the
+same way. Volume assembly, checks and CGNS export:
+turbo_moc.meshing.passage_volume.
 """
 
 import logging
@@ -127,18 +130,18 @@ def _patch_surfaces(xyz, faces, names):
     return surfaces
 
 
-def mesh_swept_stator(mesh_2d, r_hub, r_shroud, n_blades, span, output_dir,
-                      boundary_types=None, max_cells=DEFAULT_MAX_CELLS):
+def mesh_swept_passage(mesh_2d, r_hub, r_shroud, n_blades, span, output_dir,
+                       boundary_types=None, max_cells=DEFAULT_MAX_CELLS, name="stator_mesh_3d"):
     """Sweep the hub 2D mesh from r_hub to r_shroud and export it.
 
     `span` holds first_height, growth_ratio, num_layers, transition_ratio
     (endwall layers, normally the blade's) and core_size [mm]. Writes
-    stator_mesh_3d.msh, stator_mesh_3d.cgns (metres) and
-    stator_mesh_3d_surfaces.npz (compact boundary patches for display) to
-    `output_dir`. Returns a JSON-friendly summary.
+    <name>.msh, <name>.cgns (metres) and <name>_surfaces.npz (compact
+    boundary patches for display) to `output_dir`. Returns a JSON-friendly
+    summary; its "files" maps msh/cgns/surfaces to those file names.
     """
     if gmsh.isInitialized():
-        raise RuntimeError("Finish the existing Gmsh session before sweeping the stator mesh.")
+        raise RuntimeError("Finish the existing Gmsh session before sweeping a passage mesh.")
     section = swept_section(mesh_2d)
     heights = span_distribution(float(r_shroud) - float(r_hub), span["first_height"], span["growth_ratio"],
                                 int(span["num_layers"]), span["transition_ratio"], span["core_size"])
@@ -160,6 +163,7 @@ def mesh_swept_stator(mesh_2d, r_hub, r_shroud, n_blades, span, output_dir,
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    files = {"msh": f"{name}.msh", "cgns": f"{name}.cgns", "surfaces": f"{name}_surfaces.npz"}
     gmsh.initialize(["stator_mesh_3d", "-v", "0"])
     try:
         gmsh.option.setNumber("General.Terminal", 0)
@@ -167,20 +171,21 @@ def mesh_swept_stator(mesh_2d, r_hub, r_shroud, n_blades, span, output_dir,
         counts = passage_volume.assemble_volume(section, xyz_sections, channel)
         quality = passage_volume.validate_volume(section, xyz_sections, channel)
         gmsh.option.setNumber("Mesh.Binary", 1)  # ~1/3 of the ASCII size
-        gmsh.write(str(output_dir / "stator_mesh_3d.msh"))
+        gmsh.write(str(output_dir / files["msh"]))
         cgns = passage_volume.export_cgns(
-            output_dir / "stator_mesh_3d.cgns",
+            output_dir / files["cgns"],
             {"length_scale": 0.001, "boundary_types": boundary_types or {}}, channel)
         xyz, faces = passage_volume.collect_surface_mesh()
     finally:
         gmsh.finalize()
 
     surfaces = _patch_surfaces(xyz, faces, DISPLAY_PATCHES)
-    np.savez_compressed(output_dir / "stator_mesh_3d_surfaces.npz", **{
+    np.savez_compressed(output_dir / files["surfaces"], **{
         f"{name}__{key}": value for name, surface in surfaces.items() for key, value in surface.items()})
     span_sizes = np.diff(heights)
     return {
         "output_dir": str(output_dir),
+        "files": files,
         "cells": {key: int(value) for key, value in counts.items()},
         "nodes": int(xyz_sections.shape[0] * xyz_sections.shape[1]),
         "span_cells": int(len(radii) - 1),
@@ -193,10 +198,13 @@ def mesh_swept_stator(mesh_2d, r_hub, r_shroud, n_blades, span, output_dir,
     }
 
 
-def load_patch_surfaces(output_dir, names=DISPLAY_PATCHES):
-    """Read the compact display patches written by mesh_swept_stator."""
+mesh_swept_stator = mesh_swept_passage  # the original (stator-only) name
+
+
+def load_patch_surfaces(output_dir, names=DISPLAY_PATCHES, filename="stator_mesh_3d_surfaces.npz"):
+    """Read the compact display patches written by mesh_swept_passage."""
     surfaces = {}
-    with np.load(Path(output_dir) / "stator_mesh_3d_surfaces.npz") as data:
+    with np.load(Path(output_dir) / filename) as data:
         for name in names:
             if f"{name}__points" in data:
                 surfaces[name] = {"points": data[f"{name}__points"], "polys": data[f"{name}__polys"]}

@@ -107,6 +107,38 @@ def estimate_first_layer_height(nozzle_result, chord_mm, y_plus, cell_centroid=T
     }
 
 
+def rotor_wall_states(rotor_data):
+    """The rotor's relative-frame wall states, in estimate_first_layer_height's
+    nozzle_result layout: an isentropic expansion from (P0_rel, T0_rel) to
+    each design Mach number (M_inlet, M_lower, M_upper, M_outlet -- the
+    uniform inlet/outlet flow and the constant-Mach pressure/suction arcs).
+
+    Static state at Mach M: the pressure on the stagnation isentrope where
+    h0 - h(p, s0) = (M a(p, s0))^2 / 2 (CoolProp HEOS, single phase).
+    """
+    from scipy.optimize import brentq
+
+    fluid = rotor_data["fluid_name"]
+    p0, t0 = float(rotor_data["P0_rel"]), float(rotor_data["T0_rel"])
+    state = CP.AbstractState("HEOS", fluid)
+    state.update(CP.PT_INPUTS, p0, t0)
+    h0, s0 = state.hmass(), state.smass()
+
+    def residual(p, mach):
+        state.update(CP.PSmass_INPUTS, p, s0)
+        return h0 - state.hmass() - 0.5 * (mach * state.speed_sound()) ** 2
+
+    rho, temperature, machs = [], [], []
+    for key in ("M_inlet", "M_lower", "M_upper", "M_outlet"):
+        mach = float(rotor_data[key])
+        p = brentq(residual, 1e-4 * p0, p0, args=(mach,), xtol=1e-6 * p0)
+        state.update(CP.PSmass_INPUTS, p, s0)
+        rho.append(state.rhomass())
+        temperature.append(state.T())
+        machs.append(mach)
+    return {"fluid_name": fluid, "wall_final": {"rho": rho, "T": temperature, "M": machs}}
+
+
 def inflation_stack(first_height, growth_ratio, num_layers):
     """Total thickness [mm] of `num_layers` geometric layers and the last
     layer's height: h1 (r^N - 1) / (r - 1) and h1 r^(N-1)."""

@@ -941,6 +941,38 @@ rotor_sizing_controls = html.Div(
                              style={"width": "100%", "padding": "8px"}),
                 dcc.Download(id="download-rotor-sizing-step"),
                 html.Div(id="rotor-sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
+
+                html.H4("3D mesh (hub section swept → shroud)", style={"marginTop": "16px"}),
+                _field(r"Blade cell size (mm)", "rotor_mesh_blade_size", None),
+                _field(r"Far-field cell size (mm)", "rotor_mesh_domain_size", None),
+                _field(r"Target $y^+$ (first cell centroid)", "rotor_mesh_y_plus", None),
+                _field(r"Inflation layers", "rotor_mesh_num_layers", None, step=1, min=1),
+                _field(r"Layer growth ratio", "rotor_mesh_growth_ratio", None),
+                _field(r"Core / last-layer size ratio", "rotor_mesh_transition_ratio", None),
+                _field(r"Span core cell size (mm)", "rotor_mesh3d_core_size", None),
+                html.Button("Generate 3D mesh", id="generate-rotor-mesh3d-btn", n_clicks=0,
+                             style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                                    "fontWeight": "600"}),
+                html.Div(id="rotor-mesh3d-status", style={"marginTop": "8px", "fontSize": "13px"}),
+                html.Div("Boundaries shown in the 3D view (all are exported)",
+                         style={"fontSize": "13px", "marginTop": "12px"}),
+                dcc.Checklist(
+                    id="rotor_mesh3d_patches",
+                    options=[{"label": f" {name.replace('_', ' ')}", "value": name}
+                             for name in ("blade", "hub", "shroud", "inlet", "outlet",
+                                          "periodic_left", "periodic_right")],
+                    value=["blade", "hub", "periodic_left"],
+                    style={"fontSize": "13px", "marginTop": "8px"},
+                ),
+                _field(r"Passages shown (up to $N_{\text{blades}}$; display only)", "rotor_mesh3d_copies", 1,
+                       step=1, min=1),
+                html.Button("Download 3D mesh (CGNS)", id="download-rotor-mesh3d-cgns-btn", n_clicks=0,
+                             style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+                dcc.Download(id="download-rotor-mesh3d-cgns"),
+                html.Button("Download 3D mesh (Gmsh .msh)", id="download-rotor-mesh3d-msh-btn", n_clicks=0,
+                             style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+                dcc.Download(id="download-rotor-mesh3d-msh"),
+                html.Div(id="rotor-mesh3d-download-status", style={"marginTop": "8px", "fontSize": "13px"}),
             ],
         ),
 
@@ -980,6 +1012,13 @@ rotor_sizing_plots = html.Div(
                     ),
                 ),
                 html.Div(id="rotor-sizing-info-table", style={"marginTop": "12px"}),
+                html.Div(
+                    id="rotor-mesh3d-view",
+                    children=_vtk_placeholder("Generate a 3D mesh to see it here."),
+                    style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                           "borderRadius": "4px", "marginTop": "16px", "overflow": "hidden"},
+                ),
+                html.Div(id="rotor-mesh3d-info-table", style={"marginTop": "12px"}),
             ],
         ),
         html.Div(
@@ -1110,6 +1149,7 @@ app.layout = html.Div(
         dcc.Store(id="stator-sizing-store"),
         dcc.Store(id="stator-mesh-store"),
         dcc.Store(id="stator-mesh3d-store"),
+        dcc.Store(id="rotor-mesh3d-store"),
         dcc.Store(id="flow-domain-store", data=FLOW_DOMAIN_DEFAULTS),
         dcc.Store(id="stator-radial-store"),
         dcc.Store(id="rotor-store"),
@@ -2149,7 +2189,8 @@ def _remove_mesh3d_dir(mesh3d):
     import shutil
 
     path = (mesh3d or {}).get("output_dir")
-    if path and Path(path).name.startswith("turbo_moc_stator3d_") and Path(path).parent == Path(tempfile.gettempdir()):
+    if (path and Path(path).name.startswith(("turbo_moc_stator3d_", "turbo_moc_rotor3d_"))
+            and Path(path).parent == Path(tempfile.gettempdir())):
         shutil.rmtree(path, ignore_errors=True)
 
 
@@ -2196,7 +2237,7 @@ def run_stator_mesh3d(n_clicks, mesh, previous, core_size):
         return dash.no_update, html.Div("Generate the 2D mesh first: the 3D mesh sweeps it.", style=red), None
     if core_size is None or core_size <= 0:
         return dash.no_update, html.Div("The span core cell size must be positive.", style=red), None
-    from turbo_moc.meshing.stator_mesh_3d import mesh_swept_stator
+    from turbo_moc.meshing.stator_mesh_3d import mesh_swept_passage
 
     sizes = mesh["sizes"]
     span = {"first_height": sizes["first_height"], "growth_ratio": sizes["growth_ratio"],
@@ -2204,16 +2245,25 @@ def run_stator_mesh3d(n_clicks, mesh, previous, core_size):
             "core_size": float(core_size)}
     output_dir = tempfile.mkdtemp(prefix="turbo_moc_stator3d_")
     try:
-        result = mesh_swept_stator(mesh, mesh["r_hub"], mesh["r_shroud"], mesh["n_blades"], span,
-                                   output_dir, boundary_types=STATOR_MESH3D_BOUNDARY_TYPES)
+        result = mesh_swept_passage(mesh, mesh["r_hub"], mesh["r_shroud"], mesh["n_blades"], span,
+                                    output_dir, boundary_types=STATOR_MESH3D_BOUNDARY_TYPES)
     except Exception as e:
         _remove_mesh3d_dir({"output_dir": output_dir})
         return dash.no_update, html.Div(f"3D meshing failed: {e}", style=red), None
     _remove_mesh3d_dir(previous)
 
+    n_cells = sum(result["cells"].values())
+    table = make_table(_mesh3d_rows(result), ["Quantity", "Value", "Unit"])
+    status = html.Div(f"3D mesh generated: {n_cells:,} cells ({result['span_cells']} span cells, endwall layers "
+                      f"as on the blade).", style={"color": "#1a7a1a"})
+    return result, status, table
+
+
+def _mesh3d_rows(result):
+    """Results-table rows of a swept 3D mesh (stator or rotor)."""
     quality, cells = result["quality"], result["cells"]
     n_cells = sum(cells.values())
-    table = make_table([
+    return [
         {"Quantity": "Volume cells", "Value": f"{n_cells:,}", "Unit": "-"},
         {"Quantity": "Hexahedra / prisms", "Value": f"{cells['hexahedra']:,} / {cells['prisms']:,}", "Unit": "-"},
         {"Quantity": "Nodes", "Value": f"{result['nodes']:,}", "Unit": "-"},
@@ -2223,19 +2273,11 @@ def run_stator_mesh3d(n_clicks, mesh, previous, core_size):
         {"Quantity": "Min SICN", "Value": f"{quality['min_sicn']:.4f}", "Unit": "-"},
         {"Quantity": "Periodic node pairs", "Value": f"{quality['periodic_node_pairs']:,}", "Unit": "-"},
         {"Quantity": "Periodic rotation", "Value": f"{result['pitch_angle_deg']:.4f}", "Unit": "deg"},
-    ], ["Quantity", "Value", "Unit"])
-    status = html.Div(f"3D mesh generated: {n_cells:,} cells ({result['span_cells']} span cells, endwall layers "
-                      f"as on the blade).", style={"color": "#1a7a1a"})
-    return result, status, table
+    ]
 
 
-@app.callback(
-    Output("stator-mesh3d-view", "children"),
-    Input("stator-mesh3d-store", "data"),
-    Input("stator_mesh3d_patches", "value"),
-    Input("mesh3d_copies", "value"),
-)
-def _render_stator_mesh3d(mesh3d, patches, copies=1):
+def _mesh3d_view(mesh3d, patches, copies=1):
+    """dash_vtk view of a swept 3D mesh's boundary patches (stator or rotor)."""
     if not mesh3d:
         return _vtk_placeholder("Generate a 3D mesh to see it here.")
     if not DASH_VTK_AVAILABLE:
@@ -2247,7 +2289,8 @@ def _render_stator_mesh3d(mesh3d, patches, copies=1):
     from turbo_moc.meshing.stator_mesh_3d import load_patch_surfaces
 
     try:
-        surfaces = load_patch_surfaces(mesh3d["output_dir"], set(patches) | {"blade"})
+        surfaces = load_patch_surfaces(mesh3d["output_dir"], set(patches) | {"blade"},
+                                       mesh3d["files"]["surfaces"])
     except OSError:
         return _vtk_placeholder("The 3D mesh files are gone (server restarted?): generate it again.")
 
@@ -2316,9 +2359,21 @@ def _render_stator_mesh3d(mesh3d, patches, copies=1):
     )
 
 
-def _send_mesh3d_file(mesh3d, filename):
+@app.callback(
+    Output("stator-mesh3d-view", "children"),
+    Input("stator-mesh3d-store", "data"),
+    Input("stator_mesh3d_patches", "value"),
+    Input("mesh3d_copies", "value"),
+)
+def _render_stator_mesh3d(mesh3d, patches, copies=1):
+    return _mesh3d_view(mesh3d, patches, copies)
+
+
+def _send_mesh3d_file(mesh3d, kind):
+    """Send the swept mesh's "cgns" or "msh" file from the server."""
     if not mesh3d:
         return dash.no_update, html.Div("Generate a 3D mesh first.", style={"color": "#b00020"})
+    filename = mesh3d["files"][kind]
     path = Path(mesh3d["output_dir"]) / filename
     if not path.exists():
         return dash.no_update, html.Div("The 3D mesh files are gone (server restarted?): generate it again.",
@@ -2335,7 +2390,7 @@ def _send_mesh3d_file(mesh3d, filename):
     prevent_initial_call=True,
 )
 def download_stator_mesh3d_cgns(n_clicks, mesh3d):
-    return _send_mesh3d_file(mesh3d, "stator_mesh_3d.cgns")
+    return _send_mesh3d_file(mesh3d, "cgns")
 
 
 @app.callback(
@@ -2346,7 +2401,140 @@ def download_stator_mesh3d_cgns(n_clicks, mesh3d):
     prevent_initial_call=True,
 )
 def download_stator_mesh3d_msh(n_clicks, mesh3d):
-    return _send_mesh3d_file(mesh3d, "stator_mesh_3d.msh")
+    return _send_mesh3d_file(mesh3d, "msh")
+
+
+# --------------------------------------------------------------------------
+# Phase 3 (3D tab, axial): rotor 3D mesh. The hub section is meshed
+# (turbo_moc.meshing.rotor_mesh_2d) and swept to the shroud in one go -- the
+# rotor's 2D mesh is never used on its own. y+ comes from the rotor's own
+# relative-frame expansion (P0_rel, T0_rel and its design Mach numbers).
+# --------------------------------------------------------------------------
+ROTOR_MESH_SIZE_KEYS = STATOR_MESH_SIZE_KEYS
+
+
+@app.callback(
+    *(Output(f"rotor_mesh_{key}", "value") for key in ROTOR_MESH_SIZE_KEYS),
+    Output("rotor_mesh3d_core_size", "value"),
+    Output("rotor-mesh3d-store", "data"),
+    Input("rotor-sizing-store", "data"),
+    State("rotor-mesh3d-store", "data"),
+)
+def _prefill_rotor_mesh_sizes(sizing_result, previous):
+    """New rotor sizing -> sizes scaled to its pitch; any old mesh is stale."""
+    _remove_mesh3d_dir(previous)
+    if not sizing_result:
+        return (None,) * (len(ROTOR_MESH_SIZE_KEYS) + 2)
+    from turbo_moc.meshing.stator_mesh_2d import default_mesh_sizes
+
+    sizes = default_mesh_sizes(sizing_result["scaled_blade"]["pitch"])
+    core = (sizing_result["r_shroud"] - sizing_result["r_hub"]) / 20
+    return (*(float(f"{sizes[key]:.4g}") for key in ROTOR_MESH_SIZE_KEYS), float(f"{core:.4g}"), None)
+
+
+@app.callback(
+    Output("rotor-mesh3d-store", "data", allow_duplicate=True),
+    Output("rotor-mesh3d-status", "children"),
+    Output("rotor-mesh3d-info-table", "children"),
+    Input("generate-rotor-mesh3d-btn", "n_clicks"),
+    State("rotor-sizing-store", "data"),
+    State("rotor-store", "data"),
+    State("rotor-mesh3d-store", "data"),
+    *(State(f"rotor_mesh_{key}", "value") for key in ROTOR_MESH_SIZE_KEYS),
+    State("rotor_mesh3d_core_size", "value"),
+    background=True,
+    manager=background_callback_manager,
+    running=[
+        (Output("generate-rotor-mesh3d-btn", "disabled"), True, False),
+        (Output("generate-rotor-mesh3d-btn", "children"), "Meshing... (Gmsh)", "Generate 3D mesh"),
+    ],
+    prevent_initial_call=True,
+)
+def run_rotor_mesh3d(n_clicks, sizing_result, rotor_data, previous, blade_size, domain_size, y_plus,
+                     num_layers, growth_ratio, transition_ratio, core_size):
+    """Gmsh runs in the background worker process, never in the Dash server."""
+    red = {"color": "#b00020"}
+    if not sizing_result:
+        return dash.no_update, html.Div("Run Phase 3 (rotor design, 3D) sizing first.", style=red), None
+    if not rotor_data or "P0_rel" not in rotor_data:
+        return dash.no_update, html.Div("Compute the rotor blade (Phase 3, 2D) again: the y+ estimate "
+                                        "needs its inlet state.", style=red), None
+    values = (blade_size, domain_size, y_plus, num_layers, growth_ratio, transition_ratio, core_size)
+    if any(value is None or value <= 0 for value in values) or growth_ratio <= 1:
+        return dash.no_update, html.Div("All mesh inputs must be positive and the growth ratio > 1.",
+                                        style=red), None
+    from turbo_moc.meshing.rotor_mesh_2d import mesh_sized_rotor
+    from turbo_moc.meshing.stator_mesh_3d import mesh_swept_passage
+    from turbo_moc.meshing.wall_spacing import estimate_first_layer_height, rotor_wall_states
+
+    blade = sizing_result["scaled_blade"]
+    sizes = dict(zip(ROTOR_MESH_SIZE_KEYS, map(float, values[:-1])))
+    sizes["num_layers"] = int(round(sizes["num_layers"]))
+    output_dir = tempfile.mkdtemp(prefix="turbo_moc_rotor3d_")
+    try:
+        wall = estimate_first_layer_height(rotor_wall_states(rotor_data), float(blade["chord"]), sizes["y_plus"])
+        sizes["first_height"] = wall["first_height_mm"]
+        mesh = mesh_sized_rotor(blade, sizes)
+        span = {key: sizes[key] for key in ("first_height", "growth_ratio", "num_layers", "transition_ratio")}
+        span["core_size"] = float(core_size)
+        result = mesh_swept_passage(mesh, sizing_result["r_hub"], sizing_result["r_shroud"],
+                                    sizing_result["n_blades"], span, output_dir,
+                                    boundary_types=STATOR_MESH3D_BOUNDARY_TYPES, name="rotor_mesh_3d")
+    except Exception as e:
+        _remove_mesh3d_dir({"output_dir": output_dir})
+        return dash.no_update, html.Div(f"Meshing failed: {e}", style=red), None
+    _remove_mesh3d_dir(previous)
+
+    stats = mesh["statistics"]
+    rows = [
+        {"Quantity": "Hub section cells", "Value": f"{sum(stats['cells'].values()):,}", "Unit": "-"},
+        {"Quantity": "Hub quadrilateral fraction", "Value": f"{stats['quadrilateral_fraction']:.1%}", "Unit": "-"},
+        {"Quantity": "Hub min scaled Jacobian", "Value": f"{stats['minimum_scaled_jacobian']:.3f}", "Unit": "-"},
+        {"Quantity": f"First layer height (y+ = {sizes['y_plus']:g})",
+         "Value": f"{sizes['first_height'] * 1e3:.3f}", "Unit": "µm"},
+        {"Quantity": "Re (chord, most sheared wall)", "Value": f"{wall['reynolds']:.3g}", "Unit": "-"},
+        {"Quantity": "Viscosity (most sheared wall)", "Value": f"{wall['viscosity']:.3e}", "Unit": "Pa s"},
+        {"Quantity": "Inflation stack (hub)", "Value": f"{stats['stack_thickness_mm']:.4f}", "Unit": "mm"},
+        *_mesh3d_rows(result),
+    ]
+    n_cells = sum(result["cells"].values())
+    notes = [html.Div(f"3D mesh generated: {n_cells:,} cells ({result['span_cells']} span cells, endwall "
+                      f"layers as on the blade).", style={"color": "#1a7a1a"})]
+    if wall["viscosity_model"].startswith("Chung"):
+        notes.append(html.Div(f"Viscosity: {wall['viscosity_model']}.", style={"color": "#666", "fontSize": "12px"}))
+    return result, html.Div(notes), make_table(rows, ["Quantity", "Value", "Unit"])
+
+
+@app.callback(
+    Output("rotor-mesh3d-view", "children"),
+    Input("rotor-mesh3d-store", "data"),
+    Input("rotor_mesh3d_patches", "value"),
+    Input("rotor_mesh3d_copies", "value"),
+)
+def _render_rotor_mesh3d(mesh3d, patches, copies=1):
+    return _mesh3d_view(mesh3d, patches, copies)
+
+
+@app.callback(
+    Output("download-rotor-mesh3d-cgns", "data"),
+    Output("rotor-mesh3d-download-status", "children"),
+    Input("download-rotor-mesh3d-cgns-btn", "n_clicks"),
+    State("rotor-mesh3d-store", "data"),
+    prevent_initial_call=True,
+)
+def download_rotor_mesh3d_cgns(n_clicks, mesh3d):
+    return _send_mesh3d_file(mesh3d, "cgns")
+
+
+@app.callback(
+    Output("download-rotor-mesh3d-msh", "data"),
+    Output("rotor-mesh3d-download-status", "children", allow_duplicate=True),
+    Input("download-rotor-mesh3d-msh-btn", "n_clicks"),
+    State("rotor-mesh3d-store", "data"),
+    prevent_initial_call=True,
+)
+def download_rotor_mesh3d_msh(n_clicks, mesh3d):
+    return _send_mesh3d_file(mesh3d, "msh")
 
 
 @app.callback(
@@ -2659,6 +2847,7 @@ def run_rotor(n_clicks, fluid_name, P0, T0, M_inlet, M_outlet, M_lower, M_upper,
         )
     except Exception as e:
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
+    data.update(P0_rel=float(P0), T0_rel=float(T0))  # inlet state, for the rotor mesh's y+ estimate
 
     status = html.Div([
         html.Span("Blade computed", style={"fontWeight": "600", "color": "#1a7a1a"}),
@@ -3563,6 +3752,12 @@ def _stator_sizing_downloads_ready(sizing_result):
 @_disable_until_ready(["download-stator-mesh3d-cgns-btn", "download-stator-mesh3d-msh-btn"],
                       ("stator-mesh3d-store", "data"))
 def _stator_mesh3d_downloads_ready(mesh3d):
+    return bool(mesh3d)
+
+
+@_disable_until_ready(["download-rotor-mesh3d-cgns-btn", "download-rotor-mesh3d-msh-btn"],
+                      ("rotor-mesh3d-store", "data"))
+def _rotor_mesh3d_downloads_ready(mesh3d):
     return bool(mesh3d)
 
 

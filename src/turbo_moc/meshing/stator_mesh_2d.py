@@ -2210,20 +2210,25 @@ def _gmsh_session(numerics):
         gmsh.finalize()
 
 
-def _generate_passage_mesh(blade, curves, numerics):
+def _generate_passage_mesh(blade, curves, numerics, build_cad=None):
     """CAD -> sizing -> inflation -> 1D -> conformity -> 2D -> quality checks.
 
     Runs inside an active _gmsh_session. Returns (surface, boundaries,
     statistics, transition, profile); the mesh stays in the Gmsh model for
-    the caller to export or collect.
+    the caller to export or collect. `build_cad(numerics)` -> (blade_curves,
+    surface, boundaries) replaces the stator's CAD (e.g. the rotor's,
+    turbo_moc.meshing.rotor_mesh_2d); everything after it is blade-agnostic.
     """
     profile = calculate_inflation_profile(numerics["inflation_layers"])
     gmsh.model.add("stator_passage")
     logger.info("  Build blade CAD, fluid surface and periodic boundaries.")
-    blade_curves = add_blade_boundary(blade, numerics["blade_size"])
-    surface, boundaries = add_periodic_passage(
-        curves, blade_curves, blade["pitch"], numerics["domain_size"]
-    )
+    if build_cad is None:
+        blade_curves = add_blade_boundary(blade, numerics["blade_size"])
+        surface, boundaries = add_periodic_passage(
+            curves, blade_curves, blade["pitch"], numerics["domain_size"]
+        )
+    else:
+        blade_curves, surface, boundaries = build_cad(numerics)
     logger.info("  Configure mesh sizes, recombination and inflation layers.")
     set_mesh_sizes(blade_curves, numerics, profile, blade["pitch"])
     add_inflation_layers(blade_curves, numerics)
