@@ -609,18 +609,51 @@ class InvertedCellsError(RuntimeError):
     """Cells folded against, or non-convex in, their surface's orientation."""
 
 
+def _consistently_numbered(cells):
+    """Reverse cells so that neighbours traverse each shared edge in
+    opposite directions (Gmsh's own numbering mixes orientations, e.g. in
+    inflation layers). A folded cell then shows up as the opposite sign of
+    its geometric area, which a per-cell orientation cannot reveal."""
+    owners = {}
+    for k, cell in enumerate(cells):
+        for a, b in zip(cell, np.roll(cell, -1)):
+            owners.setdefault((min(a, b), max(a, b)), []).append(k)
+    flip = np.zeros(len(cells), dtype=bool)
+    seen = np.zeros(len(cells), dtype=bool)
+    for start in range(len(cells)):
+        if seen[start]:
+            continue
+        seen[start] = True
+        stack = [start]
+        while stack:
+            k = stack.pop()
+            cell = cells[k][::-1] if flip[k] else cells[k]
+            for a, b in zip(cell, np.roll(cell, -1)):
+                for m in owners[(min(a, b), max(a, b))]:
+                    if seen[m]:
+                        continue
+                    other = list(cells[m])
+                    j = other.index(a)
+                    flip[m] = other[(j + 1) % len(other)] == b  # same direction -> reverse
+                    seen[m] = True
+                    stack.append(m)
+    return [cell[::-1] if f else cell for cell, f in zip(cells, flip)]
+
+
 def _surface_cells(surface):
     """Node tags, planar node coordinates and per-type corner-index arrays
-    of one meshed surface."""
+    of one meshed surface, consistently numbered across shared edges."""
     node_tags, xyz, _ = gmsh.model.mesh.getNodes()
     index = np.zeros(int(np.max(node_tags)) + 1, dtype=int)
     index[np.asarray(node_tags, dtype=int)] = np.arange(len(node_tags))
     xy = np.asarray(xyz).reshape(-1, 3)[:, :2].copy()
-    groups = []
+    cells = []
     for kind, tags, nodes in zip(*gmsh.model.mesh.getElements(2, surface)):
         corners = gmsh.model.mesh.getElementProperties(kind)[5]
-        groups.append(index[np.asarray(nodes, dtype=int).reshape(len(tags), -1)[:, :corners]])
-    return np.asarray(node_tags, dtype=int), index, xy, groups
+        cells.extend(index[np.asarray(nodes, dtype=int).reshape(len(tags), -1)[:, :corners]])
+    cells = _consistently_numbered(cells)
+    groups = [np.array([cell for cell in cells if len(cell) == width]) for width in (3, 4)]
+    return np.asarray(node_tags, dtype=int), index, xy, [group for group in groups if len(group)]
 
 
 def _corner_turns(xy, cells):

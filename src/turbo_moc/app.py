@@ -118,6 +118,12 @@ background_callback_manager = dash.DiskcacheManager(cache)
 
 app = Dash(__name__, background_callback_manager=background_callback_manager)
 app.title = "TurboMoC"
+# Disabled buttons (e.g. a download whose model is not computed yet) look
+# greyed out, so the pipeline order is visible at a glance.
+app.index_string = app.index_string.replace(
+    "{%css%}",
+    "{%css%}\n<style>button:disabled{opacity:0.45;cursor:not-allowed;filter:grayscale(1);}</style>",
+)
 server = app.server  # WSGI app, for gunicorn (matches turbodash's Procfile convention)
 
 FLUIDS = list_supported_fluids()
@@ -684,6 +690,32 @@ sizing_controls = html.Div(
                              style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
                 dcc.Download(id="download-stator-mesh"),
                 html.Div(id="stator-mesh-download-status", style={"marginTop": "8px", "fontSize": "13px"}),
+
+                html.H4("3D mesh (2D mesh swept hub → shroud)", style={"marginTop": "16px"}),
+                _field(r"Span core cell size (mm)", "mesh3d_core_size", None),
+                html.Button("Generate 3D mesh", id="generate-stator-mesh3d-btn", n_clicks=0,
+                             style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                                    "fontWeight": "600"}),
+                html.Div(id="stator-mesh3d-status", style={"marginTop": "8px", "fontSize": "13px"}),
+                html.Div("Boundaries shown in the 3D view (all are exported)",
+                         style={"fontSize": "13px", "marginTop": "12px"}),
+                dcc.Checklist(
+                    id="stator_mesh3d_patches",
+                    options=[{"label": f" {name.replace('_', ' ')}", "value": name}
+                             for name in ("blade", "hub", "shroud", "inlet", "outlet",
+                                          "periodic_left", "periodic_right")],
+                    value=["blade", "hub", "periodic_left"],
+                    style={"fontSize": "13px", "marginTop": "8px"},
+                ),
+                _field(r"Passages shown (up to $N_{\text{blades}}$; display only)", "mesh3d_copies", 1,
+                       step=1, min=1),
+                html.Button("Download 3D mesh (CGNS)", id="download-stator-mesh3d-cgns-btn", n_clicks=0,
+                             style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+                dcc.Download(id="download-stator-mesh3d-cgns"),
+                html.Button("Download 3D mesh (Gmsh .msh)", id="download-stator-mesh3d-msh-btn", n_clicks=0,
+                             style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+                dcc.Download(id="download-stator-mesh3d-msh"),
+                html.Div(id="stator-mesh3d-download-status", style={"marginTop": "8px", "fontSize": "13px"}),
             ],
         ),
 
@@ -728,6 +760,13 @@ sizing_plots = html.Div(
                            "borderRadius": "4px", "marginTop": "16px", "overflow": "hidden"},
                 ),
                 html.Div(id="stator-mesh-info-table", style={"marginTop": "12px"}),
+                html.Div(
+                    id="stator-mesh3d-view",
+                    children=_vtk_placeholder("Generate a 3D mesh to see it here."),
+                    style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                           "borderRadius": "4px", "marginTop": "16px", "overflow": "hidden"},
+                ),
+                html.Div(id="stator-mesh3d-info-table", style={"marginTop": "12px"}),
             ],
         ),
         html.Div(
@@ -1070,6 +1109,7 @@ app.layout = html.Div(
         dcc.Store(id="blade-reference-store"),
         dcc.Store(id="stator-sizing-store"),
         dcc.Store(id="stator-mesh-store"),
+        dcc.Store(id="stator-mesh3d-store"),
         dcc.Store(id="flow-domain-store", data=FLOW_DOMAIN_DEFAULTS),
         dcc.Store(id="stator-radial-store"),
         dcc.Store(id="rotor-store"),
@@ -1905,7 +1945,7 @@ def run_stator_mesh(n_clicks, sizing_result, nozzle_data, blade_size, domain_siz
         return None, html.Div(f"Meshing failed: {e}", style=red), None
 
     mesh.update(r_hub=float(sizing_result["r_hub"]), r_shroud=float(sizing_result["r_shroud"]),
-                n_blades=int(sizing_result["n_blades"]))
+                n_blades=int(sizing_result["n_blades"]), sizes=sizes)
     stats = mesh["statistics"]
     n_cells = sum(stats["cells"].values())
     throat = float(blade["throat_opening"])
@@ -2054,10 +2094,11 @@ def _render_stator_mesh(mesh, span, mode, sizing_result):
 @app.callback(
     Output("download-stator-mesh-btn", "disabled"),
     Input("stator_mesh_mode", "value"),
+    Input("stator-mesh-store", "data"),
 )
-def _toggle_stator_mesh_download(mode):
+def _toggle_stator_mesh_download(mode, mesh):
     # A mesh on the cylinder is a curved 3D surface, not a 2D CFD mesh.
-    return mode != "unrolled"
+    return not mesh or mode != "unrolled"
 
 
 @app.callback(
@@ -2086,6 +2127,226 @@ def download_stator_mesh_cgns(n_clicks, mesh, span):
     return dcc.send_bytes(content, filename), html.Div(
         f"CGNS ready: r = {radius:.2f} mm, metres, periodic translation "
         f"{2.0 * np.pi * radius / mesh['n_blades']:.4f} mm.", style={"color": "#1a7a1a"})
+
+
+# --------------------------------------------------------------------------
+# Phase 2 (3D tab, axial): 3D mesh = the 2D hub mesh swept to the shroud
+# (turbo_moc.meshing.stator_mesh_3d). The volume can be millions of cells, so
+# it stays on the server (a temporary directory); the store holds its
+# summary and path, and the view only loads the selected boundary patches.
+# --------------------------------------------------------------------------
+STATOR_MESH3D_BOUNDARY_TYPES = {**STATOR_MESH_BOUNDARY_TYPES, "hub": "BCWallViscous",
+                                "shroud": "BCWallViscous"}
+STATOR_MESH3D_COLORS = {
+    "blade": [0.25, 0.25, 0.28], "hub": [0.55, 0.63, 0.75], "shroud": [0.75, 0.78, 0.82],
+    "inlet": [0.16, 0.62, 0.56], "outlet": [0.91, 0.44, 0.32],
+    "periodic_left": [0.95, 0.65, 0.2], "periodic_right": [0.95, 0.8, 0.4],
+}
+
+
+def _remove_mesh3d_dir(mesh3d):
+    """Delete a previous swept mesh's temporary directory (ours only)."""
+    import shutil
+
+    path = (mesh3d or {}).get("output_dir")
+    if path and Path(path).name.startswith("turbo_moc_stator3d_") and Path(path).parent == Path(tempfile.gettempdir()):
+        shutil.rmtree(path, ignore_errors=True)
+
+
+@app.callback(
+    Output("mesh3d_core_size", "value"),
+    Input("stator-sizing-store", "data"),
+)
+def _prefill_mesh3d_core_size(sizing_result):
+    if not sizing_result:
+        return None
+    return float(f"{(sizing_result['r_shroud'] - sizing_result['r_hub']) / 20:.4g}")
+
+
+@app.callback(
+    Output("stator-mesh3d-store", "data"),
+    Input("stator-mesh-store", "data"),
+    State("stator-mesh3d-store", "data"),
+)
+def _invalidate_mesh3d(mesh, mesh3d):
+    """A new (or cleared) 2D mesh makes the swept mesh stale."""
+    _remove_mesh3d_dir(mesh3d)
+    return None
+
+
+@app.callback(
+    Output("stator-mesh3d-store", "data", allow_duplicate=True),
+    Output("stator-mesh3d-status", "children"),
+    Output("stator-mesh3d-info-table", "children"),
+    Input("generate-stator-mesh3d-btn", "n_clicks"),
+    State("stator-mesh-store", "data"),
+    State("stator-mesh3d-store", "data"),
+    State("mesh3d_core_size", "value"),
+    background=True,
+    manager=background_callback_manager,
+    running=[
+        (Output("generate-stator-mesh3d-btn", "disabled"), True, False),
+        (Output("generate-stator-mesh3d-btn", "children"), "Sweeping... (Gmsh)", "Generate 3D mesh"),
+    ],
+    prevent_initial_call=True,
+)
+def run_stator_mesh3d(n_clicks, mesh, previous, core_size):
+    red = {"color": "#b00020"}
+    if not mesh or "sizes" not in mesh:
+        return dash.no_update, html.Div("Generate the 2D mesh first: the 3D mesh sweeps it.", style=red), None
+    if core_size is None or core_size <= 0:
+        return dash.no_update, html.Div("The span core cell size must be positive.", style=red), None
+    from turbo_moc.meshing.stator_mesh_3d import mesh_swept_stator
+
+    sizes = mesh["sizes"]
+    span = {"first_height": sizes["first_height"], "growth_ratio": sizes["growth_ratio"],
+            "num_layers": sizes["num_layers"], "transition_ratio": sizes["transition_ratio"],
+            "core_size": float(core_size)}
+    output_dir = tempfile.mkdtemp(prefix="turbo_moc_stator3d_")
+    try:
+        result = mesh_swept_stator(mesh, mesh["r_hub"], mesh["r_shroud"], mesh["n_blades"], span,
+                                   output_dir, boundary_types=STATOR_MESH3D_BOUNDARY_TYPES)
+    except Exception as e:
+        _remove_mesh3d_dir({"output_dir": output_dir})
+        return dash.no_update, html.Div(f"3D meshing failed: {e}", style=red), None
+    _remove_mesh3d_dir(previous)
+
+    quality, cells = result["quality"], result["cells"]
+    n_cells = sum(cells.values())
+    table = make_table([
+        {"Quantity": "Volume cells", "Value": f"{n_cells:,}", "Unit": "-"},
+        {"Quantity": "Hexahedra / prisms", "Value": f"{cells['hexahedra']:,} / {cells['prisms']:,}", "Unit": "-"},
+        {"Quantity": "Nodes", "Value": f"{result['nodes']:,}", "Unit": "-"},
+        {"Quantity": "Span cells", "Value": str(result["span_cells"]), "Unit": "-"},
+        {"Quantity": "Endwall first cell height", "Value": f"{result['span_first_height_mm'] * 1e3:.3f}", "Unit": "µm"},
+        {"Quantity": "Largest span cell", "Value": f"{result['span_max_size_mm']:.4f}", "Unit": "mm"},
+        {"Quantity": "Min SICN", "Value": f"{quality['min_sicn']:.4f}", "Unit": "-"},
+        {"Quantity": "Periodic node pairs", "Value": f"{quality['periodic_node_pairs']:,}", "Unit": "-"},
+        {"Quantity": "Periodic rotation", "Value": f"{result['pitch_angle_deg']:.4f}", "Unit": "deg"},
+    ], ["Quantity", "Value", "Unit"])
+    status = html.Div(f"3D mesh generated: {n_cells:,} cells ({result['span_cells']} span cells, endwall layers "
+                      f"as on the blade).", style={"color": "#1a7a1a"})
+    return result, status, table
+
+
+@app.callback(
+    Output("stator-mesh3d-view", "children"),
+    Input("stator-mesh3d-store", "data"),
+    Input("stator_mesh3d_patches", "value"),
+    Input("mesh3d_copies", "value"),
+)
+def _render_stator_mesh3d(mesh3d, patches, copies=1):
+    if not mesh3d:
+        return _vtk_placeholder("Generate a 3D mesh to see it here.")
+    if not DASH_VTK_AVAILABLE:
+        return _vtk_placeholder("dash-vtk is not installed -- 3D view unavailable.")
+    if not patches:
+        return _vtk_placeholder("Select at least one boundary patch to display.")
+    from dash_vtk.utils.vtk import b64_encode_numpy
+
+    from turbo_moc.meshing.stator_mesh_3d import load_patch_surfaces
+
+    try:
+        surfaces = load_patch_surfaces(mesh3d["output_dir"], set(patches) | {"blade"})
+    except OSError:
+        return _vtk_placeholder("The 3D mesh files are gone (server restarted?): generate it again.")
+
+    def mesh_state(points, polys):
+        return {"mesh": {"points": b64_encode_numpy(np.ascontiguousarray(points, dtype=np.float32)),
+                         "polys": b64_encode_numpy(np.asarray(polys))}}
+
+    # The meshed passage: the selected patches with their mesh edges.
+    children = [
+        dash_vtk.GeometryRepresentation(
+            children=[dash_vtk.Mesh(state=mesh_state(surfaces[name]["points"], surfaces[name]["polys"]))],
+            property={"color": STATOR_MESH3D_COLORS.get(name, [0.6, 0.6, 0.6]), "edgeVisibility": True,
+                      "interpolation": "Flat"},
+        )
+        for name in patches if name in surfaces
+    ]
+    # Other passages (display only; the exported mesh is always one passage):
+    # just their blades, rigid rotations by k * 2 pi / N. Copying the hub and
+    # periodic patches too would multiply the browser payload ~10x.
+    n_blades = int(round(360.0 / mesh3d["pitch_angle_deg"]))
+    copies = int(min(max(copies or 1, 1), n_blades))
+    if copies > 1:
+        # Context only: a decimated blade surface (the meshed one keeps every face).
+        import vtk
+        from vtk.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray, vtk_to_numpy
+
+        blade = surfaces["blade"]
+        source = vtk.vtkPolyData()
+        source.SetPoints(vtk.vtkPoints())
+        source.GetPoints().SetData(numpy_to_vtk(np.asarray(blade["points"], dtype=np.float64), deep=True))
+        cells = vtk.vtkCellArray()
+        cells.ImportLegacyFormat(numpy_to_vtkIdTypeArray(np.asarray(blade["polys"], dtype=np.int64), deep=True))
+        source.SetPolys(cells)
+        triangles = vtk.vtkTriangleFilter()
+        triangles.SetInputData(source)
+        decimate = vtk.vtkQuadricDecimation()
+        decimate.SetInputConnection(triangles.GetOutputPort())
+        decimate.SetTargetReduction(0.95)
+        decimate.Update()
+        coarse = decimate.GetOutput()
+        xyz = vtk_to_numpy(coarse.GetPoints().GetData()).astype(np.float64)
+        flat = np.column_stack((np.full(coarse.GetNumberOfPolys(), 3),
+                                vtk_to_numpy(coarse.GetPolys().GetConnectivityArray()).reshape(-1, 3))).ravel()
+        is_count = np.zeros(len(flat), dtype=bool)
+        is_count[::4] = True
+        angles = np.radians(mesh3d["pitch_angle_deg"]) * np.arange(1, copies)
+        points = np.vstack([np.column_stack((np.cos(a) * xyz[:, 0] - np.sin(a) * xyz[:, 1],
+                                             np.sin(a) * xyz[:, 0] + np.cos(a) * xyz[:, 1], xyz[:, 2]))
+                            for a in angles])
+        polys = np.concatenate([np.where(is_count, flat, flat + k * len(xyz)) for k in range(len(angles))])
+        children.append(dash_vtk.GeometryRepresentation(
+            children=[dash_vtk.Mesh(state=mesh_state(points, polys))],
+            property={"color": [0.45, 0.47, 0.52], "interpolation": "Phong"},
+        ))
+    note = (f"Meshed passage (selected boundaries) + {copies - 1} more blade(s) of {n_blades}."
+            if copies > 1 else "Meshed passage (one pitch).")
+    return html.Div(
+        [
+            html.Div(note, style={"position": "absolute", "top": "8px", "left": "8px", "fontSize": "12px",
+                                  "color": "#666", "zIndex": 1, "backgroundColor": "rgba(255,255,255,0.85)",
+                                  "padding": "2px 8px", "borderRadius": "4px"}),
+            dash_vtk.View(background=[0.93, 0.95, 0.97], style={"height": "100%", "width": "100%"},
+                          children=children),
+        ],
+        style={"position": "relative", "height": "100%", "width": "100%"},
+    )
+
+
+def _send_mesh3d_file(mesh3d, filename):
+    if not mesh3d:
+        return dash.no_update, html.Div("Generate a 3D mesh first.", style={"color": "#b00020"})
+    path = Path(mesh3d["output_dir"]) / filename
+    if not path.exists():
+        return dash.no_update, html.Div("The 3D mesh files are gone (server restarted?): generate it again.",
+                                        style={"color": "#b00020"})
+    return dcc.send_file(str(path)), html.Div(
+        f"{filename} ready ({path.stat().st_size / 1e6:.1f} MB).", style={"color": "#1a7a1a"})
+
+
+@app.callback(
+    Output("download-stator-mesh3d-cgns", "data"),
+    Output("stator-mesh3d-download-status", "children"),
+    Input("download-stator-mesh3d-cgns-btn", "n_clicks"),
+    State("stator-mesh3d-store", "data"),
+    prevent_initial_call=True,
+)
+def download_stator_mesh3d_cgns(n_clicks, mesh3d):
+    return _send_mesh3d_file(mesh3d, "stator_mesh_3d.cgns")
+
+
+@app.callback(
+    Output("download-stator-mesh3d-msh", "data"),
+    Output("stator-mesh3d-download-status", "children", allow_duplicate=True),
+    Input("download-stator-mesh3d-msh-btn", "n_clicks"),
+    State("stator-mesh3d-store", "data"),
+    prevent_initial_call=True,
+)
+def download_stator_mesh3d_msh(n_clicks, mesh3d):
+    return _send_mesh3d_file(mesh3d, "stator_mesh_3d.msh")
 
 
 @app.callback(
@@ -3261,6 +3522,78 @@ def download_cascade_rotor_step(n_clicks, stator_sizing, rotor_sizing, gap, stat
 
     return dcc.send_bytes(content, "cascade_rotor.step"), html.Div(
         "Rotor STEP ready (assembly position).", style={"color": "#1a7a1a"})
+
+
+# --------------------------------------------------------------------------
+# Download buttons are disabled (greyed out) until what they export exists.
+# Each rule mirrors the checks of its download callback above.
+# --------------------------------------------------------------------------
+def _disable_until_ready(button_ids, *inputs):
+    """Register one callback disabling `button_ids` while `ready(*values)` is false."""
+    def register(ready):
+        outputs = [Output(button_id, "disabled") for button_id in button_ids]
+
+        @app.callback(*outputs, *(Input(*spec) for spec in inputs))
+        def _toggle(*values):
+            disabled = not ready(*values)
+            return disabled if len(outputs) == 1 else [disabled] * len(outputs)
+
+        _toggle.__name__ = f"_disable_{button_ids[0].replace('-', '_')}"
+        return ready
+    return register
+
+
+@_disable_until_ready(["download-btn", "download-wall-csv-btn"], ("result-store", "data"))
+def _nozzle_downloads_ready(result):
+    return bool(result)
+
+
+@_disable_until_ready(["blade-download-btn", "download-step-btn"],
+                      ("blade-store", "data"), ("blade-edited-store", "data"))
+def _blade_downloads_ready(base_blade, edited_blade):
+    return bool(_effective_blade(base_blade, edited_blade))
+
+
+@_disable_until_ready(["download-sizing-json-btn", "download-sizing-step-btn"],
+                      ("stator-sizing-store", "data"))
+def _stator_sizing_downloads_ready(sizing_result):
+    return bool(sizing_result)
+
+
+@_disable_until_ready(["download-stator-mesh3d-cgns-btn", "download-stator-mesh3d-msh-btn"],
+                      ("stator-mesh3d-store", "data"))
+def _stator_mesh3d_downloads_ready(mesh3d):
+    return bool(mesh3d)
+
+
+@_disable_until_ready(["rotor-download-btn"], ("rotor-store", "data"))
+def _rotor_plot_download_ready(rotor):
+    return bool(rotor)
+
+
+@_disable_until_ready(["download-rotor-sizing-step-btn"], ("rotor-sizing-store", "data"))
+def _rotor_sizing_download_ready(sizing_result):
+    return bool(sizing_result)
+
+
+@_disable_until_ready(["download-cascade-stator-step-btn"],
+                      ("stator-sizing-store", "data"), ("stator-radial-store", "data"),
+                      ("stator_wrap_type", "value"), ("rotor_wrap_type", "value"))
+def _cascade_stator_download_ready(stator_sizing, stator_radial, stator_wrap, rotor_wrap):
+    mode = _cascade_wrap_mode(stator_wrap, rotor_wrap)
+    return bool(stator_radial if mode == "radial" else stator_sizing if mode == "axial" else None)
+
+
+@_disable_until_ready(["download-cascade-rotor-step-btn"],
+                      ("stator-sizing-store", "data"), ("rotor-sizing-store", "data"),
+                      ("stator-radial-store", "data"), ("rotor-radial-store", "data"),
+                      ("stator_wrap_type", "value"), ("rotor_wrap_type", "value"))
+def _cascade_rotor_download_ready(stator_sizing, rotor_sizing, stator_radial, rotor_radial,
+                                  stator_wrap, rotor_wrap):
+    mode = _cascade_wrap_mode(stator_wrap, rotor_wrap)
+    if mode == "radial":
+        return bool(stator_radial and rotor_radial)
+    return mode == "axial" and bool(stator_sizing and rotor_sizing)
 
 
 def main():
