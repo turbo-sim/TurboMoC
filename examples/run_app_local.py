@@ -1,6 +1,5 @@
 """
 run_app_local.py -- local dev entry point for the TurboMoC Dash app.
-Mirrors turbodash's demos/run_app_local.py.
 
 Run:
     conda activate turbo_moc_env

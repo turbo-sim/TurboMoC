@@ -262,7 +262,7 @@ def wrap_blade_radial(blade_data, r1, r2, n_blades, theta0=0.0):
     }
 
 
-def wrap_rotor_blade_radial(rotor_data, r1, r2, n_blades, theta0=0.0, scale=1.0):
+def wrap_rotor_blade_radial(rotor_data, r1, r2, n_blades, theta0=0.0):
     """
     Wrap a Phase-3-style rotor blade (turbo_moc.rotor.design_rotor_vortex_blade's
     output dict) onto an annular passage between radii r1 and r2.
@@ -273,19 +273,17 @@ def wrap_rotor_blade_radial(rotor_data, r1, r2, n_blades, theta0=0.0, scale=1.0)
         Needs "blade" ({"x", "y"}) -- the closed LE/TE-rounded blade
         contour. Its trailing edge is already part of this closed curve
         (unlike the stator's, which keeps a separate arc), so there is no
-        separate trailing-edge overlay here.
+        separate trailing-edge overlay here. Its units don't matter (it
+        may well be nondimensional, r*): the map normalises the contour by
+        its own chordwise extent, so a uniformly rescaled blade wraps to
+        exactly the same result.
     r1, r2 : float
-        Inner/outer radii of the annular passage. MUST be in the same
-        units as `scale * rotor_data["blade"]` -- rotor_data is often
-        nondimensional (r*) unless design_rotor_vortex_blade was called
-        with an explicit r_star, so `scale` (e.g. mm per r*, matching
-        turbo_moc.app's Phase 4 "Rotor scale" convention) converts it first.
+        Radii [mm] the blade's chordwise extremes map to; the result is in
+        the same units.
     n_blades : int
         Number of blade copies laid out around the full annulus.
     theta0 : float
         Angular offset [rad] of the first (index-0) blade copy.
-    scale : float
-        Multiplier applied to the raw blade (x, y) before mapping.
 
     Returns
     -------
@@ -295,14 +293,20 @@ def wrap_rotor_blade_radial(rotor_data, r1, r2, n_blades, theta0=0.0, scale=1.0)
         to draw -- kept for a uniform shape with the stator's result, so
         plot_radial_cascade works unchanged for either source).
     """
+    # Pitch is mirrored so both rows come out with the same handedness. The
+    # map treats chord + i*pitch as a holomorphic coordinate: for the
+    # rotor's (x=chord, y=pitch) frame that preserves orientation, for the
+    # stator's (x=pitch, y=chord) frame it reverses it. Unmirrored, the
+    # rotor's inlet swirl came out opposite to the stator's exit swirl
+    # (leading edge facing against the incoming flow) for both inward and
+    # outward stages.
     blade = rotor_data["blade"]
-    x = [v * scale for v in blade["x"]]
-    y = [v * scale for v in blade["y"]]
-    blades, ref = wrap_curve_radial(x, y, r1, r2, n_blades, theta0, chordwise_axis="x")
+    blades, ref = wrap_curve_radial(blade["x"], [-v for v in blade["y"]], r1, r2, n_blades, theta0,
+                                    chordwise_axis="x")
     return {
         "blades": blades,
         "trailing_edges": [{"x": [], "y": []} for _ in range(n_blades)],
         "r1": float(r1), "r2": float(r2),
         "n_blades": int(n_blades), "d_theta": ref["d_theta"],
-        "units": "mm" if scale != 1.0 else rotor_data.get("units", "r*"),
+        "units": "mm",
     }

@@ -922,3 +922,71 @@ def export_annular_blade_stl(blade_data, r_hub, r_shroud, stl_path,
         flare=flare, n_span=n_span, theta0=theta0, source=source, z_offset=z_offset,
     )
     cq.exporters.export(solid, str(stl_path))
+
+
+def _build_radial_blade_solid(cq, blade_data, r1, r2, depth, source="stator",
+                               theta0=0.0, z_offset=0.0, build_solid=True):
+    """One radial-wrapped blade (single copy, index 0) as a flat prism of
+    thickness `depth` along Z. Unlike the annular wrap, turbo_moc.geometry.
+    radial's log-spiral conformal map has no spanwise dimension of its own
+    (it maps a 2D cascade profile onto a 2D annulus footprint only), so
+    `depth` is a plain extrusion thickness -- the same semantics as the
+    app's VTK-only radial preview, built here as a real watertight solid.
+
+    The section is a fine POLYLINE through the wrapped points, not the
+    single closed interpolating spline _closed_wire_3d builds: on the
+    rotor's contour (long straight LE/TE stubs between densely sampled
+    walls) a solid bounded by that one closed spline edge passes
+    isValid() but reports a wrong volume under both makeLoft (~0.35x) and
+    extrudeLinear (~1.3x), while the polyline prism matches the shoelace
+    area * depth to ~10 significant figures. Point spacing is already
+    sub-mm, so the faceting is not visible."""
+    from .radial import wrap_blade_radial, wrap_rotor_blade_radial
+
+    if source == "stator":
+        wrapped = wrap_blade_radial(blade_data, r1, r2, n_blades=1, theta0=theta0)
+        x = wrapped["blades"][0]["x"] + wrapped["trailing_edges"][0]["x"]
+        y = wrapped["blades"][0]["y"] + wrapped["trailing_edges"][0]["y"]
+    elif source == "rotor":
+        wrapped = wrap_rotor_blade_radial(blade_data, r1, r2, n_blades=1, theta0=theta0)
+        x, y = wrapped["blades"][0]["x"], wrapped["blades"][0]["y"]
+    else:
+        raise ValueError(f"source must be 'stator' or 'rotor', got {source!r}")
+
+    pts = _dedupe_consecutive(list(zip(x, y, [z_offset] * len(x))))
+    if len(pts) > 1 and np.linalg.norm(np.subtract(pts[0], pts[-1])) < _MIN_EDGE_LENGTH:
+        pts = pts[:-1]
+    bottom = cq.Wire.makePolygon([cq.Vector(*p) for p in pts], close=True)
+    top = bottom.translate(cq.Vector(0.0, 0.0, depth))
+    solid = (cq.Solid.extrudeLinear(cq.Face.makeFromWires(bottom), cq.Vector(0.0, 0.0, depth))
+             if build_solid else None)
+    return [bottom, top], solid
+
+
+def export_radial_blade_step(blade_data, r1, r2, depth, face_path, solid_path=None,
+                              source="stator", theta0=0.0, z_offset=0.0):
+    """Export a radial-wrapped blade (see _build_radial_blade_solid) as
+    STEP -- face_path gets the bottom (z = z_offset) section wire,
+    solid_path gets the watertight extruded solid. Requires cadquery (not
+    a core dependency -- import kept local)."""
+    import cadquery as cq
+
+    wires, solid = _build_radial_blade_solid(
+        cq, blade_data, r1, r2, depth, source=source,
+        theta0=theta0, z_offset=z_offset, build_solid=solid_path is not None,
+    )
+    cq.exporters.export(wires[0], str(face_path))
+    if solid_path is not None:
+        cq.exporters.export(solid, str(solid_path))
+
+
+def export_radial_blade_stl(blade_data, r1, r2, depth, stl_path,
+                             source="stator", theta0=0.0, z_offset=0.0):
+    """Export the same watertight radial blade solid as
+    export_radial_blade_step, but as an STL mesh for CAD-quality 3D preview
+    via dash-vtk. Requires cadquery."""
+    import cadquery as cq
+
+    _, solid = _build_radial_blade_solid(cq, blade_data, r1, r2, depth, source=source,
+                                          theta0=theta0, z_offset=z_offset)
+    cq.exporters.export(solid, str(stl_path))

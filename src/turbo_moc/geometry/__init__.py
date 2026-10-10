@@ -4,6 +4,8 @@ from .blade import (
     export_annular_blade_stl,
     export_blade_step,
     export_flared_blade_step,
+    export_radial_blade_step,
+    export_radial_blade_stl,
     move_control_point_along_normal,
     parametrize_stator_blade,
     parametrize_stator_blade_semi,
@@ -35,6 +37,7 @@ from .turbogrid import export_turbogrid_blade, read_turbogrid_x_extent, shift_tu
 __all__ = [
     "parametrize_stator_blade", "parametrize_stator_blade_semi", "export_blade_step",
     "export_flared_blade_step", "export_annular_blade_step", "export_annular_blade_stl",
+    "export_radial_blade_step", "export_radial_blade_stl",
     "wrap_blade_annular",
     "move_control_point_along_normal", "BSplineTool",
     "apply_conformal_mapping", "rotate_radial_points",

@@ -247,8 +247,12 @@ def _extrude_polygon_vtk(vtk, x, y, depth):
     axial-depth dimension (see turbo_moc.geometry.radial's module
     docstring), so this is a flat, constant-depth preview/export
     extrusion, not a true spanwise-varying solid like the axial wrap's
-    _build_annular_blade_solid."""
+    _build_annular_blade_solid. The cell ordering below gives outward
+    normals for a counter-clockwise polygon, so a clockwise input is
+    reversed first (the radial wrap's stator and rotor wind opposite ways)."""
     x, y = _dedupe_closed_loop(x, y)
+    if np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1)) < 0:
+        x, y = x[::-1], y[::-1]
     n = len(x)
     points = vtk.vtkPoints()
     for xi, yi in zip(x, y):
@@ -816,16 +820,14 @@ rotor_plots = html.Div(
 # turbo_moc.geometry.sizing.size_rotor_from_pitch).
 # --------------------------------------------------------------------------
 ROTOR_SIZING_DEFAULTS = dict(n_blades=34)  # EMPOWER_DTU Novec649 meanline rotor blade_count
-# Same reasoning as RADIAL_DEFAULTS above: r1/r2 picked to match the raw
-# Phase 4 rotor blade's own native size, not the axially-scaled Phase 5
-# ones. The rotor blade is nondimensional-by-r* (no r_star passed at
-# compute time), so `scale` (mm per r*) also needs to be large enough to
-# bring it up near that same order of magnitude -- 1.0 mm/r* left it
-# under 2 mm, the opposite mismatch (blade far smaller than the target
-# annulus this time). n_blades=30 is this (r1, r2, scale)'s own
-# implied_n_blades_radial (see RADIAL_DEFAULTS' own comment for why that
-# matters).
-ROTOR_RADIAL_DEFAULTS = dict(r1=100.0, r2=200.0, n_blades=30, scale=50.0, depth=5.0)
+# No scale input: the radial map normalises the blade by its own chordwise
+# extent, so the (nondimensional, r*) rotor blade wraps to the same mm
+# geometry at any scale -- only r1/r2 set its size. n_blades=30 is this
+# (r1, r2)'s own implied_n_blades_radial (~29.7; see RADIAL_DEFAULTS'
+# comment for why that matters).
+# In the Phase 6 radial cascade only this r1/r2 RATIO is used: the rotor is
+# re-placed from the stator's outlet radius + gap (see _place_radial_rotor).
+ROTOR_RADIAL_DEFAULTS = dict(r1=100.0, r2=200.0, n_blades=30, depth=5.0)
 
 rotor_sizing_controls = html.Div(
     [
@@ -866,7 +868,6 @@ rotor_sizing_controls = html.Div(
                 _field(r"$r_2$ (mm, shroud)", "rotor_radial_r2", ROTOR_RADIAL_DEFAULTS["r2"]),
                 _field(r"$N_{\text{blades}}$", "rotor_radial_n_blades",
                        ROTOR_RADIAL_DEFAULTS["n_blades"], step=1, min=1),
-                _field(r"Scale (mm per r*)", "rotor_radial_scale", ROTOR_RADIAL_DEFAULTS["scale"]),
                 _field(r"Depth (mm, preview/export only)", "rotor_radial_depth",
                        ROTOR_RADIAL_DEFAULTS["depth"]),
                 html.Button("Compute radial wrap", id="compute-rotor-radial-btn", n_clicks=0,
@@ -931,14 +932,21 @@ rotor_sizing_plots = html.Div(
 # cascade work: the rotor's local chordwise axis runs the opposite way
 # from the stator's, so the raw x needs flipping to land downstream
 # rather than mirrored/upstream).
+#
+# Radial mode (both Phase 3 and Phase 5 wrap-type dropdowns on "Radial"):
+# the rows come from stator-radial-store/rotor-radial-store instead, built
+# as flat-depth radial solids (export_radial_blade_stl/step) sharing a Z
+# mid-plane. The same gap field becomes a radial gap: the rotor's inlet is
+# placed at the stator's outlet radius + gap (see _place_radial_rotor),
+# keeping only Phase 5's r1/r2 ratio.
 # --------------------------------------------------------------------------
 cascade_controls = html.Div(
     [
         html.H4("Cascade (stator + rotor)"),
         html.Div(id="cascade-assembly-readout", style={"fontSize": "12px", "marginBottom": "8px"}),
-        _field(r"$\Delta z_{\text{gap}}$ (mm, stator TE to rotor LE)", "cascade_axial_gap", 5.0),
+        _field(r"Gap (mm, stator outlet to rotor inlet: axial $\Delta z$ / radial $\Delta r$)", "cascade_gap", 5.0),
 
-        html.H4("2D cascade (mid-span)", style={"marginTop": "16px"}),
+        html.H4("2D cascade (axial: mid-span, radial: plan view)", style={"marginTop": "16px"}),
         _field(r"$N_{\text{stator}}$ (blades to plot)", "cascade_2d_n_stator", 3, step=1, min=1),
         _field(r"$N_{\text{rotor}}$ (blades to plot)", "cascade_2d_n_rotor", 3, step=1, min=1),
 
@@ -1022,6 +1030,8 @@ app.layout = html.Div(
         dcc.Store(id="rotor-reference-store"),
         dcc.Store(id="rotor-sizing-store"),
         dcc.Store(id="rotor-radial-store"),
+        html.Div(id="vtk-resize-trigger-stator", style={"display": "none"}),
+        html.Div(id="vtk-resize-trigger-rotor", style={"display": "none"}),
     ],
     style={"fontFamily": "Helvetica, Arial, sans-serif"},
 )
@@ -1376,6 +1386,26 @@ def _toggle_sizing_mode(mode):
 def _toggle_stator_wrap_type(wrap_type):
     shown, hidden = {"display": "block"}, {"display": "none"}
     return (shown, hidden, shown, hidden) if wrap_type == "axial" else (hidden, shown, hidden, shown)
+
+
+# vtk.js sizes its WebGL canvas to its container at the moment it mounts.
+# The radial panel starts `display: none` (axial is the default dropdown
+# value, see _toggle_stator_wrap_type above), so its dash_vtk.View mounts
+# into a zero-size box and never repaints after the panel is later shown --
+# no Python error, just a blank canvas. Firing a window "resize" event once
+# the display flip has actually applied (hence the setTimeout) makes vtk.js
+# recompute its viewport and draw. Same fix mirrored for the rotor panel
+# below (_toggle_rotor_wrap_type).
+app.clientside_callback(
+    """
+    function(wrap_type) {
+        setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 100);
+        return '';
+    }
+    """,
+    Output("vtk-resize-trigger-stator", "children"),
+    Input("stator_wrap_type", "value"),
+)
 
 
 @app.callback(
@@ -2165,6 +2195,20 @@ def _toggle_rotor_wrap_type(wrap_type):
     return (shown, hidden, shown, hidden) if wrap_type == "axial" else (hidden, shown, hidden, shown)
 
 
+# See the matching comment above _toggle_stator_wrap_type's own resize
+# clientside_callback -- same blank-canvas-on-reveal fix for this panel.
+app.clientside_callback(
+    """
+    function(wrap_type) {
+        setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 100);
+        return '';
+    }
+    """,
+    Output("vtk-resize-trigger-rotor", "children"),
+    Input("rotor_wrap_type", "value"),
+)
+
+
 @app.callback(
     Output("rotor-sizing-annulus-readout", "children"),
     Input("stator-sizing-store", "data"),
@@ -2307,13 +2351,14 @@ def _update_rotor_sizing_vtk_preview(sizing_result):
     State("rotor_radial_r1", "value"),
     State("rotor_radial_r2", "value"),
     State("rotor_radial_n_blades", "value"),
-    State("rotor_radial_scale", "value"),
     State("rotor_radial_depth", "value"),
     prevent_initial_call=True,
 )
-def run_radial_rotor(n_clicks, rotor_data, r1, r2, n_blades, scale, depth):
+def run_radial_rotor(n_clicks, rotor_data, r1, r2, n_blades, depth):
     """Geometric-only radial wrap (see run_radial_stator's docstring for
-    why N_blades is a direct input, not solved, for the rotor too)."""
+    why N_blades is a direct input, not solved, for the rotor too). The
+    raw (r*) rotor blade is used as-is: the map normalises it by its own
+    chordwise extent, so the mapped geometry/pitch only depend on r1/r2."""
     from turbo_moc.geometry import implied_n_blades_radial, mapped_pitch_width
 
     if not rotor_data:
@@ -2321,34 +2366,22 @@ def run_radial_rotor(n_clicks, rotor_data, r1, r2, n_blades, scale, depth):
                                 style={"color": "#b00020"}), None
 
     r1, r2 = float(r1), float(r2)
-    n_blades, scale, depth = int(n_blades), float(scale), float(depth)
-
-    # implied_n_blades_radial/mapped_pitch_width read blade.x/y and pitch
-    # directly, with no separate scale factor -- apply `scale` first so
-    # the diagnostic matches the geometry that actually gets wrapped/
-    # rendered (same scaled copy _update_rotor_radial_vtk_preview builds).
-    scaled_rotor = dict(rotor_data)
-    scaled_rotor["blade"] = {
-        "x": [v * scale for v in rotor_data["blade"]["x"]],
-        "y": [v * scale for v in rotor_data["blade"]["y"]],
-    }
-    scaled_rotor["pitch"] = float(rotor_data["pitch"]) * scale
+    n_blades, depth = int(n_blades), float(depth)
 
     try:
-        mapped_pitch = mapped_pitch_width(scaled_rotor, r1, r2, source="rotor")
-        n_implied = implied_n_blades_radial(scaled_rotor, r1, r2, source="rotor")
+        mapped_pitch = mapped_pitch_width(rotor_data, r1, r2, source="rotor")
+        n_implied = implied_n_blades_radial(rotor_data, r1, r2, source="rotor")
     except Exception as e:
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
 
     result = {
-        "r1": r1, "r2": r2, "n_blades": n_blades, "scale": scale, "depth": depth,
+        "r1": r1, "r2": r2, "n_blades": n_blades, "depth": depth,
         "rotor_data": rotor_data,
     }
     table_data = [
         {"Quantity": "r1 (hub)", "Value": f"{r1:.2f}", "Unit": "mm"},
         {"Quantity": "r2 (shroud)", "Value": f"{r2:.2f}", "Unit": "mm"},
         {"Quantity": "N_blades (entered)", "Value": str(n_blades), "Unit": "-"},
-        {"Quantity": "Scale", "Value": f"{scale:.4f}", "Unit": "mm / r*"},
         {"Quantity": "Mapped pitch (at N entered)", "Value": f"{mapped_pitch:.2f}", "Unit": "mm"},
         {"Quantity": "Implied N_blades (no overlap/gaps)", "Value": f"{n_implied:.1f}", "Unit": "-"},
         {"Quantity": "Depth", "Value": f"{depth:.2f}", "Unit": "mm"},
@@ -2389,7 +2422,7 @@ def _update_rotor_radial_vtk_preview(radial_result):
     try:
         wrapped = wrap_rotor_blade_radial(
             radial_result["rotor_data"], radial_result["r1"], radial_result["r2"],
-            radial_result["n_blades"], scale=radial_result["scale"])
+            radial_result["n_blades"])
         append = vtk.vtkAppendPolyData()
         for blade_copy in wrapped["blades"]:
             append.AddInputData(_extrude_polygon_vtk(
@@ -2508,12 +2541,91 @@ def _mirrored_rotor_blade(scaled_blade):
     return mirrored
 
 
+_MIXED_WRAP_MSG = ("Both rows must use the same wrap type (Axial or Radial) -- set the Phase 3 "
+                   "and Phase 5 dropdowns to match to assemble a cascade.")
+
+
+def _cascade_wrap_mode(stator_wrap, rotor_wrap):
+    """"axial"/"radial" when both rows use the same wrap type, else None."""
+    return stator_wrap if stator_wrap == rotor_wrap else None
+
+
+def _cascade_missing_msg(mode):
+    if mode == "radial":
+        return "Run Phase 3 and Phase 5 \"Compute radial wrap\" first to see the radial assembly."
+    return "Run Phase 3 and Phase 5 sizing first to see the assembly."
+
+
+def _place_radial_rotor(stator_radial, rotor_radial, gap):
+    """Copy of rotor_radial with r1/r2 re-derived for the assembly: its
+    inlet sits `gap` past the stator's outlet along the stator's own flow
+    direction, and it runs the same direction. Only Phase 5's radius RATIO
+    is kept -- the log-spiral map depends on r2/r1 alone, so a rescaled
+    pair gives the same blade shape (just scaled) and the same implied
+    N_blades as in Phase 5.
+
+    Exact, no map evaluation needed: geometry.radial's map sends the chord
+    maximum to r1 and the chord minimum to r2 exactly (by
+    _reference_point_and_scale's construction). The stator's inlet is its
+    chord-max end, the rotor's inlet its chord-MIN end (its local x runs
+    inlet -> outlet in +x, verified via design_rotor_vortex_blade's
+    x_inlet_far < x_outlet_far) -- so the stator runs r1 -> r2 and the
+    rotor r2 -> r1."""
+    s_in, s_out = float(stator_radial["r1"]), float(stator_radial["r2"])
+    s_dir = 1.0 if s_out > s_in else -1.0
+    p5 = (float(rotor_radial["r1"]), float(rotor_radial["r2"]))
+    ratio = max(p5) / min(p5)
+    r_in = s_out + s_dir * float(gap)
+    if r_in <= 0.0:
+        raise ValueError(f"gap of {gap} mm puts the rotor inlet at r = {r_in:.2f} mm (must be > 0).")
+    return {**rotor_radial, "r2": r_in, "r1": r_in * ratio ** s_dir}
+
+
+def _radial_row_export_args(radial_result, source):
+    """(blade_data, r1, r2, depth, kwargs) for export_radial_blade_step/_stl,
+    centred on z = 0 so rows of different depth share a mid-plane."""
+    depth = float(radial_result["depth"])
+    kwargs = {"source": source, "z_offset": -0.5 * depth}
+    blade_data = radial_result["rotor_data"] if source == "rotor" else radial_result["blade"]
+    return blade_data, float(radial_result["r1"]), float(radial_result["r2"]), depth, kwargs
+
+
+def _radial_cascade_readout(stator_radial, rotor_radial, gap):
+    try:
+        rotor = _place_radial_rotor(stator_radial, rotor_radial, gap)
+    except ValueError as e:
+        return html.Div(f"Radial cascade: {e}", style={"color": "#b00020"})
+    direction = "inward" if float(stator_radial["r2"]) < float(stator_radial["r1"]) else "outward"
+    lines = [html.Div(
+        f"Radial, {direction} flow. Stator r {stator_radial['r1']:.1f} -> {stator_radial['r2']:.1f} mm, "
+        f"N={stator_radial['n_blades']}. Rotor r {rotor['r2']:.1f} -> {rotor['r1']:.1f} mm, "
+        f"N={rotor['n_blades']}.")]
+    if float(gap) < 0:
+        lines.append(html.Div(f"Negative gap: rotor overlaps the stator by {-float(gap):.2f} mm.",
+                              style={"color": "#b00020", "fontWeight": "600"}))
+    return html.Div(lines)
+
+
 @app.callback(
     Output("cascade-assembly-readout", "children"),
     Input("stator-sizing-store", "data"),
     Input("rotor-sizing-store", "data"),
+    Input("stator_wrap_type", "value"),
+    Input("rotor_wrap_type", "value"),
+    Input("stator-radial-store", "data"),
+    Input("rotor-radial-store", "data"),
+    Input("cascade_gap", "value"),
 )
-def _update_cascade_readout(stator_sizing, rotor_sizing):
+def _update_cascade_readout(stator_sizing, rotor_sizing, stator_wrap, rotor_wrap,
+                            stator_radial, rotor_radial, gap):
+    mode = _cascade_wrap_mode(stator_wrap, rotor_wrap)
+    if mode is None:
+        return html.Div(_MIXED_WRAP_MSG, style={"color": "#b00020"})
+    if mode == "radial":
+        if not stator_radial or not rotor_radial:
+            return html.Div(_cascade_missing_msg(mode), style={"color": "#b00020"})
+        return _radial_cascade_readout(stator_radial, rotor_radial, gap or 0.0)
+
     missing = []
     if not stator_sizing:
         missing.append("Phase 3 (stator sizing)")
@@ -2526,15 +2638,61 @@ def _update_cascade_readout(stator_sizing, rotor_sizing):
         f"Rotor: r_hub={rotor_sizing['r_hub']:.2f} mm, N={rotor_sizing['n_blades']}.")
 
 
+def _radial_cascade_figure(stator_radial, rotor_radial, gap, n_stator, n_rotor):
+    """Plan (X/Y) view of a radial cascade, rotor placed by
+    _place_radial_rotor. Unlike the axial mid-span view, no tiling is
+    needed: the radial wraps already return every blade copy positioned
+    in the shared global annulus frame."""
+    from turbo_moc.geometry import wrap_blade_radial, wrap_rotor_blade_radial
+
+    fig = go.Figure()
+    try:
+        rotor_radial = _place_radial_rotor(stator_radial, rotor_radial, gap)
+    except ValueError as e:
+        fig.update_layout(annotations=[dict(text=str(e), showarrow=False, font=dict(size=13))])
+        return fig
+    stator = wrap_blade_radial(stator_radial["blade"], float(stator_radial["r1"]),
+                               float(stator_radial["r2"]), int(stator_radial["n_blades"]))
+    for i, (b, te) in enumerate(zip(stator["blades"][:n_stator], stator["trailing_edges"][:n_stator])):
+        fig.add_trace(go.Scatter(x=b["x"] + te["x"], y=b["y"] + te["y"], mode="lines",
+                                  line=dict(color="#3d5a80", width=2), name="Stator",
+                                  legendgroup="stator", showlegend=(i == 0)))
+
+    rotor = wrap_rotor_blade_radial(rotor_radial["rotor_data"], float(rotor_radial["r1"]),
+                                    float(rotor_radial["r2"]), int(rotor_radial["n_blades"]))
+    for i, b in enumerate(rotor["blades"][:n_rotor]):
+        fig.add_trace(go.Scatter(x=b["x"], y=b["y"], mode="lines",
+                                  line=dict(color="#ee6c4d", width=2), name="Rotor",
+                                  legendgroup="rotor", showlegend=(i == 0)))
+
+    s_out, r_in = float(stator_radial["r2"]), float(rotor_radial["r2"])
+    t = np.linspace(0.0, 2.0 * np.pi, 361)
+    for radius, name, color in ((s_out, "Stator outlet r", "#3d5a80"), (r_in, "Rotor inlet r", "#ee6c4d")):
+        fig.add_trace(go.Scatter(x=radius * np.cos(t), y=radius * np.sin(t), mode="lines",
+                                  line=dict(color=color, width=1, dash="dash"), name=name))
+
+    fig.update_layout(
+        xaxis_title="X (mm)", yaxis_title="Y (mm)",
+        yaxis=dict(scaleanchor="x", scaleratio=1),
+        title=f"Radial cascade, plan view (radial gap = {float(gap):.2f} mm)",
+    )
+    return fig
+
+
 @app.callback(
     Output("fig-cascade-2d", "figure"),
     Input("stator-sizing-store", "data"),
     Input("rotor-sizing-store", "data"),
-    Input("cascade_axial_gap", "value"),
+    Input("cascade_gap", "value"),
     Input("cascade_2d_n_stator", "value"),
     Input("cascade_2d_n_rotor", "value"),
+    Input("stator_wrap_type", "value"),
+    Input("rotor_wrap_type", "value"),
+    Input("stator-radial-store", "data"),
+    Input("rotor-radial-store", "data"),
 )
-def _update_cascade_2d_plot(stator_sizing, rotor_sizing, gap, n_stator, n_rotor):
+def _update_cascade_2d_plot(stator_sizing, rotor_sizing, gap, n_stator, n_rotor,
+                            stator_wrap, rotor_wrap, stator_radial, rotor_radial):
     """A flat 'blade-to-blade' cascade view at mid-span (r_mid = (r_hub +
     r_shroud)/2, the two rows share one annulus): N_stator/N_rotor copies
     of each row's already-sized 2D blade shape, tiled at the mid-span
@@ -2543,8 +2701,20 @@ def _update_cascade_2d_plot(stator_sizing, rotor_sizing, gap, n_stator, n_rotor)
     PITCHWISE coordinate with radius (the chordwise/axial one is
     unchanged across span, see turbo_moc.geometry.annular's docstring),
     so this is genuinely "the same as putting together the 2D shapes" at
-    a different pitch, not a 3D slice."""
+    a different pitch, not a 3D slice. Radial mode: see _radial_cascade_figure."""
     fig = go.Figure()
+    mode = _cascade_wrap_mode(stator_wrap, rotor_wrap)
+    if mode is None:
+        fig.update_layout(annotations=[dict(text=_MIXED_WRAP_MSG, showarrow=False, font=dict(size=13))])
+        return fig
+    if mode == "radial":
+        if not stator_radial or not rotor_radial:
+            fig.update_layout(annotations=[dict(text=_cascade_missing_msg(mode), showarrow=False,
+                                                  font=dict(size=14))])
+            return fig
+        return _radial_cascade_figure(stator_radial, rotor_radial, gap or 0.0,
+                                      int(n_stator or 1), int(n_rotor or 1))
+
     if not stator_sizing or not rotor_sizing:
         fig.update_layout(annotations=[dict(text="Run Phase 3 and Phase 5 sizing first.",
                                               showarrow=False, font=dict(size=14))])
@@ -2601,18 +2771,28 @@ def _update_cascade_2d_plot(stator_sizing, rotor_sizing, gap, n_stator, n_rotor)
     Output("cascade-vtk-container", "children"),
     Input("stator-sizing-store", "data"),
     Input("rotor-sizing-store", "data"),
-    Input("cascade_axial_gap", "value"),
+    Input("cascade_gap", "value"),
+    Input("stator_wrap_type", "value"),
+    Input("rotor_wrap_type", "value"),
+    Input("stator-radial-store", "data"),
+    Input("rotor-radial-store", "data"),
 )
-def _update_cascade_vtk_preview(stator_sizing, rotor_sizing, gap):
-    if not stator_sizing or not rotor_sizing:
-        return _vtk_placeholder("Run Phase 3 and Phase 5 sizing first to see the assembly.")
+def _update_cascade_vtk_preview(stator_sizing, rotor_sizing, gap, stator_wrap, rotor_wrap,
+                                stator_radial, rotor_radial):
+    mode = _cascade_wrap_mode(stator_wrap, rotor_wrap)
+    if mode is None:
+        return _vtk_placeholder(_MIXED_WRAP_MSG)
+    stator_row, rotor_row = ((stator_radial, rotor_radial) if mode == "radial"
+                             else (stator_sizing, rotor_sizing))
+    if not stator_row or not rotor_row:
+        return _vtk_placeholder(_cascade_missing_msg(mode))
     if not DASH_VTK_AVAILABLE:
         return _vtk_placeholder(
             "dash-vtk is not installed -- 3D solid preview unavailable "
             "(pip install \"turbo_moc[cad]\").")
     try:
         import vtk
-        from turbo_moc.geometry import export_annular_blade_stl
+        from turbo_moc.geometry import export_annular_blade_stl, export_radial_blade_stl
     except ImportError:
         return _vtk_placeholder(
             "cadquery / vtk are not installed -- 3D solid preview unavailable "
@@ -2620,14 +2800,8 @@ def _update_cascade_vtk_preview(stator_sizing, rotor_sizing, gap):
 
     n_render_cap = 200
 
-    def _row_mesh_state(sizing_result, source, z_offset, tmpdir, name):
-        n_blades = int(sizing_result["n_blades"])
+    def _row_mesh_state(stl_path, n_blades):
         n_render = min(n_blades, n_render_cap)
-        stl_path = os.path.join(tmpdir, name)
-        export_annular_blade_stl(
-            sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
-            stl_path, n_blades=n_blades, flare="pitch_scale", source=source, z_offset=z_offset,
-        )
         reader = vtk.vtkSTLReader()
         reader.SetFileName(stl_path)
         reader.Update()
@@ -2646,14 +2820,33 @@ def _update_cascade_vtk_preview(stator_sizing, rotor_sizing, gap):
         return to_mesh_state(_triangulate_vtk(vtk, append.GetOutput()))
 
     try:
-        z_offset = _rotor_z_offset(stator_sizing, rotor_sizing, gap or 0.0)
-        rotor_sizing_3d = {**rotor_sizing, "scaled_blade": _mirrored_rotor_blade(rotor_sizing["scaled_blade"])}
         with tempfile.TemporaryDirectory() as tmpdir:
-            stator_mesh_state = _row_mesh_state(stator_sizing, "stator", 0.0, tmpdir, "stator.stl")
-            rotor_mesh_state = _row_mesh_state(rotor_sizing_3d, "rotor", z_offset, tmpdir, "rotor.stl")
+            stator_stl = os.path.join(tmpdir, "stator.stl")
+            rotor_stl = os.path.join(tmpdir, "rotor.stl")
+            if mode == "axial":
+                z_offset = _rotor_z_offset(stator_sizing, rotor_sizing, gap or 0.0)
+                export_annular_blade_stl(
+                    stator_sizing["scaled_blade"], stator_sizing["r_hub"], stator_sizing["r_shroud"],
+                    stator_stl, n_blades=int(stator_sizing["n_blades"]), flare="pitch_scale",
+                    source="stator", z_offset=0.0,
+                )
+                export_annular_blade_stl(
+                    _mirrored_rotor_blade(rotor_sizing["scaled_blade"]), rotor_sizing["r_hub"],
+                    rotor_sizing["r_shroud"], rotor_stl, n_blades=int(rotor_sizing["n_blades"]),
+                    flare="pitch_scale", source="rotor", z_offset=z_offset,
+                )
+            else:
+                placed_rotor = _place_radial_rotor(stator_radial, rotor_radial, gap or 0.0)
+                for row, source, path in ((stator_radial, "stator", stator_stl),
+                                          (placed_rotor, "rotor", rotor_stl)):
+                    blade_data, r1, r2, depth, kwargs = _radial_row_export_args(row, source)
+                    export_radial_blade_stl(blade_data, r1, r2, depth, path, **kwargs)
+            stator_mesh_state = _row_mesh_state(stator_stl, int(stator_row["n_blades"]))
+            rotor_mesh_state = _row_mesh_state(rotor_stl, int(rotor_row["n_blades"]))
     except Exception as e:
         return _vtk_placeholder(f"Error building 3D solid preview: {e}")
 
+    z_label = "Z (axial) [mm]" if mode == "axial" else "Z (depth) [mm]"
     return dash_vtk.View(
         background=[0.93, 0.95, 0.97],
         style={"height": "100%", "width": "100%"},
@@ -2666,7 +2859,7 @@ def _update_cascade_vtk_preview(stator_sizing, rotor_sizing, gap):
                     "ambient": 0.12, "diffuse": 0.8, "specular": 0.45, "specularPower": 30,
                 },
                 showCubeAxes=True,
-                cubeAxesStyle={"axisLabels": ["X [mm]", "Y [mm]", "Z (axial) [mm]"]},
+                cubeAxesStyle={"axisLabels": ["X [mm]", "Y [mm]", z_label]},
             ),
             dash_vtk.GeometryRepresentation(
                 children=[dash_vtk.Mesh(state=rotor_mesh_state)],
@@ -2685,21 +2878,34 @@ def _update_cascade_vtk_preview(stator_sizing, rotor_sizing, gap):
     Output("cascade-step-status", "children", allow_duplicate=True),
     Input("download-cascade-stator-step-btn", "n_clicks"),
     State("stator-sizing-store", "data"),
+    State("stator_wrap_type", "value"),
+    State("rotor_wrap_type", "value"),
+    State("stator-radial-store", "data"),
     prevent_initial_call=True,
 )
-def download_cascade_stator_step(n_clicks, stator_sizing):
-    if not stator_sizing:
+def download_cascade_stator_step(n_clicks, stator_sizing, stator_wrap, rotor_wrap, stator_radial):
+    mode = _cascade_wrap_mode(stator_wrap, rotor_wrap)
+    if mode is None:
+        return dash.no_update, html.Div(_MIXED_WRAP_MSG, style={"color": "#b00020"})
+    if mode == "radial" and not stator_radial:
+        return dash.no_update, html.Div("Run Phase 3 \"Compute radial wrap\" first.",
+                                        style={"color": "#b00020"})
+    if mode == "axial" and not stator_sizing:
         return dash.no_update, html.Div("Run Phase 3 (stator sizing) first.", style={"color": "#b00020"})
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            from turbo_moc.geometry import export_annular_blade_step
+            from turbo_moc.geometry import export_annular_blade_step, export_radial_blade_step
             face_path = os.path.join(tmpdir, "face.step")
             solid_path = os.path.join(tmpdir, "solid.step")
-            export_annular_blade_step(
-                stator_sizing["scaled_blade"], stator_sizing["r_hub"], stator_sizing["r_shroud"],
-                face_path, solid_path, n_blades=int(stator_sizing["n_blades"]),
-                flare="pitch_scale", source="stator", z_offset=0.0,
-            )
+            if mode == "radial":
+                blade_data, r1, r2, depth, kwargs = _radial_row_export_args(stator_radial, "stator")
+                export_radial_blade_step(blade_data, r1, r2, depth, face_path, solid_path, **kwargs)
+            else:
+                export_annular_blade_step(
+                    stator_sizing["scaled_blade"], stator_sizing["r_hub"], stator_sizing["r_shroud"],
+                    face_path, solid_path, n_blades=int(stator_sizing["n_blades"]),
+                    flare="pitch_scale", source="stator", z_offset=0.0,
+                )
             with open(solid_path, "rb") as f:
                 content = f.read()
     except ImportError:
@@ -2716,28 +2922,46 @@ def download_cascade_stator_step(n_clicks, stator_sizing):
     Input("download-cascade-rotor-step-btn", "n_clicks"),
     State("stator-sizing-store", "data"),
     State("rotor-sizing-store", "data"),
-    State("cascade_axial_gap", "value"),
+    State("cascade_gap", "value"),
+    State("stator_wrap_type", "value"),
+    State("rotor_wrap_type", "value"),
+    State("stator-radial-store", "data"),
+    State("rotor-radial-store", "data"),
     prevent_initial_call=True,
 )
-def download_cascade_rotor_step(n_clicks, stator_sizing, rotor_sizing, gap):
-    if not stator_sizing or not rotor_sizing:
+def download_cascade_rotor_step(n_clicks, stator_sizing, rotor_sizing, gap, stator_wrap, rotor_wrap,
+                                stator_radial, rotor_radial):
+    mode = _cascade_wrap_mode(stator_wrap, rotor_wrap)
+    if mode is None:
+        return dash.no_update, html.Div(_MIXED_WRAP_MSG, style={"color": "#b00020"})
+    if mode == "radial" and (not stator_radial or not rotor_radial):
+        return dash.no_update, html.Div("Run Phase 3 and Phase 5 \"Compute radial wrap\" first.",
+                                        style={"color": "#b00020"})
+    if mode == "axial" and (not stator_sizing or not rotor_sizing):
         return dash.no_update, html.Div("Run Phase 3 and Phase 5 sizing first.", style={"color": "#b00020"})
     try:
-        z_offset = _rotor_z_offset(stator_sizing, rotor_sizing, gap or 0.0)
         with tempfile.TemporaryDirectory() as tmpdir:
-            from turbo_moc.geometry import export_annular_blade_step
+            from turbo_moc.geometry import export_annular_blade_step, export_radial_blade_step
             face_path = os.path.join(tmpdir, "face.step")
             solid_path = os.path.join(tmpdir, "solid.step")
-            export_annular_blade_step(
-                _mirrored_rotor_blade(rotor_sizing["scaled_blade"]), rotor_sizing["r_hub"], rotor_sizing["r_shroud"],
-                face_path, solid_path, n_blades=int(rotor_sizing["n_blades"]),
-                flare="pitch_scale", source="rotor", z_offset=z_offset,
-            )
+            if mode == "radial":
+                placed_rotor = _place_radial_rotor(stator_radial, rotor_radial, gap or 0.0)
+                blade_data, r1, r2, depth, kwargs = _radial_row_export_args(placed_rotor, "rotor")
+                export_radial_blade_step(blade_data, r1, r2, depth, face_path, solid_path, **kwargs)
+            else:
+                z_offset = _rotor_z_offset(stator_sizing, rotor_sizing, gap or 0.0)
+                export_annular_blade_step(
+                    _mirrored_rotor_blade(rotor_sizing["scaled_blade"]), rotor_sizing["r_hub"],
+                    rotor_sizing["r_shroud"], face_path, solid_path, n_blades=int(rotor_sizing["n_blades"]),
+                    flare="pitch_scale", source="rotor", z_offset=z_offset,
+                )
             with open(solid_path, "rb") as f:
                 content = f.read()
     except ImportError:
         return dash.no_update, html.Div(
             "cadquery is not installed -- STEP export unavailable.", style={"color": "#b00020"})
+    except ValueError as e:
+        return dash.no_update, html.Div(str(e), style={"color": "#b00020"})
 
     return dcc.send_bytes(content, "cascade_rotor.step"), html.Div(
         "Rotor STEP ready (assembly position).", style={"color": "#1a7a1a"})
