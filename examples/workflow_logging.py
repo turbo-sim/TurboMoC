@@ -10,6 +10,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 LOGGER_NAME = "stator_workflow"
+# Library modules the examples drive (e.g. turbo_moc.meshing) log under their
+# own package name; route them to the same handlers.
+LIBRARY_LOGGER_NAMES = ("turbo_moc",)
 PROJECT_DIR = Path(__file__).resolve().parent.parent
 RULE_WIDTH = 72
 
@@ -44,17 +47,18 @@ def workflow_logging(log_file, level="INFO"):
     log_file = Path(log_file)
     log_file.parent.mkdir(parents=True, exist_ok=True)
     logger = logging.getLogger(LOGGER_NAME)
-    previous_handlers = logger.handlers[:]
-    previous_level, previous_propagation = logger.level, logger.propagate
+    configured = [logger] + [logging.getLogger(name) for name in LIBRARY_LOGGER_NAMES]
+    previous = [(item, item.handlers[:], item.level, item.propagate) for item in configured]
     handlers = [
         logging.StreamHandler(sys.stdout),
         logging.FileHandler(log_file, mode="w", encoding="utf-8"),
     ]
     for handler in handlers:
         handler.setFormatter(WorkflowFormatter())
-    logger.handlers = handlers
-    logger.setLevel(level)
-    logger.propagate = False
+    for item in configured:
+        item.handlers = handlers
+        item.setLevel(level)
+        item.propagate = False
     try:
         yield logger
     except KeyboardInterrupt:
@@ -64,9 +68,10 @@ def workflow_logging(log_file, level="INFO"):
         logger.exception("Workflow failed; see the last step and traceback below.")
         raise
     finally:
-        logger.handlers = previous_handlers
-        logger.setLevel(previous_level)
-        logger.propagate = previous_propagation
+        for item, item_handlers, item_level, item_propagation in previous:
+            item.handlers = item_handlers
+            item.setLevel(item_level)
+            item.propagate = item_propagation
         for handler in handlers:
             handler.close()
 

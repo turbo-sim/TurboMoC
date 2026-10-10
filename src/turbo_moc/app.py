@@ -79,6 +79,12 @@ from turbo_moc.geometry import (
     size_stator_mode_a,
     size_stator_mode_b,
 )
+from turbo_moc.meshing.stator_mesh_2d import (
+    APP_PASSAGE_DEFAULTS,
+    export_flow_domain_step,
+    flow_domain_outline,
+    stator_flow_domain,
+)
 from turbo_moc.rotor import design_rotor_vortex_blade
 
 BLADE_PARAM_FUNCS = {
@@ -380,7 +386,7 @@ controls = html.Div(
         ], style={"display": "flex"}),
         html.Div(id="reference-status", style={"marginTop": "6px", "fontSize": "13px"}),
     ],
-    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+    style={"width": "300px", "flexShrink": 0, "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
 )
 
@@ -430,7 +436,7 @@ plots = html.Div(
             style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "12px"},
         ),
     ],
-    style={"flex": "1", "padding": "16px"},
+    style={"flex": "1", "minWidth": 0, "padding": "16px"},
 )
 
 # --------------------------------------------------------------------------
@@ -440,6 +446,11 @@ BLADE_DEFAULTS = dict(
     metal_angle_in=0.0, metal_angle_out=70.0, r_trailing=0.1143,
     inlet_opening_ratio=1.5, n_cp=30,
 )
+
+# Fluid-domain extents (in chords) shared by the 2D tab's passage preview and
+# STEP export and the 3D tab's 2D mesh -- one definition,
+# turbo_moc.meshing.stator_mesh_2d.stator_flow_domain.
+FLOW_DOMAIN_DEFAULTS = {key: APP_PASSAGE_DEFAULTS[key] for key in ("inlet_chords", "outlet_chords")}
 
 blade_controls = html.Div(
     [
@@ -489,47 +500,36 @@ blade_controls = html.Div(
         ], style={"display": "flex"}),
         html.Div(id="blade-reference-status", style={"marginTop": "6px", "fontSize": "13px"}),
 
-        html.H4("CAD export (STEP)", style={"marginTop": "16px"}),
+        html.H4("CAD export (STEP, 2D face)", style={"marginTop": "16px"}),
         dcc.RadioItems(
             id="step-export-target",
             options=[
-                {"label": " Blade solid", "value": "blade"},
+                {"label": " Blade", "value": "blade"},
                 {"label": " Fluid domain (passage)", "value": "passage"},
             ],
             value="blade",
             labelStyle={"display": "block", "fontSize": "13px"},
         ),
         html.Div(
-            id="step-export-blade-fields",
-            children=[
-                dcc.RadioItems(
-                    id="step-kind",
-                    options=[
-                        {"label": " 2D face", "value": "face"},
-                        {"label": " 3D solid (extruded)", "value": "solid"},
-                    ],
-                    value="solid",
-                    labelStyle={"display": "block", "fontSize": "13px"},
-                ),
-            ],
-        ),
-        html.Div(
             id="step-export-passage-fields",
             children=[
                 _field(r"Inlet distance ($\times$ chord)",
-                       "passage_stator_inlet_chords", 1.0, step=0.5, min=0),
+                       "passage_stator_inlet_chords", FLOW_DOMAIN_DEFAULTS["inlet_chords"],
+                       step=0.5, min=0),
                 _field(r"Outlet distance ($\times$ chord)",
-                       "passage_stator_outlet_chords", 6.0, step=0.5, min=0),
+                       "passage_stator_outlet_chords", FLOW_DOMAIN_DEFAULTS["outlet_chords"],
+                       step=0.5, min=0),
+                html.Div("Same fluid domain as the 2D mesh (Phase 2 → 3D tab).",
+                          style={"fontSize": "12px", "color": "#666"}),
             ],
             style={"display": "none"},
         ),
-        _field(r"$L_{\text{extrude}}$ (mm)", "extrude_length", 1.0),
         html.Button("Download STEP", id="download-step-btn", n_clicks=0,
                      style={"width": "100%", "marginTop": "8px", "padding": "8px"}),
         dcc.Download(id="download-step"),
         html.Div(id="blade-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
     ],
-    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+    style={"width": "300px", "flexShrink": 0, "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
 )
 
@@ -559,7 +559,7 @@ blade_plots = html.Div(
             style={"display": "flex", "flexDirection": "row", "gap": "12px", "alignItems": "flex-start"},
         ),
     ],
-    style={"flex": "1", "padding": "16px"},
+    style={"flex": "1", "minWidth": 0, "padding": "16px"},
 )
 
 # --------------------------------------------------------------------------
@@ -647,6 +647,43 @@ sizing_controls = html.Div(
                              style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
                 dcc.Download(id="download-sizing-step"),
                 html.Div(id="sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
+
+                html.H4("2D mesh (blade-to-blade)", style={"marginTop": "16px"}),
+                dcc.Dropdown(
+                    id="stator_mesh_topology",
+                    options=[
+                        {"label": "Structured (O-H, TurboGrid-like)", "value": "structured"},
+                        {"label": "Unstructured (quad-dominant)", "value": "unstructured"},
+                    ],
+                    value="structured", clearable=False, style={"marginBottom": "6px"},
+                ),
+                _field(r"Blade cell size (mm)", "mesh_blade_size", None),
+                _field(r"Far-field cell size (mm)", "mesh_domain_size", None),
+                _field(r"Target $y^+$ (first cell centroid)", "mesh_y_plus", None),
+                _field(r"Inflation layers", "mesh_num_layers", None, step=1, min=1),
+                _field(r"Layer growth ratio", "mesh_growth_ratio", None),
+                _field(r"Core / last-layer size ratio", "mesh_transition_ratio", None),
+                html.Button("Generate mesh", id="generate-stator-mesh-btn", n_clicks=0,
+                             style={"width": "100%", "marginTop": "8px", "padding": "8px",
+                                    "fontWeight": "600"}),
+                html.Div(id="stator-mesh-status", style={"marginTop": "8px", "fontSize": "13px"}),
+                html.Div("Span fraction (0 = hub, 1 = shroud)",
+                          style={"fontSize": "13px", "marginTop": "12px"}),
+                dcc.Slider(id="stator_mesh_span", min=0.0, max=1.0, step=0.05, value=0.0,
+                           marks={0: "hub", 0.5: "mid", 1: "shroud"},
+                           tooltip={"placement": "bottom"}),
+                dcc.Dropdown(
+                    id="stator_mesh_mode",
+                    options=[
+                        {"label": "Unrolled (planar, 2D CFD)", "value": "unrolled"},
+                        {"label": "On cylinder (3D surface)", "value": "cylinder"},
+                    ],
+                    value="unrolled", clearable=False, style={"marginTop": "8px"},
+                ),
+                html.Button("Download mesh (CGNS, unrolled)", id="download-stator-mesh-btn", n_clicks=0,
+                             style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+                dcc.Download(id="download-stator-mesh"),
+                html.Div(id="stator-mesh-download-status", style={"marginTop": "8px", "fontSize": "13px"}),
             ],
         ),
 
@@ -665,7 +702,7 @@ sizing_controls = html.Div(
             style={"display": "none"},
         ),
     ],
-    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+    style={"width": "300px", "flexShrink": 0, "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
 )
 
@@ -684,6 +721,13 @@ sizing_plots = html.Div(
                     ),
                 ),
                 html.Div(id="sizing-info-table", style={"marginTop": "12px"}),
+                html.Div(
+                    id="stator-mesh-view",
+                    children=_vtk_placeholder("Generate a 2D mesh to see it here."),
+                    style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                           "borderRadius": "4px", "marginTop": "16px", "overflow": "hidden"},
+                ),
+                html.Div(id="stator-mesh-info-table", style={"marginTop": "12px"}),
             ],
         ),
         html.Div(
@@ -703,7 +747,7 @@ sizing_plots = html.Div(
             style={"display": "none"},
         ),
     ],
-    style={"flex": "1", "padding": "16px"},
+    style={"flex": "1", "minWidth": 0, "padding": "16px"},
 )
 
 
@@ -775,7 +819,7 @@ rotor_controls = html.Div(
         ], style={"display": "flex"}),
         html.Div(id="rotor-reference-status", style={"marginTop": "6px", "fontSize": "13px"}),
     ],
-    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+    style={"width": "300px", "flexShrink": 0, "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
 )
 
@@ -805,7 +849,7 @@ rotor_plots = html.Div(
             style={"display": "flex", "flexDirection": "row", "gap": "12px", "alignItems": "flex-start"},
         ),
     ],
-    style={"flex": "1", "padding": "16px"},
+    style={"flex": "1", "minWidth": 0, "padding": "16px"},
 )
 
 
@@ -878,7 +922,7 @@ rotor_sizing_controls = html.Div(
             style={"display": "none"},
         ),
     ],
-    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+    style={"width": "300px", "flexShrink": 0, "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
 )
 
@@ -916,7 +960,7 @@ rotor_sizing_plots = html.Div(
             style={"display": "none"},
         ),
     ],
-    style={"flex": "1", "padding": "16px"},
+    style={"flex": "1", "minWidth": 0, "padding": "16px"},
 )
 
 
@@ -959,7 +1003,7 @@ cascade_controls = html.Div(
         dcc.Download(id="download-cascade-rotor-step"),
         html.Div(id="cascade-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
     ],
-    style={"width": "300px", "padding": "16px", "borderRight": "1px solid #ddd",
+    style={"width": "300px", "flexShrink": 0, "padding": "16px", "borderRight": "1px solid #ddd",
            "overflowY": "auto"},
 )
 
@@ -969,7 +1013,7 @@ cascade_plots = html.Div(
             type="circle",
             children=html.Div(
                 id="cascade-vtk-container",
-                children=_vtk_placeholder("Run Phase 3 and Phase 5 sizing first to see the assembly."),
+                children=_vtk_placeholder("Run Phase 2 (stator design) and Phase 3 (rotor design) first."),
                 style={"height": "600px", "width": "100%", "border": "1px solid #ddd",
                        "borderRadius": "4px"},
             ),
@@ -977,7 +1021,7 @@ cascade_plots = html.Div(
         dcc.Graph(id="fig-cascade-2d", config={"displaylogo": False},
                    style={"height": "500px", "marginTop": "16px"}),
     ],
-    style={"flex": "1", "padding": "16px"},
+    style={"flex": "1", "minWidth": 0, "padding": "16px"},
 )
 
 
@@ -1025,6 +1069,8 @@ app.layout = html.Div(
         dcc.Store(id="blade-edited-store"),
         dcc.Store(id="blade-reference-store"),
         dcc.Store(id="stator-sizing-store"),
+        dcc.Store(id="stator-mesh-store"),
+        dcc.Store(id="flow-domain-store", data=FLOW_DOMAIN_DEFAULTS),
         dcc.Store(id="stator-radial-store"),
         dcc.Store(id="rotor-store"),
         dcc.Store(id="rotor-reference-store"),
@@ -1775,6 +1821,273 @@ def download_sizing_step(n_clicks, sizing_result):
         "Sized stator STEP ready (1 blade).", style={"color": "#1a7a1a"})
 
 
+# --------------------------------------------------------------------------
+# Phase 2 (3D tab, axial): 2D blade-to-blade mesh of the sized stator.
+# One Gmsh mesh of the HUB section; every span and both views are node maps
+# of it (turbo_moc.meshing.stator_mesh_2d.section_coordinates), so moving the
+# span slider or switching view never re-meshes.
+# --------------------------------------------------------------------------
+STATOR_MESH_BOUNDARY_TYPES = {
+    "blade": "BCWallViscous",
+    "inlet": "BCInflowSubsonic",
+    "outlet": "BCOutflowSubsonic",
+    "periodic_left": "BCGeneral",
+    "periodic_right": "BCGeneral",
+}
+STATOR_MESH_SIZE_KEYS = ("blade_size", "domain_size", "y_plus", "num_layers", "growth_ratio",
+                         "transition_ratio")
+
+
+def _stator_mesh_radius(mesh, span):
+    return mesh["r_hub"] + float(span or 0.0) * (mesh["r_shroud"] - mesh["r_hub"])
+
+
+@app.callback(
+    *(Output(f"mesh_{key}", "value") for key in STATOR_MESH_SIZE_KEYS),
+    Output("stator-mesh-store", "data"),
+    Input("stator-sizing-store", "data"),
+)
+def _prefill_stator_mesh_sizes(sizing_result):
+    """New sizing -> sizes scaled to its pitch, and any old mesh is stale."""
+    if not sizing_result:
+        return (None,) * (len(STATOR_MESH_SIZE_KEYS) + 1)
+    from turbo_moc.meshing.stator_mesh_2d import default_mesh_sizes
+
+    sizes = default_mesh_sizes(sizing_result["scaled_blade"]["pitch"])
+    return (*(float(f"{sizes[key]:.4g}") for key in STATOR_MESH_SIZE_KEYS), None)
+
+
+@app.callback(
+    Output("stator-mesh-store", "data", allow_duplicate=True),
+    Output("stator-mesh-status", "children"),
+    Output("stator-mesh-info-table", "children"),
+    Input("generate-stator-mesh-btn", "n_clicks"),
+    State("stator-sizing-store", "data"),
+    State("result-store", "data"),
+    *(State(f"mesh_{key}", "value") for key in STATOR_MESH_SIZE_KEYS),
+    State("stator_mesh_topology", "value"),
+    State("flow-domain-store", "data"),
+    background=True,
+    manager=background_callback_manager,
+    running=[
+        (Output("generate-stator-mesh-btn", "disabled"), True, False),
+        (Output("generate-stator-mesh-btn", "children"), "Meshing... (Gmsh)", "Generate mesh"),
+    ],
+    prevent_initial_call=True,
+)
+def run_stator_mesh(n_clicks, sizing_result, nozzle_data, blade_size, domain_size, y_plus,
+                    num_layers, growth_ratio, transition_ratio, topology, flow_domain):
+    """Gmsh runs in the background worker process, never in the Dash server."""
+    red = {"color": "#b00020"}
+    if not sizing_result:
+        return None, html.Div("Run Phase 2 (stator design, 3D) sizing first.", style=red), None
+    if not nozzle_data:
+        return None, html.Div("Run Phase 1 first: the y+ estimate needs the nozzle expansion.",
+                              style=red), None
+    values = (blade_size, domain_size, y_plus, num_layers, growth_ratio, transition_ratio)
+    if any(value is None or value <= 0 for value in values) or growth_ratio <= 1:
+        return None, html.Div("All mesh inputs must be positive and the growth ratio > 1.",
+                              style=red), None
+    try:
+        from turbo_moc.meshing.stator_mesh_2d import mesh_sized_stator
+        from turbo_moc.meshing.wall_spacing import (
+            blade_chord_mm, estimate_first_layer_height, inflation_stack)
+
+        blade = sizing_result["scaled_blade"]
+        sizes = dict(zip(STATOR_MESH_SIZE_KEYS, map(float, values)))
+        sizes["num_layers"] = int(round(sizes["num_layers"]))
+        wall = estimate_first_layer_height(nozzle_data, blade_chord_mm(blade), sizes["y_plus"])
+        sizes["first_height"] = wall["first_height_mm"]
+        thickness, last_height = inflation_stack(sizes["first_height"], sizes["growth_ratio"],
+                                                 sizes["num_layers"])
+        mesh = mesh_sized_stator(blade, sizes, passage=flow_domain, topology=topology)
+    except Exception as e:
+        return None, html.Div(f"Meshing failed: {e}", style=red), None
+
+    mesh.update(r_hub=float(sizing_result["r_hub"]), r_shroud=float(sizing_result["r_shroud"]),
+                n_blades=int(sizing_result["n_blades"]))
+    stats = mesh["statistics"]
+    n_cells = sum(stats["cells"].values())
+    throat = float(blade["throat_opening"])
+    table = make_table([
+        {"Quantity": "Topology", "Value": mesh["topology"], "Unit": "-"},
+        {"Quantity": "Cells", "Value": f"{n_cells:,}", "Unit": "-"},
+        {"Quantity": "Quadrilateral fraction", "Value": f"{stats['quadrilateral_fraction']:.1%}", "Unit": "-"},
+        {"Quantity": "Min scaled Jacobian", "Value": f"{stats['minimum_scaled_jacobian']:.3f}", "Unit": "-"},
+        {"Quantity": f"First layer height (y+ = {sizes['y_plus']:g})",
+         "Value": f"{sizes['first_height'] * 1e3:.3f}", "Unit": "µm"},
+        {"Quantity": "Re (chord, most sheared station)", "Value": f"{wall['reynolds']:.3g}", "Unit": "-"},
+        {"Quantity": "Friction velocity", "Value": f"{wall['friction_velocity']:.3f}", "Unit": "m/s"},
+        {"Quantity": "Viscosity (most sheared station)", "Value": f"{wall['viscosity']:.3e}", "Unit": "Pa s"},
+        {"Quantity": "Inflation layers", "Value": str(sizes["num_layers"]), "Unit": "-"},
+        {"Quantity": "Inflation stack (hub)", "Value": f"{thickness:.4f}", "Unit": "mm"},
+        {"Quantity": "Last layer height", "Value": f"{last_height * 1e3:.2f}", "Unit": "µm"},
+        {"Quantity": "Periodic node pairs", "Value": str(stats["periodic_node_pairs"]), "Unit": "-"},
+        {"Quantity": "Pitch (hub)", "Value": f"{mesh['pitch']:.4f}", "Unit": "mm"},
+    ], ["Quantity", "Value", "Unit"])
+    notes = [html.Div(
+        f"Mesh generated: {n_cells:,} cells. Off the hub the section is the hub mesh stretched "
+        f"pitchwise by r/r_hub (up to {mesh['r_shroud'] / mesh['r_hub']:.3f} at the shroud), so "
+        f"wall-normal layer heights grow by up to that factor.", style={"color": "#1a7a1a"})]
+    if wall["viscosity_model"].startswith("Chung"):
+        notes.append(html.Div(f"Viscosity: {wall['viscosity_model']}; the y+ estimate is still within "
+                              f"its usual ~2x accuracy.", style={"color": "#666", "fontSize": "12px"}))
+    if mesh.get("fallback_reason"):
+        notes.append(html.Div(f"Structured mesh not possible for this design "
+                              f"({mesh['fallback_reason']}); the unstructured mesh was used instead.",
+                              style={"color": "#b36b00", "fontWeight": "600"}))
+    if thickness > 0.25 * throat:
+        notes.append(html.Div(f"Inflation stack ({thickness:.3f} mm) exceeds 25% of the throat "
+                              f"({throat:.3f} mm): reduce the layers or the growth ratio.",
+                              style={"color": "#b36b00", "fontWeight": "600"}))
+    return mesh, html.Div(notes), table
+
+
+def _segments_xy(points, pairs):
+    """NaN-separated x/y arrays drawing each node pair as one line segment."""
+    pairs = np.asarray(pairs, dtype=int) - 1
+    xs = np.full(3 * len(pairs), np.nan)
+    ys = np.full(3 * len(pairs), np.nan)
+    xs[0::3], xs[1::3] = points[pairs[:, 0], 0], points[pairs[:, 1], 0]
+    ys[0::3], ys[1::3] = points[pairs[:, 0], 1], points[pairs[:, 1], 1]
+    return xs, ys
+
+
+def _unrolled_mesh_figure(mesh, points, radius, span):
+    pairs = np.array([(a, b) for cell in mesh["cells"] for a, b in zip(cell, cell[1:] + cell[:1])])
+    pairs = np.unique(np.sort(pairs, axis=1), axis=0)
+    fig = go.Figure()
+    xs, ys = _segments_xy(points, pairs)
+    fig.add_trace(go.Scattergl(x=xs, y=ys, mode="lines", line=dict(color="#f39c12", width=0.6),
+                               hoverinfo="skip", name="cells"))
+    colors = {"blade": "#222222", "periodic_left": "#3d5a80", "periodic_right": "#3d5a80",
+              "inlet": "#2a9d8f", "outlet": "#e76f51"}
+    for name, edges in mesh["named_edges"].items():
+        xs, ys = _segments_xy(points, [edge[:2] for edge in edges])
+        fig.add_trace(go.Scattergl(x=xs, y=ys, mode="lines", line=dict(color=colors.get(name, "#000"), width=2),
+                                   hoverinfo="skip", name=name))
+    pitch = 2.0 * np.pi * radius / mesh["n_blades"]
+    fig.update_layout(
+        title=f"Unrolled section, span {float(span or 0):.2f}: r = {radius:.2f} mm, pitch = {pitch:.3f} mm",
+        xaxis_title="Pitchwise r·θ (mm)", yaxis_title="Axial z (mm)",
+        yaxis=dict(scaleanchor="x", scaleratio=1),
+        margin=dict(l=50, r=10, t=40, b=40), uirevision="stator-mesh",
+        legend=dict(orientation="h", y=-0.12),
+    )
+    return fig
+
+
+@app.callback(
+    Output("stator-mesh-view", "children"),
+    Input("stator-mesh-store", "data"),
+    Input("stator_mesh_span", "value"),
+    Input("stator_mesh_mode", "value"),
+    State("stator-sizing-store", "data"),
+)
+def _render_stator_mesh(mesh, span, mode, sizing_result):
+    if not mesh:
+        return _vtk_placeholder("Generate a 2D mesh to see it here.")
+    from turbo_moc.meshing.stator_mesh_2d import section_coordinates
+
+    radius = _stator_mesh_radius(mesh, span)
+    points = section_coordinates(mesh["xy"], mesh["r_hub"], radius, mode)
+    if mode == "unrolled":
+        return dcc.Graph(figure=_unrolled_mesh_figure(mesh, points, radius, span),
+                         style={"height": "100%", "width": "100%"}, config={"displaylogo": False})
+
+    if not DASH_VTK_AVAILABLE:
+        return _vtk_placeholder("dash-vtk is not installed -- 3D view unavailable.")
+    import vtk
+
+    vtk_points = vtk.vtkPoints()
+    for p in points:
+        vtk_points.InsertNextPoint(*p)
+    polys = vtk.vtkCellArray()
+    for cell in mesh["cells"]:
+        polys.InsertNextCell(len(cell))
+        for node in cell:
+            polys.InsertCellPoint(node - 1)
+    surface = vtk.vtkPolyData()
+    surface.SetPoints(vtk_points)
+    surface.SetPolys(polys)
+    children = [dash_vtk.GeometryRepresentation(
+        children=[dash_vtk.Mesh(state=to_mesh_state(surface))],
+        property={"representation": 1, "color": [0.95, 0.55, 0.1], "lineWidth": 1},
+        showCubeAxes=True,
+        cubeAxesStyle={"axisLabels": ["X [mm]", "Y [mm]", "Z (axial) [mm]"]},
+    )]
+    if sizing_result:
+        try:
+            from turbo_moc.geometry import export_annular_blade_stl
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                stl_path = os.path.join(tmpdir, "blade.stl")
+                export_annular_blade_stl(
+                    sizing_result["scaled_blade"], sizing_result["r_hub"], sizing_result["r_shroud"],
+                    stl_path, n_blades=int(sizing_result["n_blades"]), flare="pitch_scale",
+                    source="stator",
+                )
+                reader = vtk.vtkSTLReader()
+                reader.SetFileName(stl_path)
+                reader.Update()
+                solid_state = to_mesh_state(_triangulate_vtk(vtk, reader.GetOutput()))
+            children.insert(0, dash_vtk.GeometryRepresentation(
+                children=[dash_vtk.Mesh(state=solid_state)],
+                property={"color": [0.55, 0.63, 0.75], "opacity": 0.45, "interpolation": "Phong"},
+            ))
+        except ImportError:
+            pass
+    return html.Div(
+        [
+            html.Div(f"Mesh on the cylinder r = {radius:.2f} mm (span {float(span or 0):.2f}), "
+                     f"with the stator solid (one blade).",
+                     style={"position": "absolute", "top": "8px", "left": "8px", "fontSize": "12px",
+                            "color": "#666", "zIndex": 1, "backgroundColor": "rgba(255,255,255,0.85)",
+                            "padding": "2px 8px", "borderRadius": "4px"}),
+            dash_vtk.View(background=[0.93, 0.95, 0.97], style={"height": "100%", "width": "100%"},
+                          children=children),
+        ],
+        style={"position": "relative", "height": "100%", "width": "100%"},
+    )
+
+
+@app.callback(
+    Output("download-stator-mesh-btn", "disabled"),
+    Input("stator_mesh_mode", "value"),
+)
+def _toggle_stator_mesh_download(mode):
+    # A mesh on the cylinder is a curved 3D surface, not a 2D CFD mesh.
+    return mode != "unrolled"
+
+
+@app.callback(
+    Output("download-stator-mesh", "data"),
+    Output("stator-mesh-download-status", "children"),
+    Input("download-stator-mesh-btn", "n_clicks"),
+    State("stator-mesh-store", "data"),
+    State("stator_mesh_span", "value"),
+    prevent_initial_call=True,
+)
+def download_stator_mesh_cgns(n_clicks, mesh, span):
+    if not mesh:
+        return dash.no_update, html.Div("Generate a mesh first.", style={"color": "#b00020"})
+    from turbo_moc.meshing.stator_mesh_2d import section_coordinates, write_fluent_cgns_2d
+
+    radius = _stator_mesh_radius(mesh, span)
+    xy = section_coordinates(mesh["xy"], mesh["r_hub"], radius, "unrolled")
+    periodic = (mesh["periodic"]["current"], mesh["periodic"]["donor"])
+    settings = {"length_scale": 0.001, "boundary_types": STATOR_MESH_BOUNDARY_TYPES}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        path = os.path.join(tmpdir, "stator_mesh_2d.cgns")
+        write_fluent_cgns_2d(path, xy, mesh["cells"], mesh["named_edges"], periodic, settings)
+        with open(path, "rb") as f:
+            content = f.read()
+    filename = f"stator_mesh_2d_span{float(span or 0):.2f}.cgns"
+    return dcc.send_bytes(content, filename), html.Div(
+        f"CGNS ready: r = {radius:.2f} mm, metres, periodic translation "
+        f"{2.0 * np.pi * radius / mesh['n_blades']:.4f} mm.", style={"color": "#1a7a1a"})
+
+
 @app.callback(
     Output("cp_index", "options"),
     Output("cp_index", "value"),
@@ -1859,11 +2172,10 @@ def manage_blade_reference(pin_clicks, clear_clicks, base_blade, edited_blade):
     Input("n_blades_plot", "value"),
     Input("cp_index", "value"),
     Input("step-export-target", "value"),
-    Input("passage_stator_inlet_chords", "value"),
-    Input("passage_stator_outlet_chords", "value"),
+    Input("flow-domain-store", "data"),
 )
 def update_blade_plot(base_blade, edited_blade, reference, n_blades, cp_index,
-                        step_export_target, inlet_chords, outlet_chords):
+                        step_export_target, flow_domain):
     blade = _effective_blade(base_blade, edited_blade)
     if not blade:
         return go.Figure()
@@ -1871,21 +2183,35 @@ def update_blade_plot(base_blade, edited_blade, reference, n_blades, cp_index,
     fig = turbo_moc.plotly.plot_blade(blade, n_blades=int(n_blades) if n_blades else 2,
                                   highlight_cp=cp_index, reference=ref)
     if step_export_target == "passage":
-        # Preview of the passage this blade's own "Fluid domain (passage)"
-        # STEP export would produce -- same helper (and the same inlet/
-        # outlet-chord fields) as the actual export, so what's shown here
-        # can never disagree with what gets downloaded. mirror=False: this
-        # plot is the blade's own natural (unmirrored) orientation, unlike
-        # Phase 4's cascade view.
-        band_x, band_y = _stator_passage_band_xy(blade, inlet_chords, outlet_chords, mirror=False)
+        # The same domain the STEP export writes and the 2D mesh meshes.
+        try:
+            outline = flow_domain_outline(stator_flow_domain(blade, flow_domain))
+        except ValueError as e:
+            fig.add_annotation(text=f"Fluid domain unavailable: {e}", showarrow=False,
+                               xref="paper", yref="paper", x=0.5, y=1.05)
+            return fig
         fig.add_trace(go.Scatter(
-            x=band_x + [band_x[0]], y=band_y + [band_y[0]],
+            x=outline[:, 0], y=outline[:, 1],
             mode="lines", fill="toself",
             line=dict(color="black", width=1.5, dash="dot"),
             fillcolor="#2ecc71", opacity=0.25,
             name="Fluid domain", showlegend=True, hoverinfo="skip",
         ))
     return fig
+
+
+@app.callback(
+    Output("flow-domain-store", "data"),
+    Output("stator-mesh-store", "data", allow_duplicate=True),
+    Input("passage_stator_inlet_chords", "value"),
+    Input("passage_stator_outlet_chords", "value"),
+    prevent_initial_call=True,
+)
+def _update_flow_domain(inlet_chords, outlet_chords):
+    """New extents -> new shared domain; an existing mesh of the old domain is stale."""
+    if not inlet_chords or not outlet_chords or inlet_chords <= 0 or outlet_chords <= 0:
+        return dash.no_update, dash.no_update
+    return {"inlet_chords": float(inlet_chords), "outlet_chords": float(outlet_chords)}, None
 
 
 @app.callback(
@@ -1912,14 +2238,11 @@ def download_blade_plot(n_clicks, base_blade, edited_blade, reference, fmt, n_bl
 
 
 @app.callback(
-    Output("step-export-blade-fields", "style"),
     Output("step-export-passage-fields", "style"),
     Input("step-export-target", "value"),
 )
 def _toggle_step_export_target(target):
-    if target == "passage":
-        return {"display": "none"}, {}
-    return {}, {"display": "none"}
+    return {} if target == "passage" else {"display": "none"}
 
 
 @app.callback(
@@ -1929,65 +2252,38 @@ def _toggle_step_export_target(target):
     State("blade-store", "data"),
     State("blade-edited-store", "data"),
     State("step-export-target", "value"),
-    State("step-kind", "value"),
-    State("extrude_length", "value"),
-    State("passage_stator_inlet_chords", "value"),
-    State("passage_stator_outlet_chords", "value"),
+    State("flow-domain-store", "data"),
     prevent_initial_call=True,
 )
-def download_step(n_clicks, base_blade, edited_blade, target, kind, extrude_length,
-                    inlet_chords, outlet_chords):
+def download_step(n_clicks, base_blade, edited_blade, target, flow_domain):
+    """2D face only: the 3D blade comes from Phase 2's 3D tab (sized annular
+    solid), so an arbitrary flat extrusion here no longer has a use. The
+    fluid domain is written from the mesher's own CAD (stator_flow_domain)."""
     blade = _effective_blade(base_blade, edited_blade)
     if not blade:
         return dash.no_update, html.Div("Compute a blade first.", style={"color": "#b00020"})
 
-    cad_missing = html.Div(
-        "cadquery is not installed -- STEP export unavailable "
-        "(see environment.yaml / pyproject.toml's 'cad' extra).",
-        style={"color": "#b00020"},
-    )
-
-    if target == "passage":
-        extrude_length = float(extrude_length or 0.0)
-        # 0 (or unset) thickness -> face only, matching export_blade_step's
-        # own solid_path=None convention below: a 0-length extrusion isn't
-        # a valid CAD solid, and skipping it is exactly what "just give me
-        # the surface" means anyway, not an error to route around.
-        want_solid = extrude_length > 0.0
-        try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                from turbo_moc.geometry import extract_axial_passage_2d
-                face_path = os.path.join(tmpdir, "face.step")
-                solid_path = os.path.join(tmpdir, "solid.step") if want_solid else None
-                extract_axial_passage_2d(
-                    blade, blade["pitch"], face_path, solid_path,
-                    extrude_length=extrude_length, source="stator",
-                    inlet_chords=float(inlet_chords or 1.0),
-                    outlet_chords=float(outlet_chords or 6.0),
-                )
-                target_path = solid_path if want_solid else face_path
-                with open(target_path, "rb") as f:
-                    content = f.read()
-        except ImportError:
-            return dash.no_update, cad_missing
-        fname = "stator_passage_solid.step" if want_solid else "stator_passage_face.step"
-        return dcc.send_bytes(content, fname), html.Div(
-            "Fluid domain STEP ready.", style={"color": "#1a7a1a"})
-
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            from turbo_moc.geometry import export_blade_step
-            face_path = os.path.join(tmpdir, "blade_face.step")
-            solid_path = os.path.join(tmpdir, "blade_solid.step") if kind == "solid" else None
-            export_blade_step(blade, face_path, solid_path, extrude_length=extrude_length or 1.0)
-            target_path = solid_path if kind == "solid" else face_path
-            with open(target_path, "rb") as f:
+            face_path = os.path.join(tmpdir, "face.step")
+            if target == "passage":
+                export_flow_domain_step(blade, face_path, flow_domain)
+                fname, message = "stator_flow_domain.step", "Fluid domain STEP ready."
+            else:
+                from turbo_moc.geometry import export_blade_step
+                export_blade_step(blade, face_path, None)
+                fname, message = "stator_blade_face.step", "Blade STEP ready."
+            with open(face_path, "rb") as f:
                 content = f.read()
     except ImportError:
-        return dash.no_update, cad_missing
-
-    fname = "stator_blade_solid.step" if kind == "solid" else "stator_blade_face.step"
-    return dcc.send_bytes(content, fname), html.Div("STEP file ready.", style={"color": "#1a7a1a"})
+        return dash.no_update, html.Div(
+            "cadquery is not installed -- blade STEP export unavailable "
+            "(see environment.yaml / pyproject.toml's 'cad' extra).",
+            style={"color": "#b00020"},
+        )
+    except Exception as e:
+        return dash.no_update, html.Div(f"STEP export failed: {e}", style={"color": "#b00020"})
+    return dcc.send_bytes(content, fname), html.Div(message, style={"color": "#1a7a1a"})
 
 
 # --------------------------------------------------------------------------
@@ -2215,10 +2511,10 @@ app.clientside_callback(
 )
 def _update_rotor_sizing_annulus_readout(stator_sizing):
     if not stator_sizing:
-        return html.Div("Run Phase 3 (stator sizing) first -- the rotor shares its annulus.",
+        return html.Div("Run Phase 2 (stator design, 3D) first -- the rotor shares its annulus.",
                           style={"color": "#b00020"})
     return html.Div(
-        f"Annulus from Phase 3: r_hub={stator_sizing['r_hub']:.2f} mm, "
+        f"Annulus from Phase 2: r_hub={stator_sizing['r_hub']:.2f} mm, "
         f"r_shroud={stator_sizing['r_shroud']:.2f} mm.")
 
 
@@ -2234,10 +2530,10 @@ def _update_rotor_sizing_annulus_readout(stator_sizing):
 )
 def run_rotor_sizing(n_clicks, rotor_data, stator_sizing, n_blades):
     if not rotor_data:
-        return None, html.Div("Run Phase 4 first -- no rotor blade to size.",
+        return None, html.Div("Run Phase 3 (rotor design, 2D) first -- no rotor blade to size.",
                                 style={"color": "#b00020"}), None
     if not stator_sizing:
-        return None, html.Div("Run Phase 3 (stator sizing) first -- the rotor "
+        return None, html.Div("Run Phase 2 (stator design, 3D) first -- the rotor "
                                 "shares its annulus.", style={"color": "#b00020"}), None
 
     try:
@@ -2362,7 +2658,7 @@ def run_radial_rotor(n_clicks, rotor_data, r1, r2, n_blades, depth):
     from turbo_moc.geometry import implied_n_blades_radial, mapped_pitch_width
 
     if not rotor_data:
-        return None, html.Div("Run Phase 4 first -- no rotor blade to wrap.",
+        return None, html.Div("Run Phase 3 (rotor design, 2D) first -- no rotor blade to wrap.",
                                 style={"color": "#b00020"}), None
 
     r1, r2 = float(r1), float(r2)
@@ -2552,8 +2848,8 @@ def _cascade_wrap_mode(stator_wrap, rotor_wrap):
 
 def _cascade_missing_msg(mode):
     if mode == "radial":
-        return "Run Phase 3 and Phase 5 \"Compute radial wrap\" first to see the radial assembly."
-    return "Run Phase 3 and Phase 5 sizing first to see the assembly."
+        return "Run Phase 2 (stator design) and Phase 3 (rotor design) first, with \"Compute radial wrap\"."
+    return "Run Phase 2 (stator design) and Phase 3 (rotor design) first."
 
 
 def _place_radial_rotor(stator_radial, rotor_radial, gap):
@@ -2628,9 +2924,9 @@ def _update_cascade_readout(stator_sizing, rotor_sizing, stator_wrap, rotor_wrap
 
     missing = []
     if not stator_sizing:
-        missing.append("Phase 3 (stator sizing)")
+        missing.append("Phase 2 (stator design)")
     if not rotor_sizing:
-        missing.append("Phase 5 (rotor sizing)")
+        missing.append("Phase 3 (rotor design)")
     if missing:
         return html.Div(f"Run {' and '.join(missing)} first.", style={"color": "#b00020"})
     return html.Div(
@@ -2716,7 +3012,7 @@ def _update_cascade_2d_plot(stator_sizing, rotor_sizing, gap, n_stator, n_rotor,
                                       int(n_stator or 1), int(n_rotor or 1))
 
     if not stator_sizing or not rotor_sizing:
-        fig.update_layout(annotations=[dict(text="Run Phase 3 and Phase 5 sizing first.",
+        fig.update_layout(annotations=[dict(text="Run Phase 2 (stator design) and Phase 3 (rotor design) first.",
                                               showarrow=False, font=dict(size=14))])
         return fig
 
@@ -2888,10 +3184,10 @@ def download_cascade_stator_step(n_clicks, stator_sizing, stator_wrap, rotor_wra
     if mode is None:
         return dash.no_update, html.Div(_MIXED_WRAP_MSG, style={"color": "#b00020"})
     if mode == "radial" and not stator_radial:
-        return dash.no_update, html.Div("Run Phase 3 \"Compute radial wrap\" first.",
+        return dash.no_update, html.Div("Run Phase 2 (stator design) first, with \"Compute radial wrap\".",
                                         style={"color": "#b00020"})
     if mode == "axial" and not stator_sizing:
-        return dash.no_update, html.Div("Run Phase 3 (stator sizing) first.", style={"color": "#b00020"})
+        return dash.no_update, html.Div("Run Phase 2 (stator design) first.", style={"color": "#b00020"})
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             from turbo_moc.geometry import export_annular_blade_step, export_radial_blade_step
@@ -2935,10 +3231,10 @@ def download_cascade_rotor_step(n_clicks, stator_sizing, rotor_sizing, gap, stat
     if mode is None:
         return dash.no_update, html.Div(_MIXED_WRAP_MSG, style={"color": "#b00020"})
     if mode == "radial" and (not stator_radial or not rotor_radial):
-        return dash.no_update, html.Div("Run Phase 3 and Phase 5 \"Compute radial wrap\" first.",
+        return dash.no_update, html.Div("Run Phase 2 (stator design) and Phase 3 (rotor design) first, with \"Compute radial wrap\".",
                                         style={"color": "#b00020"})
     if mode == "axial" and (not stator_sizing or not rotor_sizing):
-        return dash.no_update, html.Div("Run Phase 3 and Phase 5 sizing first.", style={"color": "#b00020"})
+        return dash.no_update, html.Div("Run Phase 2 (stator design) and Phase 3 (rotor design) first.", style={"color": "#b00020"})
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             from turbo_moc.geometry import export_annular_blade_step, export_radial_blade_step

@@ -12,8 +12,16 @@ Set TURBO_MOC_EXAMPLE_SMOKE_TEST=1 to validate the app without starting the serv
 """
 
 import os
+import sys
+from pathlib import Path
 
-from turbo_moc.app import app
+# Running this file puts examples/ first on sys.path, where the examples/gmsh
+# folder would shadow the real gmsh package that turbo_moc.meshing imports.
+# Module level on purpose: the app's background worker re-imports this file.
+_EXAMPLES_DIR = Path(__file__).resolve().parent
+sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != _EXAMPLES_DIR]
+
+from turbo_moc.app import app  # noqa: E402
 
 if __name__ == "__main__":
     if os.environ.get("TURBO_MOC_EXAMPLE_SMOKE_TEST") == "1":
