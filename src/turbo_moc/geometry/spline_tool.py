@@ -4,13 +4,14 @@ turbo_moc.geometry.blade to reduce a dense blade-profile polyline to a small set
 of control points (for CAD/optimization use) and reconstruct a smooth
 curve from them.
 
-Ported from opt_framework/test_2/01_geometry_parametrization/utils/
-spline_gen.py (BSplineTool) verbatim -- self-contained (numpy + scipy.linalg
-only), no changes to the algorithm itself.
+Originally ported from opt_framework/test_2/01_geometry_parametrization/utils/
+spline_gen.py (BSplineTool). Basis assembly/evaluation use SciPy's compiled routines;
+parameterization, normal-equation fitting, and endpoint conventions are retained.
 """
 
 import numpy as np
 from scipy import linalg
+from scipy.interpolate import BSpline
 
 __all__ = ["BSplineTool"]
 
@@ -94,10 +95,7 @@ class BSplineTool:
         ])
 
         # 3. Build Linear System A*x = B solved with Cholesky
-        N_mat = np.zeros((P, num_cp))
-        for i in range(P):
-            for j in range(num_cp):
-                N_mat[i, j] = self._get_basis(j + 1, self.n, w[i], knots)
+        N_mat = self._basis_matrix(w, knots)
 
         A = N_mat.T @ N_mat
         B = N_mat.T @ data_points
@@ -109,13 +107,9 @@ class BSplineTool:
 
     # The following employs the backward approach while fixing the start and end points
     def backward_fixed(self, data_points, num_cp):
-        P_len = len(data_points)
         w, knots = self._get_params_and_knots(data_points, num_cp)
 
-        N_mat = np.zeros((P_len, num_cp))
-        for i in range(P_len):
-            for j in range(num_cp):
-                N_mat[i, j] = self._get_basis(j + 1, self.n, w[i], knots)
+        N_mat = self._basis_matrix(w, knots)
 
         # Force d0 and dL to match first and last data points
         d0, dL = data_points[0], data_points[-1]
@@ -136,13 +130,16 @@ class BSplineTool:
         Generates the curve from control points (Forward Method).
         """
         u_range = np.linspace(knots[self.n], knots[-self.n - 1], num_points)
-        curve = []
-        for u in u_range:
-            if u == knots[-self.n - 1]:
-                u -= 1e-10
-            point = np.zeros(2)
-            for j in range(len(control_points)):
-                basis = self._get_basis(j + 1, self.n, u, knots)
-                point += np.array(control_points[j]) * basis
-            curve.append(point)
-        return np.array(curve)
+        # Preserve the legacy upper-end sampling so CAD endpoints and existing
+        # fitted contours do not change during this performance refactor.
+        u_range[u_range == knots[-self.n - 1]] -= 1e-10
+        return BSpline(knots, np.asarray(control_points), self.n)(u_range)
+
+    def _basis_matrix(self, parameters, knots):
+        """Compiled basis evaluation with the historical half-open endpoint."""
+        matrix = BSpline.design_matrix(parameters, knots, self.n).toarray()
+        # The recursive reference returns zero for all bases at the upper knot.
+        # Retain that convention in both fit methods (including unconstrained
+        # fits), rather than changing the least-squares problem accidentally.
+        matrix[np.asarray(parameters) == knots[-self.n - 1]] = 0.0
+        return matrix

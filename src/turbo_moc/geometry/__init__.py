@@ -1,3 +1,10 @@
+"""Blade geometry and coordinate mappings.
+
+The canonical design pipeline lives in geometry_2d, geometry_3d,
+meridional_channel and linear_cascade. Shared spline/section fitting remains
+in blade and spline_tool. Historical public names below resolve to preserved
+deprecated implementations so existing clients and the comparison app run.
+"""
 from .annular import wrap_blade_annular
 from .blade import (
     export_annular_blade_step,
