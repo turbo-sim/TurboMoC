@@ -15,6 +15,8 @@ dependencies = [
     "scipy",
     "matplotlib",
     "gmsh>=4.12,<5.0",
+    "pyvista>=0.46,<1.0",
+    "dash-vtk>=0.0.9,<1.0",
     "PyYAML>=6.0,<7.0",
     "pandas",
     "plotly",
@@ -23,16 +25,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mesh-viz = ["pyvista>=0.46,<1.0", "dash-vtk>=0.0.9,<1.0"]
 # Optional STEP export support. CadQuery may instead be installed through the
 # Conda environment defined in environment.yaml.
-cad = ["cadquery", "dash-vtk"]
+cad = ["cadquery"]
 # Fluent automation is opt-in: poetry install -E fluent / pip install .[fluent].
 # Install the companion barotropy checkout separately for fluid-model generation.
-fluent = ["ansys-fluent-core>=0.38,<0.43"]
+fluent = ["ansys-fluent-core[reader]>=0.38,<0.43"]
 
 [project.scripts]
 turbo_moc-app = "turbo_moc.app:main"
+turbo_moc-design-app = "turbo_moc.apps.app:main"
 
 [tool.poetry.group.dev.dependencies]
 bibtexparser = ">=1.4,<2"
@@ -51,6 +53,9 @@ bump-my-version = "^1.5.1"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"turbo_moc.apps.app" = ["assets/*.js", "assets/*.css", "assets/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

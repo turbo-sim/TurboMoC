@@ -2,11 +2,15 @@
 
 **From a real-fluid supersonic nozzle to a meshed turbine stage, in one Python package.**
 
-TurboMoC designs supersonic nozzles with the method of characteristics (MoC) using real-fluid
-thermodynamics, including two-phase flashing and condensing expansions under the Homogeneous
-Equilibrium Model (HEM). The nozzle becomes a stator blade, a supersonic vortex rotor completes the
-stage, and both rows are sized in 3D, assembled into axial or radial stages, meshed for CFD and
-exported to CAD and Fluent. Every step is available from Python scripts and from an interactive app.
+TurboMoC designs supersonic nozzles with the method of characteristics (MoC)
+using real-fluid thermodynamics, including two-phase flashing and condensing
+expansions under the Homogeneous Equilibrium Model (HEM). Its current design
+app turns a MoC stator profile into a linear cascade or an axial/radial row,
+then generates independent section and volume meshes with quality reports
+and CGNS export. The Python library and preserved preceding app also provide
+vortex rotor design, sizing, CAD and stage-assembly tools. These legacy tools
+have not yet been integrated into the row-based interface; its rotor controls
+remain explicit planning placeholders.
 
 📦 **PyPI package**: [https://pypi.org/project/turbo_moc/](https://pypi.org/project/turbo_moc/)
 
@@ -36,7 +40,7 @@ exported to CAD and Fluent. Every step is available from Python scripts and from
 
 ![Stator blade derived from the nozzle wall and a supersonic vortex rotor blade](docs/images/readme_blades.png)
 
-### 3D rows and stages
+### Sizing, CAD and stages in the preserved workflow
 
 - Size the stator for a mass flow and blade count; the rotor shares its annulus.
 - **Axial** rows wrap onto the annulus between hub and shroud; **radial** rows use an
@@ -46,23 +50,39 @@ exported to CAD and Fluent. Every step is available from Python scripts and from
 
 ### Meshing for CFD
 
-- **2D blade-to-blade meshes** with [Gmsh](https://gmsh.info/): structured O-H (TurboGrid-like)
-  or quad-dominant unstructured passages, with inflation layers sized from a target y+ estimated
-  on the actual expansion (mixture viscosity for two-phase flows).
-- **3D meshes** of stator and rotor passages, axial or radial: the 2D section swept or extruded
-  into hexahedra/prisms, matching the exported CAD solid, with y+-based endwall layers and
-  rotational periodicity.
-- CGNS (Fluent-ready) and Gmsh exports; automatic quality checks and repair of folded cells.
+- The canonical pipeline generates a periodic 2D reference mesh with Gmsh,
+  inflation layers and controlled core grading, then deforms and sweeps its
+  shared connectivity into hexahedral/prismatic volumes.
+- General meridional mapping serves axial/radial stators. Linear cascades use
+  physical section coordinates and translational extrusion, with both true
+  2D export and an optional one-element-span volume.
+- Geometry and meshing are separate actions; reference/volume validity,
+  periodicity, quality and CGNS connectivity are audited before publication.
+- The preserved legacy workflow retains structured O-H topology, sizing from
+  target $y^+$, stator/rotor axial/radial meshes and original guarded cell
+  repairs. Those capabilities remain available under `turbo_moc.deprecated`;
+  they are not silently activated in the canonical pipeline.
 
 ![Unstructured 2D passage mesh and the inflation layers at the trailing edge](docs/images/readme_mesh_2d.png)
 
 ### Interactive app and workflows
 
-- A Dash app takes you through the pipeline: nozzle → stator → rotor → 3D sizing and meshing →
-  stage assembly, with 3D views, and downloads that become available as each step is completed.
-- Scripted workflows in [`examples/`](examples): nozzle, stator and rotor design, Gmsh meshing
-  ([2D](examples/gmsh/readme.md), [3D](examples/gmsh_3D/readme.md)) and a
-  [Fluent case setup](examples/fluent/readme.md).
+- The current Dash app has **Geometry generation** and **Mesh generation**
+  workspaces, ordered row settings, shared machine views, selected-row
+  section/report views and a live terminal for local background jobs.
+- The preceding Nozzle/Stator/Rotor/Cascade app remains runnable through its
+  established entry point. Its diagnostics, reference tools, control-point
+  editing, sizing, CAD and rotor capabilities are preserved.
+- Thin scripted workflows and editable cases live under
+  [`examples/`](examples/readme.md):
+  [Gmsh 2D](examples/gmsh_2D/readme.md),
+  [Gmsh 3D](examples/gmsh_3D/readme.md) and
+  [Fluent 2D automation](examples/fluent_2D/readme.md).
+
+The [merging summary](z_information/merging_summary.md) records the canonical/deprecated
+module map, complete interface feature matrix and remaining integration work.
+The [teaching guide](z_information/theory_guide.md) derives the coordinate
+mapping, mesh deformation, connectivity and CGNS export.
 
 ## Installation instructions
 
@@ -112,10 +132,22 @@ poetry install --extras "cad fluent"
 ```
 
 The `fluent` extra installs the Python interface; Fluent must be installed and
-licensed separately. See the [Fluent workflow README](examples/fluent/readme.md)
+licensed separately. See the [Fluent workflow README](examples/fluent_2D/readme.md)
 for the companion barotropy installation and example configuration.
 
 Use `poetry run python` to run Python scripts in the Poetry environment.
+
+Gmsh, PyVista and Dash VTK are installed by default for the geometry/meshing app:
+
+```bash
+poetry install
+# Alternatively:
+python -m pip install -e .
+```
+
+Package promotion described here applies to this checkout; publishing a new
+PyPI release is a separate step. CAD and Fluent dependencies remain optional.
+
 
 ## Quick start
 
@@ -157,22 +189,64 @@ for nozzle, stator, and rotor design, including plots and coordinate exports.
 
 ## Interactive app
 
-Launch the app from your terminal:
+Launch the current row-based app:
+
+```bash
+turbo_moc-design-app
+# Equivalent Python entry point:
+python -m turbo_moc.apps.app
+# Initialize an editable case and choose writable output/port:
+python -m turbo_moc.apps.app --config examples/apps/cases/linear_stator.yaml --port 8053 --output-dir ./turbo_moc_output
+```
+
+An existing editable environment needs reinstallation to register the new
+`turbo_moc-design-app` console command. `python -m turbo_moc.apps.app` and the
+minimal example app launcher work immediately; run
+`python -m pip install -e .` to refresh console registration.
+
+For a Poetry installation, prefix commands with `poetry run`. Open the local
+URL printed in the terminal (port 8052 by default). **Geometry generation**
+shows the fitted section, meridional channel and capped 3D blade preview.
+**Mesh generation** combines section/span grids with the 3D boundary viewer
+and quality report. Compute MoC, generate 2D, generate 3D and export remain
+separate actions, with progress and live activity from background workers.
+
+Stator, Rotor and Stator + Rotor project modes retain independent row settings.
+The implemented stator supports linear/axial/radial mapping; combined linear
+mode is excluded. Rotor generation is disabled pending provider integration.
+The interface may show its planned meridional channel and axial/radial gap
+without fabricating a blade or a coupled CFD domain.
+
+Browser assets are installed resources; initialization defaults are Python
+values. Example app YAML files live under `examples/apps/cases/`. Installed
+app outputs go under `./output/` unless `--output-dir` or `TURBO_MOC_OUTPUT_DIR` chooses
+another writable root; no output is written into the installed package.
+Loading `--config` initializes settings rather than restoring previous jobs.
+See the [app implementation guide](src/turbo_moc/apps/app/readme.md).
+
+The preserved preceding app retains its established commands:
 
 ```bash
 turbo_moc-app
+python -m turbo_moc.app
 ```
 
-For a Poetry source installation, use `poetry run turbo_moc-app`. Open the local URL printed in
-the terminal. The phases follow the design pipeline:
+It retains Nozzle/Stator/Rotor/Cascade phases, nozzle diagnostics and result
+loading, blade editing, sizing/CAD, vortex rotor tools and legacy mesh options.
+Its implementation is `turbo_moc.deprecated.app`; the public `turbo_moc.app`
+path preserves compatibility. These commands do not launch the new interface.
 
-1. **Nozzle**: MoC design, property plots and the T-s diagram.
-2. **Stator**: blade parametrization (2D), then sizing, 3D wrap, and 2D/3D meshing.
-3. **Rotor**: vortex blade design (2D), then sizing, 3D wrap and 3D meshing.
-4. **Cascade**: axial or radial stage assembly and STEP export.
+## Package migration verification
 
-Long computations (MoC, meshing) run in the background, and each download button is enabled once
-its model is ready.
+The promoted implementation passes 112 canonical regressions and 32 migration
+checks, with additional overlapping numerical/legacy suites. The final wheel
+includes browser/default-case resources; fresh installed axial/linear jobs
+run outside the checkout without modifying package files. A real final-wheel
+Edge workflow passes 17 checks with zero exceptions, errors or warnings.
+Protected MoC/progress/reporting files remain byte-identical. See the
+[merging summary](z_information/merging_summary.md) for precise coverage and limits. Optional
+CadQuery acceptance, licensed Fluent execution and rotor integration remain
+separate work.
 
 ## Reproducing the figures
 
