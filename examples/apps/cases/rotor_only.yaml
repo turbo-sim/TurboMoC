@@ -1,0 +1,104 @@
+# Row geometry is in millimetres; rotor stagnation pressure [Pa], temperature [K].
+# Rotor Mach numbers and flow angles are in the relative frame.
+# Coupling uses the active upstream stator exit and the rotor midspan inlet radius.
+# The axial gap places the rotor after the farthest stator trailing edge.
+machine:
+  design_mode: rotor
+  geometry_type: axial
+workflow:
+  save_figures: true
+  show_gmsh: true
+  show_pyvista: true
+  log_level: INFO
+rows:
+- id: rotor_1
+  role: rotor
+  geometry:
+    parametrization_type: vortex
+    meridional_channel:
+      type: axial
+      hub_radius: 100.0
+      blade_height: 10.0
+      hub_chord: 20.0
+      tip_chord: 20.0
+      num_blades: 31
+    axial_interspace_mm: 0.0
+    rotor_design:
+      fluid_name: Novec649
+      P0_rel: 500000.0
+      T0_rel: 400.0
+      M_inlet: 1.5
+      M_outlet: 1.5
+      M_lower: 1.05
+      M_upper: 2.0
+      beta_inlet: 65.0
+      num_points: 60
+      le_te_ratio: 25.0
+    inlet_coupling:
+      mode: manual
+      rpm: 20716.71
+    flow_domain:
+      inlet_chords: 1.5
+      outlet_chords: 2.0
+      domain_shift_mode: auto
+      domain_shift: 0.0
+      inlet_axial_tangent: 0.35
+      inlet_blade_tangent: 0.35
+      outlet_blade_tangent: 0.15
+      outlet_axial_tangent: 0.55
+      num_points: 120
+  mesh:
+    show_gui: false
+    numerics:
+      terminal_output: true
+      verbosity: 2
+      blade_size: 0.25
+      domain_size: 1.0
+      curvature_elements: 50
+      algorithm: 6
+      recombine: true
+      recombination_algorithm: 1
+      smoothing_steps: 5
+      inflation_layers:
+        enabled: true
+        first_height: 0.03
+        growth_ratio: 1.2
+        thickness: 1.0
+      span_layers: 25
+      span_stretch: 1.5
+    matplotlib:
+      num_blades: 3
+      annotate_boundaries: true
+      mesh_color: orange
+      edge_color: black
+      domain_color: lightgrey
+      dpi: 500
+      rasterize_mesh: true
+    visualization:
+      section_edge_width: 0.35
+      volume_edge_width: 0.35
+    pyvista:
+      show_mesh_edges: true
+      surfaces:
+        blade: true
+        hub: true
+        shroud: false
+        inlet: false
+        outlet: false
+        periodic_left: false
+        periodic_right: false
+    cgns:
+      enabled: true
+      filename: rotor_mesh_3d.cgns
+      length_scale: 0.001
+      boundary_types:
+        blade: BCWallViscous
+        inlet: BCInflowSubsonic
+        outlet: BCOutflowSubsonic
+        periodic_left: BCGeneral
+        periodic_right: BCGeneral
+        hub: BCWallViscous
+        shroud: BCWallViscous
+  placement:
+    streamwise_offset_mm: 0.0
+    angular_phase_deg: 0.0
