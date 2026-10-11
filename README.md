@@ -189,22 +189,13 @@ for nozzle, stator, and rotor design, including plots and coordinate exports.
 
 ## Interactive app
 
-Launch the current row-based app:
+Launch the app:
 
 ```bash
 turbo_moc-design-app
-# Equivalent Python entry point:
-python -m turbo_moc.apps.app
-# Initialize an editable case and choose writable output/port:
-python -m turbo_moc.apps.app --config examples/apps/cases/linear_stator.yaml --port 8053 --output-dir ./turbo_moc_output
 ```
 
-An existing editable environment needs reinstallation to register the new
-`turbo_moc-design-app` console command. `python -m turbo_moc.apps.app` and the
-minimal example app launcher work immediately; run
-`python -m pip install -e .` to refresh console registration.
-
-For a Poetry installation, prefix commands with `poetry run`. Open the local
+For a Poetry installation, prefix the commands with `poetry run`. Open the local
 URL printed in the terminal (port 8052 by default). **Geometry generation**
 shows the fitted section, meridional channel and capped 3D blade preview.
 **Mesh generation** combines section/span grids with the 3D boundary viewer
@@ -224,34 +215,3 @@ another writable root; no output is written into the installed package.
 Loading `--config` initializes settings rather than restoring previous jobs.
 See the [app implementation guide](src/turbo_moc/apps/app/readme.md).
 
-The preserved preceding app retains its established commands:
-
-```bash
-turbo_moc-app
-python -m turbo_moc.app
-```
-
-It retains Nozzle/Stator/Rotor/Cascade phases, nozzle diagnostics and result
-loading, blade editing, sizing/CAD, vortex rotor tools and legacy mesh options.
-Its implementation is `turbo_moc.deprecated.app`; the public `turbo_moc.app`
-path preserves compatibility. These commands do not launch the new interface.
-
-## Package migration verification
-
-The promoted implementation passes 112 canonical regressions and 32 migration
-checks, with additional overlapping numerical/legacy suites. The final wheel
-includes browser/default-case resources; fresh installed axial/linear jobs
-run outside the checkout without modifying package files. A real final-wheel
-Edge workflow passes 17 checks with zero exceptions, errors or warnings.
-Protected MoC/progress/reporting files remain byte-identical. See the
-[merging summary](z_information/merging_summary.md) for precise coverage and limits. Optional
-CadQuery acceptance, licensed Fluent execution and rotor integration remain
-separate work.
-
-## Reproducing the figures
-
-The figures above are generated from the package itself:
-
-```bash
-poetry run python docs/images/make_readme_figures.py
-```
