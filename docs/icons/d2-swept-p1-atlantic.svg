@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="d2-swept-p1-atlantic-title d2-swept-p1-atlantic-desc">
+  <title id="d2-swept-p1-atlantic-title">TurboMoC: Swept / Atlantic</title>
+  <desc id="d2-swept-p1-atlantic-desc">A symmetric divergent nozzle with two crossing characteristic families. Stylized mathematical directions, not streamlines or a computed solution.</desc>
+  <defs>
+    <clipPath id="d2-swept-p1-atlantic-passage">
+      <path d="M56 237C152 237 198 183 288 161C350 146 402 141 456 141V371C402 371 350 366 288 351C198 329 152 275 56 275Z" />
+    </clipPath>
+  </defs>
+  <g fill="none" clip-path="url(#d2-swept-p1-atlantic-passage)" stroke-width="11">
+    <path d="M32 287.620L480 59.140M32 412.060L480 183.580" stroke="#008C83" />
+    <path d="M32 224.380L480 452.860M32 99.940L480 328.420" stroke="#BD842D" />
+  </g>
+  <g fill="#142D4E">
+    <path d="M56 213C145 213 191 160 281 138C346 122 400 117 456 117L456 141C402 141 350 146 288 161C198 183 152 237 56 237Z" />
+    <path d="M56 213C145 213 191 160 281 138C346 122 400 117 456 117L456 141C402 141 350 146 288 161C198 183 152 237 56 237Z" transform="translate(0 512) scale(1 -1)" />
+  </g>
+</svg>

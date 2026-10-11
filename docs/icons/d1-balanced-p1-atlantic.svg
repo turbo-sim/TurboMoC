@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="d1-balanced-p1-atlantic-title d1-balanced-p1-atlantic-desc">
+  <title id="d1-balanced-p1-atlantic-title">TurboMoC: Balanced / Atlantic</title>
+  <desc id="d1-balanced-p1-atlantic-desc">A symmetric divergent nozzle with two crossing characteristic families. Stylized mathematical directions, not streamlines or a computed solution.</desc>
+  <defs>
+    <clipPath id="d1-balanced-p1-atlantic-passage">
+      <path d="M60 232C172 232 248 146 378 146H452V366H378C248 366 172 280 60 280Z" />
+    </clipPath>
+  </defs>
+  <g fill="none" clip-path="url(#d1-balanced-p1-atlantic-passage)" stroke-width="10">
+    <path d="M32 300.322L480 61.090M32 382.558L480 143.326M32 464.794L480 225.562" stroke="#008C83" />
+    <path d="M32 211.678L480 450.910M32 129.442L480 368.674M32 47.206L480 286.438" stroke="#BD842D" />
+  </g>
+  <g fill="#142D4E">
+    <path d="M60 204C166 204 240 118 378 118H452V146H378C248 146 172 232 60 232Z" />
+    <path d="M60 204C166 204 240 118 378 118H452V146H378C248 146 172 232 60 232Z" transform="translate(0 512) scale(1 -1)" />
+  </g>
+</svg>

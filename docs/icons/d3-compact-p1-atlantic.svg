@@ -1,0 +1,18 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="d3-compact-p1-atlantic-title d3-compact-p1-atlantic-desc">
+  <title id="d3-compact-p1-atlantic-title">TurboMoC: Compact / Atlantic</title>
+  <desc id="d3-compact-p1-atlantic-desc">A symmetric divergent nozzle with two crossing characteristic families. Stylized mathematical directions, not streamlines or a computed solution.</desc>
+  <defs>
+    <clipPath id="d3-compact-p1-atlantic-passage">
+      <path d="M88 224C181 224 236 138 354 138H424V374H354C236 374 181 288 88 288Z" />
+    </clipPath>
+  </defs>
+  <g fill="none" clip-path="url(#d3-compact-p1-atlantic-passage)" stroke-width="13">
+    <path d="M32 322.240L480 13.120M32 467.140L480 158.020" stroke="#008C83" />
+    <path d="M32 189.760L480 498.880M32 44.860L480 353.980" stroke="#BD842D" />
+  </g>
+  <g fill="#142D4E">
+    <path d="M88 190C172 190 230 104 354 104H424V138H354C236 138 181 224 88 224Z" />
+    <path d="M88 190C172 190 230 104 354 104H424V138H354C236 138 181 224 88 224Z" transform="translate(0 512) scale(1 -1)" />
+  </g>
+</svg>

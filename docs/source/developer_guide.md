@@ -58,9 +58,9 @@ poetry run python docs/build_docs.py --build-bib
 
 The repository has a deliberately small smoke-test suite. It checks that the
 installed package exposes its basic public interface and executes the Python
-scripts directly under `examples/`.
+design scripts under `examples/moc_design/` and launchers under `examples/apps/`.
 
-Run the package and top-level example smoke checks from the repository root:
+Run the package and design/app example smoke checks from the repository root:
 
 ```bash
 poetry run python tests/run_tests.py

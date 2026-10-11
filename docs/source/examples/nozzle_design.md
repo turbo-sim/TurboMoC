@@ -25,13 +25,13 @@ before plotting or exporting the wall.
 Run from the repository root after following the [source installation instructions](../getting_started.md#install-from-source-with-poetry):
 
 ```bash
-poetry run python examples/nozzle_design.py
+poetry run python examples/moc_design/nozzle_design.py
 ```
 
 The code below is included directly from the example. The final display block
 is omitted; the script opens the figures with `plt.show()` during normal runs.
 
-```{literalinclude} ../../../examples/nozzle_design.py
+```{literalinclude} ../../../examples/moc_design/nozzle_design.py
 :language: python
 :start-at: from pathlib import Path
 :end-before: Show figures during interactive runs

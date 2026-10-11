@@ -29,8 +29,8 @@ It configures only the `turbo_moc` logger (never the root logger), writes each
 record once to the console and to a fresh UTF-8 file, and restores the previous
 handlers, level and propagation on exit, including after exceptions and Ctrl+C. An
 exception leaving the block is logged there once, with its traceback, and
-re-raised. The Gmsh and Fluent examples use the same context through
-`examples/workflow_logging.py`, so MoC, meshing and workflow messages share one
+re-raised. The Gmsh and Fluent workflows use the same context from
+`turbo_moc.reporting`, so MoC, meshing and workflow messages share one
 console and one log file.
 
 A short successful run looks like this:

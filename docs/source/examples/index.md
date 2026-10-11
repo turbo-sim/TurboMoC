@@ -15,9 +15,9 @@ Follow the [source installation instructions](../getting_started.md#install-from
 then run these examples from the repository root:
 
 ```bash
-poetry run python examples/nozzle_design.py
-poetry run python examples/stator_design.py
-poetry run python examples/rotor_design.py
+poetry run python examples/moc_design/nozzle_design.py
+poetry run python examples/moc_design/stator_design.py
+poetry run python examples/moc_design/rotor_design.py
 ```
 
 The nozzle example uses nitrogen at 20 bar with 10 K inlet subcooling, following
