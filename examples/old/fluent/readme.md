@@ -78,9 +78,11 @@ identify an unconverged final solution or pressures outside the fitted barotropi
 All execution-time decorators and measurements have been removed.
 
 Reporting uses Python's standard `logging` module through
-[`../workflow_logging.py`](../workflow_logging.py). Only the entry point installs
-handlers; imported Gmsh and barotropic helpers share them. This does not configure
-logging for MoC, Gmsh, barotropy or PyFluent themselves.
+[`../workflow_logging.py`](../workflow_logging.py), a thin wrapper around
+`turbo_moc.reporting`. Only the entry point installs handlers, on the `turbo_moc`
+logger: the Fluent workflow (`turbo_moc.workflows.fluent.*`), the barotropic
+helpers, the MoC solver and the meshing library share them, each record appearing
+once. Gmsh, barotropy and PyFluent's own logging is not configured.
 
 With `fluent.print_transcript: true`, Fluent's native convergence table continues
 to stream to the terminal. Its detailed native output is saved separately in
@@ -250,7 +252,7 @@ counts include only the current run.
 | `run_fluent_case.py` | YAML loading, shared mesh orchestration, Fluent configuration, strategy-based solve, periodic instancing and both PNGs |
 | `barotropic_model.py` | Inlet resolution, model generation, piecewise fits, validation and safe expression export |
 | `stator_fluent.yaml` | Workflow, thermodynamic range, solver, iteration and image settings |
-| `../workflow_logging.py` | Shared console/file reporting, numbered sections, summaries and failure tracebacks |
+| `../workflow_logging.py` | Wrapper around `turbo_moc.reporting`: console/file reporting, numbered sections, summaries, failure tracebacks |
 
 For the fast mesh/Fluent automation smoke suite, run:
 

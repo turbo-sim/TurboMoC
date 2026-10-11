@@ -1,3 +1,4 @@
+import logging
 import jaxprop as jxp
 from jax import jit
 from jax import numpy as jnp
@@ -131,7 +132,8 @@ def jax_solve_critical_state(fluid, h0, s0, mach_tol=0.05):
 
     v_final = np.sqrt(2 * max(0.0, h0 - state["h"]))
     ma_final = v_final / state["a"]
-    print(f"CRIT SOLVE | Mode: {mode} | P: {state['p']:.1f} | Mach: {ma_final:.4f} | a: {state['a']:.2f}")
+    logging.getLogger(__name__).debug(
+        "  MoC critical state: %s, p %.1f Pa, Mach %.4f, a %.2f m/s", mode, state["p"], ma_final, state["a"])
 
     return state
 

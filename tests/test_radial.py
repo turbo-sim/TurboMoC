@@ -4,6 +4,7 @@ preserves angles, not lengths, so a 2D-plane length needs an exact local
 magnification factor to be valid once mapped onto the annulus."""
 
 import numpy as np
+import pytest
 
 from turbo_moc.geometry.radial import (
     _reference_point_and_scale,
@@ -64,6 +65,52 @@ def test_mapped_throat_width_uses_the_same_reference_as_the_actual_wrap():
     expected = blade["throat_opening"] * expected_scale
 
     assert np.isclose(mapped_throat_width(blade, r1, r2, source="stator"), expected)
+
+
+def _wrapped_swirl(wrap_fn, data, curve_key, p, probe, r1, r2):
+    """v_theta / v_r of the step probe -> p (or p -> probe) after wrapping:
+    both points are appended to the blade's own contour so they go through
+    exactly the map (reference point, c_axial) the blade itself gets."""
+    curve = data[curve_key]
+    patched = {**data, curve_key: {"x": list(curve["x"]) + [p[0], probe[0]],
+                                   "y": list(curve["y"]) + [p[1], probe[1]]}}
+    c = wrap_fn(patched, r1, r2, 1)["blades"][0]
+    (X0, Y0), (X1, Y1) = (c["x"][-2], c["y"][-2]), (c["x"][-1], c["y"][-1])
+    dX, dY = X1 - X0, Y1 - Y0
+    return (X0 * dY - Y0 * dX) / (X0 * dX + Y0 * dY)
+
+
+@pytest.mark.parametrize("stator_r, rotor_r", [((150.0, 300.0), (610.0, 305.0)),   # outward
+                                               ((300.0, 200.0), (97.5, 195.0))])   # inward
+def test_radial_rotor_inlet_swirl_matches_stator_exit_swirl(stator_r, rotor_r):
+    """The rotor's leading edge must face the stator's exit flow: same
+    tangential sense at the interface. Regression for the rotor coming out
+    with the opposite handedness (concavity against the incoming flow)."""
+    from turbo_moc.geometry.blade import parametrize_stator_blade
+    from turbo_moc.geometry.radial import wrap_blade_radial, wrap_rotor_blade_radial
+
+    wall_x = np.linspace(0.0, 10.0, 50)
+    stator = parametrize_stator_blade(wall_x, 1.0 + 0.1 * wall_x, metal_angle_in=0.0,
+                                      metal_angle_out=70.0, r_trailing=0.1143)
+    sx, sy = stator["suction"]["x"], stator["suction"]["y"]
+    te, upstream = np.array([sx[-1], sy[-1]]), np.array([sx[-2], sy[-2]])
+    d_s = (te - upstream) / np.linalg.norm(te - upstream)
+    # probe upstream of the TE (larger chord), so the chord-min reference is untouched
+    stator_swirl = _wrapped_swirl(wrap_blade_radial, stator, "blade_curve", te - 1e-4 * d_s, te, *stator_r)
+
+    # Rotor convention (design_rotor_vortex_blade): flow along +x, inlet at
+    # min x, inlet flow direction (1, tan(beta_inlet)) with beta_inlet > 0.
+    t = np.linspace(0.0, 2.0 * np.pi, 200)
+    rotor = {"blade": {"x": (2.0 * np.cos(t)).tolist(), "y": (0.3 * np.sin(t)).tolist()}}
+    i_in = int(np.argmin(rotor["blade"]["x"]))
+    p = np.array([rotor["blade"]["x"][i_in], rotor["blade"]["y"][i_in]])
+    d_r = np.array([1.0, np.tan(np.radians(57.0))])
+    d_r /= np.linalg.norm(d_r)
+    rotor_swirl = _wrapped_swirl(wrap_rotor_blade_radial, rotor, "blade", p, p + 1e-4 * d_r, *rotor_r)
+
+    assert np.sign(stator_swirl) == np.sign(rotor_swirl)
+    assert np.isclose(abs(stator_swirl), np.tan(np.radians(70.0)), rtol=1e-3)
+    assert np.isclose(abs(rotor_swirl), np.tan(np.radians(57.0)), rtol=1e-3)
 
 
 def test_mapped_throat_width_rejects_rotor_source():

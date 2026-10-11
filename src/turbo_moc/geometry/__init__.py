@@ -4,6 +4,8 @@ from .blade import (
     export_annular_blade_stl,
     export_blade_step,
     export_flared_blade_step,
+    export_radial_blade_step,
+    export_radial_blade_stl,
     move_control_point_along_normal,
     parametrize_stator_blade,
     parametrize_stator_blade_semi,
@@ -12,6 +14,7 @@ from .meridional import build_meridional_view
 from .passage import extract_axial_passage_2d, extract_radial_passage_2d
 from .radial import (
     apply_conformal_mapping,
+    consistent_radial_wrap,
     conformal_length_scale,
     implied_n_blades_radial,
     mapped_pitch_width,
@@ -35,12 +38,13 @@ from .turbogrid import export_turbogrid_blade, read_turbogrid_x_extent, shift_tu
 __all__ = [
     "parametrize_stator_blade", "parametrize_stator_blade_semi", "export_blade_step",
     "export_flared_blade_step", "export_annular_blade_step", "export_annular_blade_stl",
+    "export_radial_blade_step", "export_radial_blade_stl",
     "wrap_blade_annular",
     "move_control_point_along_normal", "BSplineTool",
     "apply_conformal_mapping", "rotate_radial_points",
     "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial",
     "conformal_length_scale", "mapped_throat_width", "mapped_pitch_width",
-    "implied_n_blades_radial",
+    "implied_n_blades_radial", "consistent_radial_wrap",
     "build_meridional_view",
     "extract_axial_passage_2d",
     "extract_radial_passage_2d",

@@ -26,7 +26,7 @@ import numpy as np
 
 __all__ = [
     "apply_conformal_mapping", "rotate_radial_points",
-    "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial",
+    "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial", "consistent_radial_wrap",
     "conformal_length_scale", "mapped_throat_width",
 ]
 
@@ -223,6 +223,32 @@ def implied_n_blades_radial(blade_data, r1, r2, source="stator"):
     return float(2.0 * np.pi * r_eval / mapped_pitch)
 
 
+def consistent_radial_wrap(blade_data, r1, r2_target, source="stator"):
+    """Blade count and outer radius that keep the designed 2D passage.
+
+    Under the log-spiral map one 2D pitch p turns by |a| p, a = ln(r2/r1) /
+    c_axial, at every radius; the copies are laid out 2*pi/N apart. Both
+    agree only for N = 2*pi / (|a| p) (implied_n_blades_radial, which is
+    exactly this, independent of where it is evaluated). So N is the
+    nearest integer to that count at (r1, r2_target), and r2 is then moved
+    to the radius where it is exact:
+
+        |ln(r2/r1)| = 2*pi |c_axial| / (N p),   same side of r1 as r2_target
+
+    Returns n_blades, r2, and the target's non-integer implied count.
+    """
+    if r1 <= 0 or r2_target <= 0 or r1 == r2_target:
+        raise ValueError("r1 and r2 must be positive and different.")
+    n_target = implied_n_blades_radial(blade_data, r1, r2_target, source=source)
+    n_blades = max(2, int(round(n_target)))
+    curve = blade_data["blade_curve"] if source == "stator" else blade_data["blade"]
+    chord_vals = np.asarray(curve["y"] if source == "stator" else curve["x"], dtype=float)
+    pitch_vals = np.asarray(curve["x"] if source == "stator" else curve["y"], dtype=float)
+    _, _, c_axial = _reference_point_and_scale(chord_vals, pitch_vals)
+    log_ratio = np.sign(np.log(r2_target / r1)) * 2.0 * np.pi * abs(c_axial) / (n_blades * float(blade_data["pitch"]))
+    return {"n_blades": n_blades, "r2": float(r1 * np.exp(log_ratio)), "n_implied_at_target": float(n_target)}
+
+
 def wrap_blade_radial(blade_data, r1, r2, n_blades, theta0=0.0):
     """
     Wrap a Phase-2-style stator blade (parametrize_stator_blade/_semi's
@@ -262,7 +288,7 @@ def wrap_blade_radial(blade_data, r1, r2, n_blades, theta0=0.0):
     }
 
 
-def wrap_rotor_blade_radial(rotor_data, r1, r2, n_blades, theta0=0.0, scale=1.0):
+def wrap_rotor_blade_radial(rotor_data, r1, r2, n_blades, theta0=0.0):
     """
     Wrap a Phase-3-style rotor blade (turbo_moc.rotor.design_rotor_vortex_blade's
     output dict) onto an annular passage between radii r1 and r2.
@@ -273,19 +299,17 @@ def wrap_rotor_blade_radial(rotor_data, r1, r2, n_blades, theta0=0.0, scale=1.0)
         Needs "blade" ({"x", "y"}) -- the closed LE/TE-rounded blade
         contour. Its trailing edge is already part of this closed curve
         (unlike the stator's, which keeps a separate arc), so there is no
-        separate trailing-edge overlay here.
+        separate trailing-edge overlay here. Its units don't matter (it
+        may well be nondimensional, r*): the map normalises the contour by
+        its own chordwise extent, so a uniformly rescaled blade wraps to
+        exactly the same result.
     r1, r2 : float
-        Inner/outer radii of the annular passage. MUST be in the same
-        units as `scale * rotor_data["blade"]` -- rotor_data is often
-        nondimensional (r*) unless design_rotor_vortex_blade was called
-        with an explicit r_star, so `scale` (e.g. mm per r*, matching
-        turbo_moc.app's Phase 4 "Rotor scale" convention) converts it first.
+        Radii [mm] the blade's chordwise extremes map to; the result is in
+        the same units.
     n_blades : int
         Number of blade copies laid out around the full annulus.
     theta0 : float
         Angular offset [rad] of the first (index-0) blade copy.
-    scale : float
-        Multiplier applied to the raw blade (x, y) before mapping.
 
     Returns
     -------
@@ -295,14 +319,20 @@ def wrap_rotor_blade_radial(rotor_data, r1, r2, n_blades, theta0=0.0, scale=1.0)
         to draw -- kept for a uniform shape with the stator's result, so
         plot_radial_cascade works unchanged for either source).
     """
+    # Pitch is mirrored so both rows come out with the same handedness. The
+    # map treats chord + i*pitch as a holomorphic coordinate: for the
+    # rotor's (x=chord, y=pitch) frame that preserves orientation, for the
+    # stator's (x=pitch, y=chord) frame it reverses it. Unmirrored, the
+    # rotor's inlet swirl came out opposite to the stator's exit swirl
+    # (leading edge facing against the incoming flow) for both inward and
+    # outward stages.
     blade = rotor_data["blade"]
-    x = [v * scale for v in blade["x"]]
-    y = [v * scale for v in blade["y"]]
-    blades, ref = wrap_curve_radial(x, y, r1, r2, n_blades, theta0, chordwise_axis="x")
+    blades, ref = wrap_curve_radial(blade["x"], [-v for v in blade["y"]], r1, r2, n_blades, theta0,
+                                    chordwise_axis="x")
     return {
         "blades": blades,
         "trailing_edges": [{"x": [], "y": []} for _ in range(n_blades)],
         "r1": float(r1), "r2": float(r2),
         "n_blades": int(n_blades), "d_theta": ref["d_theta"],
-        "units": "mm" if scale != 1.0 else rotor_data.get("units", "r*"),
+        "units": "mm",
     }

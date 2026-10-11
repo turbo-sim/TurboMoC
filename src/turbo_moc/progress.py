@@ -13,6 +13,11 @@ run_stage_4_reflex) accepts progress_callback=<callable(fraction, label)>,
 called with the label it already prints to the terminal ("1 of 4", "2 of
 4", "3 of 4", "4 of 4"/"4A of 4") -- only the leading digit is used here to
 route to a stage weight, so both solvers' label variants work unchanged.
+A parenthesized qualifier in the label -- "(retry 2 of 6)" from
+design_nozzle's automatic retries, "(finished, not converged)" on its final
+update -- is kept in the displayed message. A retry restarts at Stage 1, so
+the overall fraction intentionally drops back for the new attempt; the
+reporter itself holds no state between calls.
 """
 
 DEFAULT_STAGE_WEIGHTS = {
@@ -60,11 +65,18 @@ def make_progress_reporter(set_progress, weights=None):
     total_weight = acc if acc > 0 else 1.0
 
     def reporter(fraction, stage_label):
-        stage_key = stage_label.strip()[:1] or "1"
+        label = stage_label.strip()
+        stage_key = label[:1] or "1"
         base = cumulative_before.get(stage_key, 0.0)
         w = weights.get(stage_key, 0.0)
-        local = max(0.0, min(1.0, fraction))
+        try:
+            local = float(fraction)
+        except (TypeError, ValueError):
+            local = 0.0
+        local = 0.0 if local != local else max(0.0, min(1.0, local))  # NaN -> 0 (min(1, nan) is 1)
         overall = min(1.0, (base + w * local) / total_weight)
-        set_progress((f"{overall * 100:.0f}%", f"Stage {stage_key} of 4"))
+        # Keep qualifiers such as "(retry 2 of 6)" or "(finished, not converged)".
+        note = label[label.index("("):] if "(" in label else ""
+        set_progress((f"{overall * 100:.0f}%", f"Stage {stage_key} of 4 {note}".strip()))
 
     return reporter
