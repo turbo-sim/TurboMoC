@@ -407,3 +407,38 @@ artifact identities include CGNS output settings so changed boundary/unit/filena
 settings cannot silently reuse an outdated deliverable. Standalone examples and
 the deprecated app retain their existing output behavior. Verification is limited
 to targeted worker/UI checks with conversion intercepted; no expensive mesh run.
+
+## Calculation scope and combined stage export
+
+The current app adds `calculations.py` to orchestrate the existing isolated
+workers in row order. **Calculations apply to** selects Stator, Rotor or both;
+**Inspect row** independently selects section plots and the quality report.
+The shared Compute blade design action performs fresh MoC/vortex calculations.
+A coupled rotor receives the newly published stator solution. Mesh queues check
+every selected dependency before launching, reuse current meshes and retain
+earlier successes if a later row fails or is cancelled. Worker internals and
+scientific kernels remain unchanged.
+
+`io/cgns_stage.py` assembles the existing physical row exports into one ADF
+file with separate zones. Export project requires a complete current active
+stage, independent of calculation scope. The ZIP exposes `stage.cgns` at its
+top level and preserves individual files under `meshes/`. True linear 2D export
+remains available, with a separate `stage_2d.cgns` when both dimensions exist.
+Zone/element-section/boundary/family names are row-qualified; periodic donors
+point to their renamed zone. All numerical arrays and local IDs remain intact,
+and shared-interface faces remain independent. Stage rows must use equal
+coordinate multipliers. The report records the exported zone and boundary map.
+
+Focused checks cover queue ordering, immutable snapshots, fresh coupling,
+all-row prerequisites, duplicate polling, current-mesh reuse, failure and
+cancellation, actual Dash callbacks and ZIP contents/freshness. Real small
+Gmsh volumes with different blade counts verify preserved coordinates,
+connectivity, shared-interface descriptors and reciprocal periodic transforms
+after stage assembly. Existing affected app checks and a legacy layout smoke
+check pass. A real Fluent 24.2 import of the small stage retains two fluid regions,
+48 vertices, 16 hexahedra and 14 boundary patches, and passes the mesh check.
+Fluent imports the patches as walls and qualifies names with their zone; solver
+boundary conversion, periodic/interface pairing and rotating frames still need
+setup. No flow solve was performed. The report and transcript are in
+`artifacts/stage_import/`. Production-case and CFX acceptance remain separate.
+The legacy app and numerical providers are unchanged.

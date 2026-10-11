@@ -1,4 +1,4 @@
-# TurboMoC
+<img src="docs/icons/t3-dynamic.svg" alt="TurboMoC logo with the Atlantic nozzle icon and Dynamic wordmark" width="460">
 
 **From a real-fluid supersonic nozzle to a meshed turbine stage, in one Python package.**
 

@@ -366,3 +366,39 @@ selects its local case and output. Package numerical entry points accept explici
 configuration paths, while the app has Python initialization defaults independent
 of example files. Fluent paths consistently resolve relative to its YAML.
 Earlier descriptions of packaged YAML/resources refer to the prior architecture.
+
+## Calculation scope and stage deliverable
+
+The current app now separates **Calculations apply to** from **Inspect row**.
+One design button runs stator MoC and rotor vortex calculations in order when
+both rows are selected; separate 2D and 3D buttons apply the same scope.
+`apps/app/calculations.py` handles dependency gates, immutable queue snapshots,
+fresh stator-to-rotor handoff, current-mesh reuse and cancellation. Each row's
+success updates the views immediately. Failure stops subsequent rows while
+retaining completed predecessors. The terminal accumulates live row output and
+the status reports the active row and queue position.
+
+Export project now requires current meshes for the complete active stage.
+Its ZIP adds top-level `stage.cgns`; individual row files remain under `meshes/`
+for review. `io/cgns_stage.py` preserves each row as a separate fluid zone,
+qualifies names and repairs donor-name references after renaming. It preserves
+all coordinate/connectivity/parent arrays and periodic transforms. Interface
+faces are not welded. The consolidated report identifies the stage boundary
+names for solver setup. Annular export uses physical 3D meshes; a linear cascade
+can export true 2D, and both dimensions are packaged separately when available.
+The shared ADF utility adds in-memory serialization/readback for ZIP packaging.
+
+This replaces the former selected-row generation target and partial-project
+download behavior. It does not modify the legacy app, MoC/vortex solvers,
+geometry mapping or numerical mesh generation. A small stage passes a Fluent
+24.2 import/mesh check with two fluid regions and 14 separate boundary patches.
+The importer qualifies names with their zone and initially treats patches as
+walls. Solver BC/interface assignment, rotating frames, production-case
+acceptance and CFX import acceptance remain future work.
+
+- [x] Calculation scope independent of the inspected row.
+- [x] Sequential per-row workers, fresh coupling, cumulative live logs and failure/cancellation retention.
+- [x] Complete-stage CGNS assembly with distinct zones and preserved local topology/periodicity.
+- [x] Focused callbacks, archive and actual Gmsh/CGNS checks.
+- [x] Small real two-row stage imported and checked in Fluent 24.2; regions and boundary patches retained.
+- [ ] Production/CFX acceptance and a configured stage CFD case.

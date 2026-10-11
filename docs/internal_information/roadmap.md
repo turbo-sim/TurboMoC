@@ -17,7 +17,7 @@ The canonical implementation is now under `src/turbo_moc/`, with the current app
 | D5 | Require an up-to-date reference mesh before volume generation. | Both the UI and job service enforce this. The sweep reads the persisted topology/definition. |
 | D6 | Originally boundaries, slice and worst-cell inspection; simplified by the latest UI decision. | Main viewer exposes boundary surfaces, edges and blade-count sliders. Slice/worst-cell extraction remains tested in the backend; it is no longer an app control. |
 | A1 | Retain true 2D export and 3D extrusion for linear cascades. | Independent 2D/3D products; one span element remains an optional 3D setting. Annular 2D exports are labeled conformal references. |
-| A2 | Two persistent Geometry generation/Mesh generation workspaces, with settings grouped by row. | Shared physical views; selected-row section, actions and quality report; one anchored terminal. |
+| A2 | Two persistent Geometry generation/Mesh generation workspaces, with settings grouped by row. | Shared physical views; independent calculation scope and inspected-row section/report; one anchored terminal. |
 | A3 | Ordered rows with stable IDs and stator/rotor roles. | Each row owns geometry and mesh inputs; MoC stators and vortex rotors share the canonical mapping and mesh stages. |
 
 ## Row-based architecture and current scope
@@ -31,14 +31,16 @@ follows the specified radii rather than a separate inflow/outflow code path.
 Each row has a stable ID, a role, independent geometry/mesh settings and its
 own scientific artifact references. The sidebar shows every active row in
 a collapsible group; the workspace selects geometry or meshing controls. Row
-selection controls section plots, generation actions and the report; available
-row geometry is assembled in shared
+inspection controls section plots and the report, while calculation checkboxes
+select rows for sequential jobs and independent visibility checkboxes select
+the rows assembled in shared
 physical views. Axial rotor interspace derives its relative LE origin from the greater
 upstream hub/tip chord; radial radii supply a directed clearance/overlap
 diagnostic without an extra gap input. Adjacent domains meet at a shared
 physical plane or cylinder. Browser/NPZ meshes remain row-local; paired 3D
-CGNS exports apply the assembly origin and angular phase. Independent row
-files still require interface pairing and rotating-frame setup in the solver.
+CGNS exports apply the assembly origin and angular phase. Combined stage files
+retain independent zones that require interface pairing and rotating-frame
+setup in the solver.
 
 Rotor-only and combined projects now support the existing vortex-flow rotor
 provider. Manual relative-frame inlet inputs remain independent; optional
@@ -47,8 +49,8 @@ state from the current upstream result and rotor inlet blade speed. Coupled
 values remain visible but locked. This reuses the legacy local velocity
 triangle without changing its scientific solver; it does not model interspace
 losses or radial transport. Physical interface geometry is implemented;
-solver coupling, rotating frames, blade-count compatibility and a connected
-stage mesh remain future work.
+solver coupling, rotating frames, blade-count compatibility and a configured
+stage CFD case remain future work.
 
 The linear adapter scales the source profile and its pitch together to the
 specified meridional chord, then extrudes through the blade height. It needs
@@ -183,7 +185,7 @@ Feedback still useful: should first/last endwall spacing or span cell count be t
 
 **Implemented:** row-identified dedicated workers for MoC, 2D, 3D and export (inspection is available in the backend); an always-visible terminal header anchored below the scrolling main content; stage progress beside buttons; live native/solver log; spinner; elapsed time; disabled competing actions; cancellation; immutable configuration snapshots and source-revision checks; previous-artifact retention. Workers check the submitted source fingerprint against the current files; the app does not archive or freeze a copy of the source tree.
 
-Every Compute MoC action and CLI run solves afresh through `geometry/moc.py`, forwarding the solver callbacks. The app saves `moc_result.json` only for handoff from that selected successful job to subsequent stages. It does not discover or reuse prior MoC solutions. Weighted solver stages provide approximate percentages. Native Gmsh operations use an indeterminate bar where a precise fraction is unavailable. The terminal shows work actually performed; it does not invent shell commands for Python API calls.
+Every Compute blade design action solves the selected MoC/vortex profiles afresh; stator CLI runs also solve afresh through `geometry/moc.py`, forwarding the solver callbacks. The app saves `moc_result.json` only for handoff from that selected successful job to subsequent stages. It does not discover or reuse prior MoC solutions. Selected rows execute sequentially, publishing each result before resolving the next row's dependencies. Weighted solver stages provide approximate percentages across the row queue. Native Gmsh operations use an indeterminate bar where a precise fraction is unavailable. The terminal accumulates work actually performed; it does not invent shell commands for Python API calls.
 
 **Next:** a structured event history with independent stage durations, session/job recovery after refresh or app restart, app-shutdown worker cleanup, bounded derived-geometry/output retention and global concurrency limits across multiple browser sessions.
 
@@ -228,7 +230,7 @@ Feedback still useful: which Fluent release should be the first acceptance targe
 
 ## 8. Export, artifacts and project lifecycle
 
-**Implemented:** generation automatically produces audited one-passage CGNS/ADF output. CGNS filename/BC/unit edits invalidate the app deliverable keys; shared-interface or assembly-placement edits invalidate the affected domains and meshes. The reusable backend can export an existing mesh without remeshing. Project ZIP downloads collect current row meshes, settings, logs, quality reports and interface metadata; numerical arrays are saved without pickle and successful artifacts are published atomically.
+**Implemented:** generation automatically produces audited one-passage CGNS/ADF output. CGNS filename/BC/unit edits invalidate the app deliverable keys; shared-interface or assembly-placement edits invalidate the affected domains and meshes. The reusable backend can export an existing mesh without remeshing. Project ZIP downloads require a complete current active stage and place combined `stage.cgns` at the top level, alongside settings, logs, quality reports and interface metadata. Row-specific originals remain under `meshes/`. The combined file retains independent row zones, local topology and separate interface sides; node/element IDs are not welded or renumbered. Numerical arrays are saved without pickle and successful artifacts are published atomically.
 
 The 3D exporter writes CGNS 3.4 in ADF, with one combined fluid-volume element section, seven audited outward-facing boundary patches and reciprocal vertex-level periodic maps (rotation for annular rows, translation for linear rows). It reloads the file to check stored base/zone and BC data. The 2D exporter checks topology before writing but does not perform that serialized-file readback. These are implementation checks; target-reader acceptance remains to be established. In particular, periodic sides retain named BC patches alongside vertex connectivity, an importer-oriented convention discussed in [the theory guide](theory_guide.md#105-what-is-established-before-fluent-runs).
 
@@ -388,7 +390,7 @@ The following are optional extensions, with scope to be agreed before implementa
 
 - [x] Ordered project schema, stable row IDs, active-row validation and legacy flat-stator adaptation.
 - [x] Geometry generation/Mesh generation workspaces; collapsible settings for all active rows; independent retained artifacts.
-- [x] Shared physical machine views and selected-row section/actions/report.
+- [x] Shared physical machine views and independently inspected-row section/report.
 - [x] Stator/rotor/stator+rotor modes, paired-linear restriction and vortex rotor controls.
 - [x] Linear chord/height mapping with scaled source pitch and no radius/physical blade-count input.
 - [x] Translational linear periodicity in volume assembly, quality and reciprocal CGNS metadata.
@@ -462,3 +464,35 @@ Earlier descriptions of packaged YAML/resources refer to the prior architecture.
   before solving. Older planar YAML copies need the new `workflow` section.
   The Fluent workflow still owns its execution controls and uses the shared
   planar file for geometry/mesh inputs.
+
+## Sequential multirow calculations and stage export
+
+The calculation checkboxes select any subset of active rows without changing
+the machine design mode or the row being inspected. Compute blade design runs
+fresh profile calculations in row order, handing the new stator result to a
+coupled rotor before its worker starts. The two mesh buttons apply the same
+scope, validate all selected prerequisites first and skip current meshes.
+Each queue holds an immutable project snapshot, uses isolated per-row workers,
+publishes each success immediately and stops after failure or cancellation.
+The status identifies the active row and queue position; terminal logs accumulate.
+
+Export covers every active row regardless of calculation scope. Annular stages
+require current volumes for all rows. The ZIP's top-level `stage.cgns` preserves
+distinct fluid zones, row-qualified names, reciprocal periodic donor references
+and both sides of each shared physical interface. Linear cases retain true 2D
+and 3D export; if both are current, an additional `stage_2d.cgns` is supplied.
+CGNS coordinate multipliers must agree across rows. The stage manifest maps
+row IDs to exported zone and boundary names. No solver flow-interface model or
+rotating-frame assignment is inferred from packaging.
+
+- [x] Independent per-row calculation and plot-visibility checkboxes, with Inspect row for the section/report.
+- [x] Compact row controls; static calculation guidance and interspace details appear on hover.
+- [x] Shared meridional mesh projection of visible rows with current 2D meshes; row-local blade-to-blade inspection.
+- [x] Solid meridional blade extents and dashed actual inlet/outlet flow-domain extensions; zero radius/span origin retained.
+- [x] Sequential design/2D/3D row jobs with current dependency handoff and prerequisite gates.
+- [x] Live cumulative logs, queue progress, per-row publication and failure/cancellation handling.
+- [x] Complete-stage export gate and combined, dimension-consistent CGNS with distinct row zones.
+- [x] Focused Dash callback checks and actual small Gmsh stage exports verify topology and periodicity preservation.
+- [x] Small real stage imported in Fluent 24.2: two fluid regions, 14 boundary patches and successful mesh check.
+- [ ] Production Fluent/CFX acceptance, periodic/interface setup and rotating-frame validation.
+- [ ] Durable session reopening and queue recovery after app-server restart.

@@ -22,9 +22,18 @@ row. Invalid files leave the current settings intact.
 rotor-only and stator/rotor cases. `rotor_only.yaml` starts with a manual
 relative-frame inlet and the legacy vortex-method defaults. `stator_rotor.yaml`
 uses a 3 mm axial blade interspace and couples the rotor inlet to the current
-upstream stator result; compute that stator first. Its 1000 RPM sample speed
+upstream stator result. Check **Stator** and **Rotor** under **Apply calculations to**
+and click **Compute blade design** to compute the stator first, then the rotor.
+Its 1000 RPM sample speed
 uses the rotor's 105 mm midspan inlet radius. Selecting a row changes the
-geometry/mesh generation target while keeping the shared machine view.
+section plots and quality report through **Inspect row** while keeping the shared
+machine view. The calculation checkboxes separately control which rows run.
+**Plot rows** checkboxes control which rows appear in geometry and mesh views;
+hiding a row retains its calculation results. Meridional mesh projections show
+checked rows with current 2D meshes together, while the blade-to-blade section
+and report inspect one row. Solid meridional outlines show the blade extent;
+dashed outlines show inlet/outlet flow-domain extensions. Hover over the compact
+control strip for interspace details and guidance.
 These are the only app YAML samples; the package has Python initialization
 defaults and accepts any caller-supplied project YAML.
 
@@ -39,27 +48,38 @@ The installed current command still accepts explicit configuration, port and
 output arguments; these are not required by the example launchers.
 
 See the [app guide](../../src/turbo_moc/apps/app/readme.md) and
-[feature comparison](../../z_information/merging_summary.md).
+[feature comparison](../../docs/internal_information/merging_summary.md).
 
 Mesh generation automatically includes Fluent-compatible CGNS conversion.
-Use **Download project (.zip)** beside the generation controls to download:
+Use **Export project (.zip)** beside the generation controls to download:
 
 - The final `project.yaml` and a readable `README.txt`.
+- One top-level `stage.cgns` with a separate fluid zone for every active row.
 - Completed 3D CGNS meshes, grouped by blade row under `meshes/`.
 - 2D CGNS meshes for linear cascades only.
 - One `mesh_report.json` combining mesh statistics and quality results for all
   included meshes, and one `activity.log` combining their computation logs.
 
-The button becomes available when a current mesh is ready and no job is active.
-Outdated or incomplete meshes are omitted and identified in the README.
-The archive uses available stator and rotor artifacts. Internal job files,
+The button becomes available when every active row has a current 3D mesh and
+no job is active. A linear cascade can also export its current true 2D mesh
+without a volume mesh; if both dimensions are available, `stage_2d.cgns` is added.
+Export includes every active row regardless of calculation scope. Missing or
+outdated annular row meshes block a partial-stage export. Internal job files,
 MoC/vortex results and derived-geometry caches are omitted.
 Temporary MSH topology is removed after conversion.
+
+The two mesh-generation buttons run selected rows sequentially and retain
+already-current meshes. Generate current 2D meshes before requesting 3D meshes.
+Progress reports the current row, and the terminal retains live output from
+each job. Completed rows update their views immediately; cancellation or a
+failed row stops the remaining queue and retains earlier successful results.
 
 Rotor inlet coupling reproduces the legacy local velocity triangle and relative
 stagnation-state calculation. It does not model interspace losses, radial
 transport, or a connected stator-rotor CFD interface. Axial spacing is the
 minimum gap from the farthest upstream trailing edge to the rotor leading-edge
 plane; radial spacing follows the supplied row inlet/outlet radii. Each row's
-mesh remains an independent domain. See the [app guide](../../src/turbo_moc/apps/app/readme.md)
+mesh remains an independent zone inside `stage.cgns`, with separate interface
+faces. Set up their interface coupling and the rotor reference frame in the
+CFD solver. See the [app guide](../../src/turbo_moc/apps/app/readme.md)
 for input units, coupling assumptions and supported rotor settings.

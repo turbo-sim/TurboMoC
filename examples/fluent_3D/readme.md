@@ -106,3 +106,45 @@ Radial and linear Fluent setup currently have unit-test coverage only. The
 mesher and barotropic physics were unchanged. Before relying on a result,
 inspect the saved case, transcript, run summary, mesh quality, wall y-plus and
 contours.
+
+## Offline PyVista postprocessing
+
+After solving, run the adjacent plotting script from the repository root:
+
+```powershell
+poetry install --extras fluent
+# Save PNGs and open interactive windows; close each window to advance:
+poetry run python examples/fluent_3D/plot_fluent_case.py
+# Export only, without opening windows:
+poetry run python examples/fluent_3D/plot_fluent_case.py --no-show
+```
+
+The script reads the matching `stator_fluent_3d.cas.h5` and `.dat.h5` files plus
+`setup_summary.json`. Paths resolve beside the script. PyVista's Fluent CFF reader
+loads the volume solution; PyFluent's offline HDF5 reader provides the blade/hub
+faces and their saved pressure values. No Fluent session or license is needed.
+
+Five PNGs at 400 DPI are saved under `output/pyvista/`, beside `barotropy/`, `fluent/`, and
+`gmsh/`: `blade_hub_pressure.png`, `midspan_flow.png`,
+`three_blades_hub_surface.png`, `three_blades_hub_mesh.png`, and
+`single_blade_views.png`.
+Each image is exported before its interactive window opens for inspection, so
+closing the window does not interrupt saving. Individual images are 3200 by
+2000 pixels (8 by 5 inches); the four-view image is 4800 by 3200 pixels
+(12 by 8 inches). The PNG metadata records 400 DPI.
+The midspan cut is cylindrical for axial geometry and planar for radial/linear
+geometry. It uses saved Mach when available and otherwise velocity magnitude;
+the barotropic Mach expression is normally evaluated in Fluent and is not a
+stored solution field. Cell values are averaged to nodes for the midspan contour.
+The midspan view also includes the blade and hub surfaces. Cameras align with
+the blade chord and use an oblique view above the hub, with the same orientation
+for the pressure, flow, surface and mesh images. Black lines trace surface
+outlines and sharp joins; only the mesh image includes individual cell edges.
+The three-passage views use the saved periodic transformation. The mesh image
+shows actual blade/hub boundary cells, including their quad/triangle topology.
+
+The single-blade PNG contains four camera views in one 2-by-2 figure. Complete
+blade geometry views reconstruct the hub and shroud caps from the two saved
+blade end rings, including cylindrical curvature for axial cases. These caps
+are used for geometry display; pressure plots use the saved fluid-facing wall
+values, and the mesh view uses the original boundary mesh.
