@@ -69,7 +69,7 @@ poetry install --extras "cad fluent"
 ```
 
 The `fluent` extra installs the Python interface; Fluent must be installed and
-licensed separately. See the [Fluent workflow README](examples/fluent/readme.md)
+licensed separately. See the [Fluent workflow README](example_meshing/fluent_2D/readme.md)
 for the companion barotropy installation and example configuration.
 
 Use `poetry run python` to run Python scripts in the Poetry environment.
@@ -121,3 +121,29 @@ turbo_moc-app
 ```
 
 For a Poetry source installation, use `poetry run turbo_moc-app`. Open the local URL printed in the terminal to explore nozzle designs, parametrize stator blades, compare results, and export plots and STEP geometry.
+
+## Blade meshing and Fluent workflows
+
+The consolidated development examples live in
+[`example_meshing/`](example_meshing/readme.md), outside the installed package.
+Shared geometry, meshing and Fluent services are grouped under
+`example_meshing/src/geometry/`, `src/meshing/` and `src/fluent/`; the app lives
+in `example_meshing/src/app/`. Every CLI run and Compute MoC action solves
+afresh, while subsequent app stages consume the explicitly selected job result. Case folders contain thin launchers,
+YAML and notes for Gmsh 2D, Gmsh 3D and Fluent 2D; Fluent 3D is a placeholder.
+
+From the repository root, using the project environment:
+
+```bash
+python -m example_meshing.gmsh_3D.run_mesh_app
+```
+
+Open `http://127.0.0.1:8052` for geometric design, reference-section/span setup
+and 3D meshing. The [migration record](example_meshing/migration.md) documents
+verification. Historical meshing/Fluent snapshots under `examples/old/` are
+unchanged by this refactor and remain available for manual comparison; use the
+consolidated entry points for continued development.
+
+The [development roadmap](example_meshing/roadmap.md) records implementation
+status and next priorities. The [theory guide](example_meshing/theory_guide.md)
+explains the geometry, coordinate mapping, meshing and CGNS export.

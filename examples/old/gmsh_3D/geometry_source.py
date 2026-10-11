@@ -388,6 +388,7 @@ def preview_geometry(nozzle, config, *, span_sections=7, curve_points=180):
     from vtkmodules.vtkCommonCore import vtkPoints
     from vtkmodules.vtkCommonDataModel import vtkCellArray, vtkPolyData
     from vtkmodules.vtkFiltersGeneral import vtkContourTriangulator
+    from vtkmodules.vtkFiltersModeling import vtkLinearSubdivisionFilter
 
     channel = Channel(geometry_from_machine(config["machine"]))
     wall = nozzle["wall_final"]
@@ -495,7 +496,14 @@ def preview_geometry(nozzle, config, *, span_sections=7, curve_points=180):
         triangulator.Update()
         if triangulator.GetTriangulationError():
             raise ValueError("Could not tessellate the endwall geometry for display.")
-        triangles = triangulator.GetOutput()
+        # Collinear cap points can disappear during planar triangulation. Refine
+        # before the nonlinear XYZ map so circular radial caps remain curved,
+        # rather than becoming one straight chord per blade passage.
+        subdivision = vtkLinearSubdivisionFilter()
+        subdivision.SetInputConnection(triangulator.GetOutputPort())
+        subdivision.SetNumberOfSubdivisions(3)
+        subdivision.Update()
+        triangles = subdivision.GetOutput()
         q = vtk_to_numpy(triangles.GetPoints().GetData())[:, :2]
         surfaces[name] = {
             "points": channel.map_points(q, eta).ravel().tolist(),

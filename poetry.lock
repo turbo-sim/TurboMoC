@@ -1244,7 +1244,7 @@ description = "React based declarative usage of vtk.js for Dash"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"cad\""
+markers = "extra == \"mesh-viz\" or extra == \"cad\""
 files = [
     {file = "dash_vtk-0.0.9-py3-none-any.whl", hash = "sha256:107a9df32c72acf681b265c454f315879eb6f1bac9da37d4792d3fe1ba21caf7"},
     {file = "dash_vtk-0.0.9.tar.gz", hash = "sha256:27e9b944963013aa5d52db38c8e72f5d315e59084902d35b2708080ce09ee578"},
@@ -6518,9 +6518,9 @@ type = ["pytest-mypy (>=1.0.1) ; platform_python_implementation != \"PyPy\""]
 [extras]
 cad = ["cadquery", "dash-vtk"]
 fluent = ["ansys-fluent-core"]
-mesh-viz = ["pyvista"]
+mesh-viz = ["dash-vtk", "pyvista"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "c15c4b98b2e5305b09f29d2f3da215908dc8fb55eb17677d3344a1ce3a762055"
+content-hash = "7d074274969788ae24c46f8f7725900ef5b5dc1d41e50138083fdc2016aff7bf"

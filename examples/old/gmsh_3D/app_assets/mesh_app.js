@@ -2,12 +2,32 @@
  * browser, avoiding repeated transfers of large mesh-coordinate arrays. */
 window.dash_clientside = Object.assign({}, window.dash_clientside, {
   mesh_app: {
+    fitScene: function (id, sceneKey, actorCount, attempt) {
+      if (window.dash_clientside.mesh_app.lastSceneKey !== sceneKey) return;
+      const element = document.getElementById(id);
+      if (element && element.querySelectorAll("[id^='polydata-']").length === actorCount) {
+        // VTK is loaded asynchronously. Fit after the actors and their data
+        // have mounted, rather than fitting the initially empty renderer.
+        setTimeout(() => {
+          if (document.getElementById(id) &&
+              window.dash_clientside.mesh_app.lastSceneKey === sceneKey) {
+            window.dash_clientside.set_props(id, {
+              triggerResetCamera: Date.now(), triggerRender: Date.now()
+            });
+          }
+        }, 300);
+      } else if (attempt < 100) {
+        setTimeout(() => window.dash_clientside.mesh_app.fitScene(
+          id, sceneKey, actorCount, attempt + 1), 50);
+      }
+    },
     renderScene: function (geometry, mesh, state, tab, requestedCount) {
       const is2D = tab === "conformal";
       const panel2D = {display: is2D ? "block" : "none"};
       const panel3D = {display: is2D ? "none" : "block", height: "64vh"};
       const data = tab === "mesh" ? mesh : geometry;
       if (!data || !state || !state.config) {
+        window.dash_clientside.mesh_app.lastSceneKey = null;
         return [[], panel2D, panel3D,
           tab === "mesh" ? "Create a mesh to inspect it here." : "Compute MoC to preview the geometry."];
       }
@@ -19,7 +39,8 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         inlet: [.39,.58,.93], outlet: [.24,.7,.44], periodic_left: [.87,.63,.87],
         periodic_right: [.94,.9,.55]};
       const sceneKey = [tab, data.geometry_key || data.mesh_key,
-        data.solution_job, count, names.join(","), !!options.show_mesh_edges].join("|");
+        data.solution_job || data.mesh_job, count, names.join(","),
+        !!options.show_mesh_edges].join("|");
       const unchanged = window.dash_clientside.mesh_app.lastSceneKey === sceneKey;
       window.dash_clientside.mesh_app.lastSceneKey = sceneKey;
       const representations = [];
@@ -32,8 +53,10 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
               actor: {orientation: [0, 0, -360 * index / data.num_blades]},
               mapper: {scalarVisibility: false},
               property: {color: colors[name], edgeColor: [0,0,0], opacity: 1,
+                ambient: .25, diffuse: .75,
                 edgeVisibility: tab === "mesh" && !!options.show_mesh_edges},
               children: [{namespace: "dash_vtk", type: "PolyData", props: {
+                id: "polydata-" + index + "-" + name,
                 points: surface.points, polys: surface.polys, connectivity: "manual"
               }}]
             }});
@@ -61,6 +84,10 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       const container = {namespace: "dash_html_components", type: "Div", props: {
         key: sceneKey, style: {height: "100%"}, children: [view]
       }};
+      if (!is2D && !unchanged && representations.length) {
+        setTimeout(() => window.dash_clientside.mesh_app.fitScene(
+          view.props.id, sceneKey, representations.length, 0), 0);
+      }
       // Let the visible pane settle before VTK resizes its canvas.
       setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
       return [unchanged ? window.dash_clientside.no_update : [container],

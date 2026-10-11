@@ -62,7 +62,8 @@ LOG_FILENAME = "mesh_generation.log"  # Replaced on every run, like mesh outputs
 
 
 def load_or_solve_nozzle(
-    parameters, cache_file, use_cache=True, force_solve=False, *, cache_only=False
+    parameters, cache_file, use_cache=True, force_solve=False, *, cache_only=False,
+    progress_callback=None,
 ):
     """Load or solve a validated MoC design; cache_only returns None on a cache miss."""
 
@@ -149,7 +150,9 @@ def load_or_solve_nozzle(
         return None
 
     logger.info("  Calculating a new MoC solution (solver output follows).")
-    result = turbo_moc.design_nozzle(**parameters)
+    # Keep the cache policy shared by CLI and apps, but let a UI observe the
+    # solver's existing progress events without inspecting terminal text.
+    result = turbo_moc.design_nozzle(**parameters, progress_callback=progress_callback)
     if not usable_result(result):
         raise RuntimeError("The nozzle design did not converge to a usable wall.")
     if use_cache:

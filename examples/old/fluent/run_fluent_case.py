@@ -17,10 +17,10 @@ from scipy.spatial import cKDTree
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from examples.fluent.barotropic_model import generate_barotropic_model, positive
-import examples.gmsh.geometry_source as geo
-from examples.gmsh.meshing_source import create_mesh
-from examples.gmsh.run_mesh_generation import (
+from examples.old.fluent.barotropic_model import generate_barotropic_model, positive
+import examples.old.gmsh.geometry_source as geo
+from examples.old.gmsh.meshing_source import create_mesh
+from examples.old.gmsh.run_mesh_generation import (
     load_or_solve_nozzle,
     read_configuration,
 )

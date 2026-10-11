@@ -19,7 +19,7 @@ dependencies = [
     "pandas",
     "plotly",
     "kaleido>=1",
-    "dash[diskcache]",
+    "dash[diskcache]>=2.16",
 ]
 
 [project.optional-dependencies]

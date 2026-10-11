@@ -67,9 +67,19 @@ CASES = {
 # JavaScript represents 1.0 and 1 with the same number type. Use parameter
 # semantics rather than the round-tripped YAML value to identify integers.
 INTEGER_KEYS = {
-    "n", "n_cp", "num_baseline_points", "num_curve_points", "num_points",
-    "num_blades", "verbosity", "curvature_elements", "algorithm",
-    "recombination_algorithm", "smoothing_steps", "span_layers", "dpi",
+    "n",
+    "n_cp",
+    "num_baseline_points",
+    "num_curve_points",
+    "num_points",
+    "num_blades",
+    "verbosity",
+    "curvature_elements",
+    "algorithm",
+    "recombination_algorithm",
+    "smoothing_steps",
+    "span_layers",
+    "dpi",
 }
 logger = log.get_logger("gmsh_3D.app")
 
@@ -731,23 +741,15 @@ def create_app():
         Output("mesh-data", "data"),
         Output("mesh-downloads", "children"),
         Input("mesh-reference", "data"),
+        background=True,
+        prevent_initial_call=True,
     )
     def load_mesh(reference):
+        # Gmsh owns process-global state and installs signal handlers. Keep
+        # loading in a worker, too: Flask request threads cannot safely use it.
         if not reference:
             return None, []
         directory = session_directory(reference["session"], reference["job"])
-        faces = msh.load_mesh_surfaces(directory / "stator_mesh_3d.msh")
-        summary = reference["summary"]
-        data = {
-            "surfaces": {
-                name: {"points": points.ravel().tolist(), "polys": polygons.tolist()}
-                for name, (points, polygons) in faces.items()
-            },
-            "num_blades": summary["geometry"]["num_blades"],
-            "mesh_key": reference["mesh_key"],
-            "cells": sum(summary["cells"].values()),
-            "min_sicn": summary["quality"]["min_sicn"],
-        }
         files = [
             "stator_mesh_3d.msh",
             "configuration.yaml",
@@ -763,6 +765,26 @@ def create_app():
             )
             for name in files
         ]
+        try:
+            faces = msh.load_mesh_surfaces(directory / "stator_mesh_3d.msh")
+        except Exception as exc:
+            logger.exception("Loading the browser mesh view failed")
+            return None, [
+                html.Span(f"Could not load the mesh view: {exc}", className="error"),
+                *links,
+            ]
+        summary = reference["summary"]
+        data = {
+            "surfaces": {
+                name: {"points": points.ravel().tolist(), "polys": polygons.tolist()}
+                for name, (points, polygons) in faces.items()
+            },
+            "num_blades": summary["geometry"]["num_blades"],
+            "mesh_key": reference["mesh_key"],
+            "mesh_job": reference["job"],
+            "cells": sum(summary["cells"].values()),
+            "min_sicn": summary["quality"]["min_sicn"],
+        }
         return data, links
 
     app.clientside_callback(
