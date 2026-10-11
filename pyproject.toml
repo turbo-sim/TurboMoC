@@ -60,6 +60,8 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-p no:cacheprovider"
+# Preserved legacy implementation tests are opt-in via pytest tests/deprecated.
+norecursedirs = ["deprecated"]
 
 
 # Rememeber to add --tags when publishing a new version

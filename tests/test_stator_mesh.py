@@ -1,4 +1,4 @@
-"""Small workflow checks: one real mesh, cache reuse, and failed-mesh cleanup."""
+"""Small workflow checks: a real mesh, fresh MoC solves and failed-mesh cleanup."""
 
 import copy
 import importlib
@@ -17,9 +17,11 @@ from turbo_moc.io.cgns_adf import read_adf
 def mesh_example():
     with pytest.MonkeyPatch.context() as patch:
         patch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-        runner = importlib.import_module("examples.gmsh.run_mesh_generation")
-        meshing = importlib.import_module("examples.gmsh.meshing_source")
-        config = runner.read_configuration()
+        runner = importlib.import_module("turbo_moc.meshing.meshing_2d")
+        meshing = importlib.import_module("turbo_moc.meshing.meshing_2d")
+        from turbo_moc.configuration_2d import read_configuration
+        from turbo_moc.geometry import geometry_2d
+        config = read_configuration(Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml")
         # Exercise real blade fitting and automatic passage placement without
         # solving a thermodynamic MoC case. Keep the test mesh and plots small.
         config["blade"].update(
@@ -35,7 +37,7 @@ def mesh_example():
                 "y": (0.002 + 0.001 * (x / x[-1]) ** 2).tolist(),
             },
         }
-        blade, curves = runner.geo.build_geometry(nozzle, config)
+        blade, curves = geometry_2d.build_geometry(nozzle, config)
         settings = copy.deepcopy(config["mesh"])
         settings["show_gui"] = False
         settings["numerics"].update(
@@ -134,25 +136,34 @@ def test_mesh_workflow_exports_a_usable_periodic_mesh(
     assert not gmsh.isInitialized()
 
 
-def test_nozzle_cache_reuses_matching_inputs_and_preserves_good_results(
-    mesh_example, monkeypatch, tmp_path
-):
-    runner, *_ = mesh_example
+def test_explicit_moc_calls_always_solve_and_do_not_write_files(monkeypatch, tmp_path):
+    from turbo_moc.geometry import moc
     result = {"converged": True, "wall_final": {"x": [0, 0.05], "y": [0.01, 0.015]}}
     solve = Mock(return_value=result)
-    monkeypatch.setattr(runner.turbo_moc, "design_nozzle", solve)
-    cache = tmp_path / "nozzle.json"
-    runner.load_or_solve_nozzle({"n": 15}, cache)
-    assert runner.load_or_solve_nozzle({"n": 15}, cache) == result
-    assert solve.call_count == 1
-    runner.load_or_solve_nozzle({"n": 20}, cache)
+    monkeypatch.setattr(moc.turbo_moc, "design_nozzle", solve)
+    monkeypatch.chdir(tmp_path)
+    assert moc.solve_nozzle({"n": 15}) is result
+    progress = Mock()
+    assert moc.solve_nozzle({"n": 15}, progress_callback=progress) is result
+    assert solve.call_args.kwargs["progress_callback"] is progress
     assert solve.call_count == 2
-    previous = cache.read_text()
+    assert not list(tmp_path.iterdir())
     solve.return_value = {"converged": False}
     with pytest.raises(RuntimeError, match="did not converge"):
-        runner.load_or_solve_nozzle({"n": 20}, cache, force_solve=True)
-    assert cache.read_text() == previous
-    assert json.loads(previous)["result"] == result
+        moc.solve_nozzle({"n": 15})
+
+
+@pytest.mark.parametrize("wall", [
+    {"x": [0, float("nan")], "y": [0, 1]},
+    {"x": [0, 1], "y": [0]},
+    {"x": [0], "y": [1]},
+])
+def test_moc_rejects_unusable_converged_walls(monkeypatch, wall):
+    from turbo_moc.geometry import moc
+    monkeypatch.setattr(moc.turbo_moc, "design_nozzle",
+                        Mock(return_value={"converged": True, "wall_final": wall}))
+    with pytest.raises(RuntimeError, match="did not converge"):
+        moc.solve_nozzle({})
 
 
 def test_invalid_periodic_geometry_closes_gmsh(mesh_example, tmp_path):
@@ -162,3 +173,83 @@ def test_invalid_periodic_geometry_closes_gmsh(mesh_example, tmp_path):
     with pytest.raises(ValueError, match="pitch-translated"):
         meshing.create_mesh(blade, invalid, settings, tmp_path, show_gui=False)
     assert not gmsh.isInitialized()
+
+
+@pytest.mark.parametrize("generate_mesh,show_gui,save_figure,show_figure", [
+    (True, True, True, False),
+    (True, False, False, True),
+    (False, True, False, False),
+])
+def test_planar_workflow_obeys_yaml_controls(
+        mesh_example, monkeypatch, tmp_path, generate_mesh, show_gui,
+        save_figure, show_figure):
+    import yaml
+    import barotropy
+    import matplotlib.pyplot as plt
+    from turbo_moc.geometry import geometry_2d, moc
+
+    runner, _, blade, curves, _ = mesh_example
+    source = Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml"
+    config = yaml.safe_load(source.read_text())
+    config["workflow"] = {
+        "generate_mesh": generate_mesh,
+        "geometry_figure": {"save": save_figure, "show": show_figure,
+                            "size": [9, 5], "dpi": 123, "formats": [".svg"]},
+        "reporting": {"level": "DEBUG", "filename": "custom.log"},
+    }
+    config["mesh"]["show_gui"] = show_gui
+    case = tmp_path / "case.yaml"
+    case.write_text(yaml.safe_dump(config))
+    solve = Mock(return_value={})
+    mesh = Mock()
+    viewer = Mock()
+    exports = []
+
+    def save(figure, filename, *, formats):
+        exports.append((tuple(figure.get_size_inches()), plt.rcParams["savefig.dpi"],
+                        formats, Path(filename).name))
+
+    monkeypatch.setattr(moc, "solve_nozzle", solve)
+    monkeypatch.setattr(geometry_2d, "build_geometry", lambda *args: (blade, curves))
+    plot = Mock(wraps=geometry_2d.plot_construction)
+    monkeypatch.setattr(geometry_2d, "plot_construction", plot)
+    monkeypatch.setattr(runner, "create_mesh", mesh)
+    monkeypatch.setattr(barotropy, "savefig_in_formats", save)
+    monkeypatch.setattr(plt, "show", viewer)
+    dpi_before = plt.rcParams["savefig.dpi"]
+    runner.main(case, tmp_path / "output")
+    solve.assert_called_once()
+    assert mesh.call_count == int(generate_mesh)
+    if generate_mesh:
+        assert mesh.call_args.kwargs["show_gui"] is show_gui
+    assert plot.call_count == int(save_figure or show_figure)
+    assert viewer.call_count == int(show_figure)
+    assert exports == ([((9.0, 5.0), 123, [".svg"], "stator_geometry")] if save_figure else [])
+    assert (tmp_path / "output/custom.log").is_file()
+    assert plt.rcParams["savefig.dpi"] == dpi_before
+
+
+@pytest.mark.parametrize("section,key,value", [
+    (None, "generate_mesh", "false"),
+    ("geometry_figure", "size", [0, 8]),
+    ("geometry_figure", "dpi", True),
+    ("geometry_figure", "formats", [".unsupported"]),
+    ("reporting", "level", "VERBOSE"),
+    ("reporting", "filename", "../outside.log"),
+])
+def test_invalid_workflow_settings_fail_before_moc(monkeypatch, tmp_path, section, key, value):
+    import yaml
+    from turbo_moc.geometry import moc
+    from turbo_moc.meshing import meshing_2d
+
+    source = Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml"
+    config = yaml.safe_load(source.read_text())
+    settings = config["workflow"] if section is None else config["workflow"][section]
+    settings[key] = value
+    case = tmp_path / "invalid.yaml"
+    case.write_text(yaml.safe_dump(config))
+    solve = Mock()
+    monkeypatch.setattr(moc, "solve_nozzle", solve)
+    with pytest.raises(ValueError, match="workflow"):
+        meshing_2d.main(case, tmp_path / "output")
+    solve.assert_not_called()

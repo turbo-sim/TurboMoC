@@ -1,4 +1,4 @@
-"""Run every shipped example in non-interactive smoke-test mode."""
+"""Run canonical examples in non-interactive smoke-test mode."""
 
 import os
 from pathlib import Path
@@ -9,7 +9,11 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-EXAMPLES = sorted((PROJECT_ROOT / "examples").glob("*.py"))
+EXAMPLES = sorted(
+    path for folder in ("moc_design", "apps")
+    for path in (PROJECT_ROOT / "examples" / folder).glob("*.py")
+    if path.name != "run_app_legacy.py"
+)
 
 
 @pytest.mark.parametrize("script", EXAMPLES, ids=lambda path: path.stem)
@@ -31,3 +35,28 @@ def test_example_runs(script):
         f"{script.name} failed with exit code {result.returncode}.\n"
         f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
+
+
+def test_workflow_runners_resolve_local_files_from_another_directory(tmp_path, monkeypatch):
+    import runpy
+    import yaml
+    from turbo_moc.meshing import meshing_2d, meshing_3d
+    from turbo_moc.fluent import workflow_2d, workflow_3d
+    monkeypatch.chdir(tmp_path)
+    for family, module, runner in (
+        ("gmsh_2D", meshing_2d, "run_mesh_generation.py"),
+        ("gmsh_3D", meshing_3d, "run_mesh_generation.py"),
+        ("fluent_2D", workflow_2d, "run_fluent_case.py"),
+        ("fluent_3D", workflow_3d, "run_fluent_case.py"),
+    ):
+        calls = []
+        monkeypatch.setattr(module, "main", lambda *args: calls.append(args))
+        folder = PROJECT_ROOT / "examples" / family
+        runpy.run_path(str(folder / runner), run_name="__main__")
+        assert len(calls) == 1
+        config = calls[0][0]
+        assert config.is_absolute() and config.parent == folder and config.is_file()
+        if len(calls[0]) == 2:
+            assert calls[0][1] == folder / "output"
+        else:
+            assert yaml.safe_load(config.read_text())["output_dir"] == "output"

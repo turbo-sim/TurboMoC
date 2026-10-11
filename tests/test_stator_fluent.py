@@ -15,14 +15,14 @@ import pytest
 @pytest.fixture
 def workflow_module(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-    return importlib.import_module("examples.fluent.run_fluent_case")
+    return importlib.import_module("turbo_moc.fluent.workflow_2d")
 
 
 def test_barotropic_fit_preserves_moc_inlet_and_has_positive_properties(
     workflow_module,
 ):
-    model = importlib.import_module("examples.fluent.barotropic_model")
-    workflow, config = workflow_module.read_workflow(workflow_module.CONFIG_FILE)
+    model = importlib.import_module("turbo_moc.fluent.barotropic_model")
+    workflow, config = workflow_module.read_workflow(FLUENT_CONFIG)
     inputs = {**config["nozzle"], "Q0": 0.0}
     # Preserve the quality actually used by MoC, rather than its original input.
     fluid, inlet, quality = model.resolve_inlet_state(
@@ -53,7 +53,7 @@ def test_barotropic_fit_preserves_moc_inlet_and_has_positive_properties(
 def test_case_creation_never_solves_and_always_closes_fluent(
     workflow_module, monkeypatch, tmp_path, setup_fails
 ):
-    workflow, _ = workflow_module.read_workflow(workflow_module.CONFIG_FILE)
+    workflow, _ = workflow_module.read_workflow(FLUENT_CONFIG)
     workflow.update(output_dir=tmp_path, run_case=False)
     options = workflow["fluent"]
     folder = tmp_path / "fluent"
@@ -102,7 +102,7 @@ def test_case_creation_never_solves_and_always_closes_fluent(
 def test_solver_strategy_and_final_exports(
     workflow_module, monkeypatch, tmp_path, outcome
 ):
-    workflow, _ = workflow_module.read_workflow(workflow_module.CONFIG_FILE)
+    workflow, _ = workflow_module.read_workflow(FLUENT_CONFIG)
     options = workflow["fluent"]
     # Two blocks exercise order switching and advancing after early convergence.
     # Keep the scenario independent of the user-editable example stage budgets.
@@ -256,7 +256,7 @@ def test_solver_strategy_and_final_exports(
 def test_final_pair_save_reports_completion_and_failures(
     workflow_module, monkeypatch, tmp_path, outcome
 ):
-    workflow, _ = workflow_module.read_workflow(workflow_module.CONFIG_FILE)
+    workflow, _ = workflow_module.read_workflow(FLUENT_CONFIG)
     options = workflow["fluent"]
     solver = MagicMock()
     stem = options["case_filename"].removesuffix(".cas.h5")
@@ -307,3 +307,7 @@ def test_final_pair_save_reports_completion_and_failures(
         assert "case_file" not in summary and "data_file" not in summary
         if outcome == "write_error":
             assert summary["failed_stage"] == "saving_final_solution"
+
+CASE_DIR = Path(__file__).resolve().parents[1] / "examples/apps/cases"
+CASES = {n: CASE_DIR / f"{n}.yaml" for n in ("axial_stator", "radial_stator")}
+FLUENT_CONFIG = Path(__file__).resolve().parents[1] / "examples/fluent_2D/workflow_fluent_stator_2D.yaml"

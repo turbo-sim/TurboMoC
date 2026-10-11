@@ -10,30 +10,37 @@ from scipy.integrate import quad
 from scipy.interpolate import BSpline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from examples.gmsh_3D import geometry_source as geo
-from examples.gmsh_3D import meshing_source as msh
-from examples.gmsh_3D.run_mesh_generation import read_configuration
+from turbo_moc.geometry import meridional_channel as geo
+from turbo_moc.meshing import meshing_3d as msh
+from turbo_moc.configuration import read_configuration as read_case, to_shared
+from pathlib import Path
+GMSH_3D_DIR = Path(__file__).resolve().parents[1] / "examples/apps/cases"
+
+
+def read_configuration(config_file=GMSH_3D_DIR / 'axial_stator.yaml'):
+    # These meridional_channel/topology tests exercise the low-level conformal convention.
+    return to_shared(read_case(config_file))
 from turbo_moc.io.cgns_adf import read_adf
 
 
 def test_physical_chords_and_radial_endpoints():
     config = read_configuration()
-    channel = geo.Channel(geo.geometry_from_machine(config["machine"]))
+    meridional_channel = geo.MeridionalChannel(geo.geometry_from_machine(config["machine"]))
     for eta, chord in (
         (0, config["machine"]["hub_chord"]),
         (1, config["machine"]["tip_chord"]),
     ):
         q = np.array(
-            [[0, 0], [0, -channel.reference_radius * channel.prime_chord(eta)]]
+            [[0, 0], [0, -meridional_channel.reference_radius * meridional_channel.prime_chord(eta)]]
         )
-        xyz = channel.map_points(q, eta)
+        xyz = meridional_channel.map_points(q, eta)
         assert xyz[0, 2] == 0
         assert xyz[1, 2] == pytest.approx(chord)
-    config = read_configuration("examples/gmsh_3D/radial_stator.yaml")
-    channel = geo.Channel(geo.geometry_from_machine(config["machine"]))
-    q = np.array([[0, 0], [0, -channel.reference_chord]])
+    config = read_configuration("examples/apps/cases/radial_stator.yaml")
+    meridional_channel = geo.MeridionalChannel(geo.geometry_from_machine(config["machine"]))
+    q = np.array([[0, 0], [0, -meridional_channel.reference_chord]])
     for eta in (0, 0.5, 1):
-        xyz = channel.map_points(q, eta)
+        xyz = meridional_channel.map_points(q, eta)
         assert np.linalg.norm(xyz[:, :2], axis=1) == pytest.approx(
             [config["machine"]["inlet_radius"], config["machine"]["outlet_radius"]]
         )
@@ -43,7 +50,7 @@ def test_physical_chords_and_radial_endpoints():
 
 
 def curved_geometry():
-    """A curved mixed-direction channel specified without a machine type."""
+    """A curved mixed-direction meridional_channel specified without a machine type."""
     knots = [0, 0, 0, 0, 1, 1, 1, 1]
     return geo.GeometryDefinition(
         hub=BSpline(knots, [[100, 0], [100, 12], [102, 28], [104, 40]], 3),
@@ -54,7 +61,7 @@ def curved_geometry():
 
 def test_general_curved_meridional_mapping():
     definition = curved_geometry()
-    channel = geo.Channel(definition)
+    meridional_channel = geo.MeridionalChannel(definition)
     for eta in (0, 0.5, 1):
 
         def wall(u, derivative=False):
@@ -81,21 +88,21 @@ def test_general_curved_meridional_mapping():
                 for end in stations
             ]
         )
-        q = np.column_stack((np.zeros(len(prime)), -channel.reference_radius * prime))
-        xyz = channel.map_points(q, eta)
+        q = np.column_stack((np.zeros(len(prime)), -meridional_channel.reference_radius * prime))
+        xyz = meridional_channel.map_points(q, eta)
         expected = np.array([wall(u) for u in stations])
         assert np.allclose(xyz[:, (0, 2)], expected, rtol=2e-9, atol=2e-8)
         assert np.allclose(xyz[:, 1], 0)
-        assert channel.prime_chord(eta) == pytest.approx(prime[3], rel=1e-10)
+        assert meridional_channel.prime_chord(eta) == pytest.approx(prime[3], rel=1e-10)
 
     with pytest.raises(ValueError, match="degenerate"):
-        geo.Channel(geo.GeometryDefinition(definition.hub, definition.hub, 12))
+        geo.MeridionalChannel(geo.GeometryDefinition(definition.hub, definition.hub, 12))
 
 
 @pytest.mark.parametrize("case", ["axial", "radial_inflow", "radial_outflow", "curved"])
 def test_tiny_volume_export_and_periodic_rotation(case, tmp_path):
     name = "axial_stator" if case == "axial" else "radial_stator"
-    config = read_configuration(f"examples/gmsh_3D/{name}.yaml")
+    config = read_configuration(f"examples/apps/cases/{name}.yaml")
     if case == "radial_outflow":
         m = config["machine"]
         m["inlet_radius"], m["outlet_radius"] = m["outlet_radius"], m["inlet_radius"]
@@ -104,8 +111,8 @@ def test_tiny_volume_export_and_periodic_rotation(case, tmp_path):
         if case == "curved"
         else geo.geometry_from_machine(config["machine"])
     )
-    channel = geo.Channel(definition)
-    p, c = channel.pitch, channel.reference_chord
+    meridional_channel = geo.MeridionalChannel(definition)
+    p, c = meridional_channel.pitch, meridional_channel.reference_chord
     # Four CCW quads surrounding a blade hole, with opposite sides translated.
     xy = np.array(
         [
@@ -134,16 +141,16 @@ def test_tiny_volume_export_and_periodic_rotation(case, tmp_path):
         "slave": np.array([1, 2]),
         "master": np.array([0, 3]),
     }
-    xyz = np.array([channel.map_points(xy, eta) for eta in (0, 0.5, 1)])
+    xyz = np.array([meridional_channel.map_points(xy, eta) for eta in (0, 0.5, 1)])
     gmsh.initialize(["test_3d", "-v", "0"])
     try:
-        counts = msh.assemble_volume(section, xyz, channel)
-        quality = msh.validate_volume(section, xyz, channel)
+        counts = msh.assemble_volume(section, xyz, meridional_channel)
+        quality = msh.validate_volume(section, xyz, meridional_channel)
         assert counts == {"hexahedra": 8, "prisms": 0}
         assert quality["min_determinant_jacobian"] > 0
         assert quality["periodic_node_pairs"] == 6
         path = tmp_path / f"{case}.cgns"
-        result = msh.export_cgns(path, config["mesh"]["cgns"], channel)
+        result = msh.export_cgns(path, config["mesh"]["cgns"], meridional_channel)
         assert result["validation"]["boundary_partition_complete"]
         base = read_adf(path).get(label="CGNSBase_t")
         assert np.array_equal(base.data, [3, 3])

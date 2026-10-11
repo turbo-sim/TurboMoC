@@ -84,12 +84,10 @@ def test_logging_context_logs_an_escaping_exception_once_and_reraises():
     assert text.count("Traceback") == 1 and "RuntimeError: solver exploded" in text
 
 
-def test_examples_wrapper_shares_the_handlers():
-    from examples import workflow_logging as log
-
+def test_workflow_and_meshing_loggers_share_the_handlers():
     stream = io.StringIO()
     with logging_context(stream=stream):
-        log.get_logger("fluent.runner").info("fluent")
+        get_logger("workflows.fluent.runner").info("fluent")
         logging.getLogger("turbo_moc.meshing.stator_mesh_2d").info("mesh")
     assert stream.getvalue().splitlines() == ["fluent", "mesh"]
 
