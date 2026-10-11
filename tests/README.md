@@ -66,14 +66,27 @@ From the repository root, run the current implementation suite:
 .venv/Scripts/python.exe -m pytest tests -q
 ```
 
-Plain `pytest` uses the same default selection. Run the preserved deprecated
+Plain `pytest` uses the same default selection, excluding `tests/fluent/` and
+`tests/deprecated/`. The default suite requires neither PyFluent, a Fluent
+installation/license, CadQuery nor the companion barotropy package.
+
+Fluent workflow and graphics checks are opt-in:
+
+```powershell
+poetry run pytest tests/fluent -q
+```
+
+These checks use mocked Fluent sessions and field requests; they do not launch
+Fluent. They retain a real jaxprop EOS check for the barotropic fit.
+
+Run the preserved deprecated
 tests explicitly when changing that implementation or its compatibility aliases:
 
 ```powershell
 .venv/Scripts/python.exe -m pytest tests/deprecated -q
 ```
 
-To run both suites together:
+To run the default, Fluent and deprecated suites together:
 
 ```powershell
 .venv/Scripts/python.exe -m pytest tests -q -o norecursedirs=
@@ -103,7 +116,18 @@ complete run passed all 332; the optional CAD module was skipped because CadQuer
 was unavailable. VTK emitted NumPy deprecation warnings. No application or
 scientific implementation changes were needed. The subsequent folder separation
 preserves those tests while excluding deprecated coverage from default runs:
-308 current tests are collected by default, and 24 deprecated tests are available
+308 current tests were collected by default, and 24 deprecated tests were available
 explicitly, plus the optional CAD module. Collection was checked for each mode;
 19 fast deprecated tests were rerun and passed after the move. The slower mesh
 tests were already passing in the complete run before relocation.
+
+The subsequent Fluent separation moves 72 checks into `tests/fluent/`, leaving
+236 checks in the default suite. Ubuntu CI installs `libglu1-mesa`, the native
+library required to import Gmsh. The planar mesh workflow uses jaxprop plotting
+helpers and is tested with barotropy explicitly unavailable.
+
+Verification on Windows with Python 3.13: all 236 default checks passed with
+PyFluent, barotropy and CadQuery imports blocked. The 15 planar mesh checks and
+72 opt-in Fluent checks also passed together. The default run reported 170
+VTK/NumPy deprecation warnings; no test failed. The Ubuntu system-library fix
+requires verification by the next GitHub Actions run.

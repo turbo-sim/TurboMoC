@@ -192,8 +192,12 @@ for nozzle, stator, and rotor design, including plots and coordinate exports.
 Launch the app:
 
 ```bash
-turbo_moc-design-app
+turbo_moc-app
 ```
+
+Launch the preserved app separately with `turbo_moc-app-legacy` (port 8050).
+After updating a Poetry checkout, run `poetry install --only-root` to refresh
+the installed launcher commands without updating dependencies.
 
 For a Poetry installation, prefix the commands with `poetry run`. Open the local
 URL printed in the terminal (port 8052 by default). **Geometry generation**

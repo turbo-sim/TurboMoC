@@ -72,10 +72,21 @@ You can also invoke pytest directly or run one test module:
 poetry run pytest tests/test_examples.py
 ```
 
-The Gmsh and Fluent workflows have a separate fast smoke suite:
+The default suite includes app, geometry, meshing and solver checks, and excludes
+the opt-in Fluent and deprecated folders:
 
 ```bash
-poetry run pytest tests/test_stator_mesh.py tests/test_stator_fluent.py -q
+poetry run pytest
+```
+
+It needs neither Fluent/PyFluent nor the companion barotropy package. On Ubuntu,
+install Gmsh's native library with `sudo apt-get install libglu1-mesa` before
+running mesh checks. GitHub Actions installs this dependency automatically.
+
+For the fast Gmsh and opt-in Fluent workflow checks:
+
+```bash
+poetry run pytest tests/test_stator_mesh.py tests/fluent -q
 ```
 
 It generates one small real mesh, checks its exported artifacts and cache behavior,
@@ -90,8 +101,8 @@ figures are still constructed, but the checks do not start the Dash server,
 open plot windows. The design examples still export coordinates and figures
 to their own ignored `examples/output/` directories.
 
-GitHub Actions runs the same smoke suite on Ubuntu and Windows for pushes and
-pull requests targeting `main`.
+The package publishing workflow runs the default pytest suite on Ubuntu and
+Windows for release tags and pull requests targeting `main`.
 
 ## Releasing a new version
 

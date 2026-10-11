@@ -271,7 +271,7 @@ counts include only the current run.
 For the fast mesh/Fluent automation smoke suite, run:
 
 ```powershell
-poetry run pytest tests/test_stator_mesh.py tests/test_stator_fluent.py -q
+poetry run pytest tests/test_stator_mesh.py tests/fluent -q
 ```
 
 The Fluent module checks inlet/fit consistency, case-only creation and cleanup,

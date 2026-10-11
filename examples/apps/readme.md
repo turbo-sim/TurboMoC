@@ -43,10 +43,12 @@ defaults and accepts any caller-supplied project YAML.
 sizing, CAD and rotor tools. Both launchers accept
 `TURBO_MOC_EXAMPLE_SMOKE_TEST=1` for initialization without a server.
 
-Installed package commands remain available separately: `turbo_moc-design-app`
-(or `python -m turbo_moc.apps.app`) and `turbo_moc-app` for the preceding app.
+Installed package commands remain available separately: `turbo_moc-app`
+(or `python -m turbo_moc.apps.app`) and `turbo_moc-app-legacy` for the preceding app.
 The installed current command still accepts explicit configuration, port and
 output arguments; these are not required by the example launchers.
+Run `poetry install --only-root` after updating a Poetry checkout to refresh
+the installed commands. Prefix either command with `poetry run` in that environment.
 
 See the [app guide](../../src/turbo_moc/apps/app/readme.md) and
 [feature comparison](../../docs/internal_information/merging_summary.md).

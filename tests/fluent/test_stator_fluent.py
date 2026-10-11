@@ -14,7 +14,7 @@ import pytest
 
 @pytest.fixture
 def workflow_module(monkeypatch):
-    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
     return importlib.import_module("turbo_moc.fluent.workflow_2d")
 
 
@@ -308,6 +308,6 @@ def test_final_pair_save_reports_completion_and_failures(
         if outcome == "write_error":
             assert summary["failed_stage"] == "saving_final_solution"
 
-CASE_DIR = Path(__file__).resolve().parents[1] / "examples/apps/cases"
+CASE_DIR = Path(__file__).resolve().parents[2] / "examples/apps/cases"
 CASES = {n: CASE_DIR / f"{n}.yaml" for n in ("axial_stator", "radial_stator")}
-FLUENT_CONFIG = Path(__file__).resolve().parents[1] / "examples/fluent_2D/workflow_fluent_stator_2D.yaml"
+FLUENT_CONFIG = Path(__file__).resolve().parents[2] / "examples/fluent_2D/workflow_fluent_stator_2D.yaml"

@@ -249,17 +249,17 @@ choose explicit case output directories.
 
 ## Entry points and resource locations
 
-The canonical interface runs as `turbo_moc-design-app` or
+The canonical interface runs as `turbo_moc-app` or
 `python -m turbo_moc.apps.app`, accepting `--config`, `--port` (default 8052)
 and `--output-dir`. The example `examples/apps/run_app.py` delegates to this
 entry point. `create_app(config_file=None)` remains available to Python callers.
 
-The established `turbo_moc-app` / `python -m turbo_moc.app` commands retain the
+The preserved `turbo_moc-app-legacy` / `python -m turbo_moc.app` commands retain the
 preceding app, implemented under `turbo_moc.deprecated.app`.
 `examples/apps/run_app_legacy.py` also retains its preceding app behavior and is
 now located alongside the new launcher under `examples/apps/`. Existing editable environments need reinstallation to register
-`turbo_moc-design-app`; the Python module and minimal new example launcher
-work immediately. Installing `.[mesh-viz]` registers the new console entry.
+the current console commands; use `poetry install --only-root` in a Poetry
+checkout. The Python module and minimal new example launcher work immediately.
 
 
 Default YAML is installed under `turbo_moc/data/gmsh_2D`, `gmsh_3D` and

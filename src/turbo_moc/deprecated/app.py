@@ -28,7 +28,7 @@ Run locally::
 
     conda activate turbo_moc_env
     python -m turbo_moc.app
-    (or: turbo_moc-app, the console-script entry point from pyproject.toml)
+    (or: turbo_moc-app-legacy, the console-script entry point from pyproject.toml)
 
 then open the printed http://127.0.0.1:8050/ URL in a browser.
 """

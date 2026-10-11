@@ -295,8 +295,8 @@ python -m examples.apps.run_app
 The minimal launcher delegates to `turbo_moc.apps.app.main` and accepts
 `--config` to initialize a project YAML, `--port` to choose a local port and
 `--output-dir` for writable runtime artifacts. Installed entry points are
-`turbo_moc-design-app` / `python -m turbo_moc.apps.app`; the established
-`turbo_moc-app` / `python -m turbo_moc.app` retain the preceding app. For example, use
+`turbo_moc-app` / `python -m turbo_moc.apps.app`; the preserved
+`turbo_moc-app-legacy` / `python -m turbo_moc.app` retain the preceding app. For example, use
 `--config examples/apps/cases/rotor_only.yaml --port 8053` to inspect the
 rotor placeholder beside another app. This loads settings without restoring
 session history or adopting old artifacts.

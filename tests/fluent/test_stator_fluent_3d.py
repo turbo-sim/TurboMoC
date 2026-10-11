@@ -20,7 +20,7 @@ from turbo_moc.geometry.meridional_channel import (
     geometry_from_machine,
 )
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_FILE = ROOT / "examples/fluent_3D/workflow_fluent_stator_3D.yaml"
 CASES = ROOT / "examples/apps/cases"
 

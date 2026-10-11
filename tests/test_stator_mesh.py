@@ -3,6 +3,7 @@
 import copy
 import importlib
 import json
+import sys
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -11,6 +12,12 @@ import numpy as np
 import pytest
 
 from turbo_moc.io.cgns_adf import read_adf
+
+
+@pytest.fixture(autouse=True)
+def without_barotropy(monkeypatch):
+    """Mesh workflows must work without the optional Fluent companion package."""
+    monkeypatch.setitem(sys.modules, "barotropy", None)
 
 
 @pytest.fixture(scope="module")
@@ -184,7 +191,7 @@ def test_planar_workflow_obeys_yaml_controls(
         mesh_example, monkeypatch, tmp_path, generate_mesh, show_gui,
         save_figure, show_figure):
     import yaml
-    import barotropy
+    import jaxprop as jxp
     import matplotlib.pyplot as plt
     from turbo_moc.geometry import geometry_2d, moc
 
@@ -205,8 +212,8 @@ def test_planar_workflow_obeys_yaml_controls(
     viewer = Mock()
     exports = []
 
-    def save(figure, filename, *, formats):
-        exports.append((tuple(figure.get_size_inches()), plt.rcParams["savefig.dpi"],
+    def save(figure, filename, *, formats, dpi):
+        exports.append((tuple(figure.get_size_inches()), dpi,
                         formats, Path(filename).name))
 
     monkeypatch.setattr(moc, "solve_nozzle", solve)
@@ -214,7 +221,7 @@ def test_planar_workflow_obeys_yaml_controls(
     plot = Mock(wraps=geometry_2d.plot_construction)
     monkeypatch.setattr(geometry_2d, "plot_construction", plot)
     monkeypatch.setattr(runner, "create_mesh", mesh)
-    monkeypatch.setattr(barotropy, "savefig_in_formats", save)
+    monkeypatch.setattr(jxp, "savefig_in_formats", save)
     monkeypatch.setattr(plt, "show", viewer)
     dpi_before = plt.rcParams["savefig.dpi"]
     runner.main(case, tmp_path / "output")

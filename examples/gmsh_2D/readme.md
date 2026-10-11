@@ -471,11 +471,12 @@ See the [migration record](../../z_information/migration.md) for the complete ve
 Run just the fast mesh and Fluent automation checks:
 
 ```powershell
-poetry run pytest tests/test_stator_mesh.py tests/test_stator_fluent.py -q
+poetry run pytest tests/test_stator_mesh.py tests/fluent -q
 ```
 
 The Fluent cases use mocks without launching Fluent; the thermodynamic fit check
-uses jaxprop. The runner imports the installed barotropy plotting helpers.
+uses jaxprop. The mesh runner also uses jaxprop plotting helpers and needs no
+barotropy checkout. Fluent tests are excluded from the default pytest run.
 For a full execution check, run the example with both viewers disabled,
 then inspect `mesh_generation.log`, the CGNS mesh and the quality report.
 

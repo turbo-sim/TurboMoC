@@ -89,6 +89,8 @@ class RejectExamples(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in ('examples', 'example_meshing'):
             raise AssertionError('Canonical dependency on examples: ' + fullname)
+        if fullname == 'barotropy' or fullname == 'cadquery' or fullname.startswith('ansys.fluent'):
+            raise AssertionError('App startup requires an optional dependency: ' + fullname)
 sys.meta_path.insert(0, RejectExamples())
 from turbo_moc.apps.app import create_app, worker, workflow
 from turbo_moc.geometry import geometry_2d, geometry_3d, meridional_channel

@@ -244,7 +244,7 @@ filters behind a separate numerical adapter. Common logging uses the
 existing [turbo_moc.reporting](../../reporting.py) unchanged, preserving its
 MoC reporting/progress interfaces.
 
-Run `turbo_moc-design-app` or `python -m turbo_moc.apps.app`. An existing
+Run `turbo_moc-app` or `python -m turbo_moc.apps.app`. An existing
 editable environment needs reinstallation to register the new console;
 the Python module and minimal example launcher work immediately. The example
 launcher delegates to the same entry point. It accepts
@@ -286,7 +286,7 @@ checks, review artifacts, manual acceptance and remaining solver integration.
 
 
 The preserved preceding app remains `turbo_moc.deprecated.app`, with the
-established `turbo_moc-app` / `python -m turbo_moc.app` entry points. This
+preserved `turbo_moc-app-legacy` / `python -m turbo_moc.app` entry points. This
 package migration preserves nozzle diagnostics, control-point editing,
 sizing and CAD tools in that app. Vortex rotor design is now also integrated
 with the current app's row and mesh workflow. Other retained capabilities and

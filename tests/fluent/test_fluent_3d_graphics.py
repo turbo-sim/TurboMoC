@@ -1,4 +1,4 @@
-"""Physical 3D cuts, periodic display transforms and graphics opt-out behavior."""
+"""Opt-in checks for 3D Fluent cuts, periodic transforms and graphics controls."""
 
 from copy import deepcopy
 from pathlib import Path

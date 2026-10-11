@@ -2007,7 +2007,7 @@ def create_mesh(blade, curves, settings, output_dir, show_gui=True):
 def main(config_file, output_dir="output"):
     """Run the planar workflow using execution and viewer options from its YAML."""
     # Validation imports the meshing APIs, so import the reader only at execution.
-    import barotropy
+    import jaxprop as jxp
     import matplotlib.pyplot as plt
     from ..configuration_2d import read_configuration
     from ..geometry import geometry_2d as geo
@@ -2027,9 +2027,9 @@ def main(config_file, output_dir="output"):
     # The logging context sends progress to both the console and a fresh log.
     # A separate plotting context restores Matplotlib settings when this run ends.
     with log.logging_context(log_file, reporting["level"]), plt.rc_context():
-        # Apply barotropy's publication style before creating any figure.
+        # Apply the core dependency's publication style before creating figures.
         # Keep a complete axes box; construction exports follow the YAML settings.
-        barotropy.set_plot_options()
+        jxp.set_plot_options()
         plt.rcParams.update(
             {
                 "axes.spines.top": True,
@@ -2083,10 +2083,11 @@ def main(config_file, output_dir="output"):
             figure, _ = geo.plot_construction(blade, curves, figure_size=figure_options["size"])
             try:
                 if figure_options["save"]:
-                    barotropy.savefig_in_formats(
+                    jxp.savefig_in_formats(
                         figure,
                         output_dir / "stator_geometry",
                         formats=figure_options["formats"],
+                        dpi=figure_options["dpi"],
                     )
                 if figure_options["show"]:
                     logger.info("  Opening the geometry viewer; close it to continue.")

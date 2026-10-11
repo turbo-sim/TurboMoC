@@ -89,5 +89,9 @@ turbo_moc-app
 For a Poetry source installation, use `poetry run turbo_moc-app`.
 Open the local URL printed in the terminal in a browser.
 
+The current app defaults to port 8052. Use `turbo_moc-app-legacy` for the
+preserved app on port 8050. After updating a Poetry checkout, refresh the
+launcher commands with `poetry install --only-root`.
+
 Continue to the [theory](theory/index.md), [examples](examples/index.md),
 or [API reference](api_reference.md).

@@ -6,7 +6,7 @@ Run:
     python examples/apps/run_app_legacy.py
 
 Automatically opens http://127.0.0.1:8050/ in a browser. Equivalent to running
-`turbo_moc-app` (the console-script entry point) or `python -m turbo_moc.app` directly.
+`turbo_moc-app-legacy` (the console-script entry point) or `python -m turbo_moc.app` directly.
 
 Set TURBO_MOC_EXAMPLE_SMOKE_TEST=1 to validate the app without starting the server.
 """
