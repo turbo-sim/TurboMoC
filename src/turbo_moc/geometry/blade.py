@@ -845,8 +845,8 @@ def export_annular_blade_step(blade_data, r_hub, r_shroud, face_path, solid_path
     circumferentially at every span station from r_hub to r_shroud (see
     turbo_moc.geometry.annular's module docstring for the wrap math), then
     lofted through all n_span sections and capped at the hub/shroud ends
-    (_close_loft_solid) into one watertight body -- unlike export_flared_
-    blade_step's flat 2-wire loft between parallel planes, this actually
+    (_close_loft_solid) into one watertight body -- unlike
+    :func:`export_flared_blade_step`'s flat 2-wire loft between parallel planes, this actually
     curves around the machine axis. Always exports a SINGLE blade;
     n_blades only affects the pitch-scale flare physics (pitch =
     2*pi*r/n_blades convention) and is not used to multiply the exported

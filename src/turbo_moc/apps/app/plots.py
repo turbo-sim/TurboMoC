@@ -11,8 +11,8 @@ MESH_EDGE = "orange"
 def figure(title, x, y):
     result = go.Figure()
     result.update_layout(title=title, xaxis_title=x, yaxis_title=y,
-        template="plotly_white", margin=dict(l=55, r=20, t=55, b=65),
-        uirevision=title, legend=dict(orientation="h", y=-0.2, font=dict(size=10)))
+        template="plotly_white", margin=dict(l=55, r=20, t=55, b=45),
+        uirevision=title, showlegend=False)
     result.update_yaxes(scaleanchor="x", scaleratio=1)
     return result
 
@@ -26,25 +26,30 @@ def _section_axes(design, *, mesh=False):
     return title + " · η = 0.5", "θ [rad, clockwise]", "−m′ [dimensionless]"
 
 
-def section_figure(design):
+def section_figure(design, *, offset=None, label=None):
     result = figure(*_section_axes(design))
     data = section_data(design)
     # The passage reference defines periodic walls; it is not a blade camberline.
     # Keep it out of the default plot to avoid implying a physical blade feature.
     for name in ("periodic_left", "periodic_right", "inlet", "outlet", "blade"):
         points = np.asarray(data[name])
+        if offset is not None:
+            points = points + offset
         result.add_trace(go.Scatter(x=points[:, 0], y=points[:, 1], mode="lines",
-            name=name.replace("_", " "), line=dict(
+            name=f"{label}: {name.replace('_', ' ')}" if label else name.replace("_", " "),
+            legendgroup=label, line=dict(
                 width=1.5 if name == "blade" else 1,
                 color=EDGE if name == "blade" else "#72858e"),
             fill="toself" if name == "blade" else None, fillcolor=BLADE_FILL))
     return result
 
 
-def section_mesh_figure(section, design, edge_width=0.35):
+def section_mesh_figure(section, design, edge_width=0.35, *, offset=None, label=None):
     result = figure(*_section_axes(design, mesh=True))
     mapping = design.meridional_channel
     xy = section["xy"] if mapping.is_linear else section["xy"] / mapping.reference_radius
+    if offset is not None:
+        xy = xy + offset
     # Unique edges prevent drawing every shared interior edge twice.
     edges = np.concatenate([np.stack((c, np.roll(c, -1, axis=1)), axis=-1).reshape(-1, 2)
                             for c in section["cells"].values()])
@@ -52,11 +57,79 @@ def section_mesh_figure(section, design, edge_width=0.35):
     segments = np.full((len(edges), 3, 2), np.nan)
     segments[:, :2] = xy[edges]
     result.add_trace(go.Scattergl(x=segments[:, :, 0].ravel(), y=segments[:, :, 1].ravel(),
-        mode="lines", line=dict(color=MESH_EDGE, width=edge_width), name="cell edges"))
+        mode="lines", line=dict(color=MESH_EDGE, width=edge_width),
+        name=f"{label}: cell edges" if label else "cell edges", legendgroup=label))
     contour = np.asarray(section_data(design)["blade"])
+    if offset is not None:
+        contour = contour + offset
     result.add_trace(go.Scatter(x=contour[:, 0], y=contour[:, 1], mode="lines",
-        line=dict(color=EDGE, width=1.2), fill="toself", fillcolor=BLADE_FILL, name="blade"))
+        line=dict(color=EDGE, width=1.2), fill="toself", fillcolor=BLADE_FILL,
+        name=f"{label}: blade" if label else "blade", legendgroup=label))
     return result
+
+
+def section_offsets(project, mappings=None):
+    """Put row-local charts into one midspan m'-theta chart for display.
+
+    The first active row's leading edge defines m'=0, even when hidden. Across
+    rows, accumulate integral(ds/r) along their midspan curves and across the
+    straight physical interspace. For a bridge of length L with linear radius,
+    the integral is L*log(r2/r1)/(r2-r1), or L/r1 at constant radius. This covers
+    axial, radial inflow and radial outflow without arbitrary plot offsets.
+    Angular phase is counterclockwise in XYZ and clockwise in this chart.
+    Numerical reference meshes and exported coordinates remain untouched.
+    """
+    from ... import configuration_project as projects
+    from ...geometry.meridional_channel import MeridionalChannel, geometry_from_machine
+    rows = projects.active_rows(project)
+    if len(rows) == 1:
+        return {rows[0]["id"]: np.zeros(2)}
+    offsets, previous_end, previous_chord, origin = {}, None, 0.0, 0.0
+    for row in rows:
+        mapping = (mappings or {}).get(row["id"])
+        if mapping is None:
+            mapping = MeridionalChannel(geometry_from_machine(row["geometry"]["meridional_channel"]))
+        placement = projects.assembly_placement(project, row["id"])
+        ends = mapping.meridional_points(np.array([0., 1.]), .5).copy()
+        ends[:, 1] += _mapping_offset(mapping, placement)
+        if previous_end is not None:
+            length = np.linalg.norm(ends[0] - previous_end)
+            r1, r2 = previous_end[0], ends[0, 0]
+            dr = r2 - r1
+            bridge = length / r1 if abs(dr) <= 1e-12 * r1 else length * np.log1p(dr / r1) / dr
+            origin += previous_chord + bridge
+        offsets[row["id"]] = np.array([-np.deg2rad(placement.get("angular_phase_deg", 0)), -origin])
+        previous_end, previous_chord = ends[1], mapping.prime_chord(.5)
+    return offsets
+
+
+def assembly_section_figure(project, views, *, mesh=False):
+    """Plot checked rows together; return per-row mesh trace indices for patches.
+
+    Entries contain (id, label, Design, section-or-None, edge width). A single
+    row keeps its original axes; multirow plots share the assembly chart.
+    """
+    from ... import configuration_project as projects
+    views = list(views)
+    if not views:
+        result = section_mesh_placeholder("Blade-to-blade mesh") if mesh else figure(
+            "Blade-to-blade geometry", "θ [rad, clockwise]", "−m′ [dimensionless]")
+        return result, {}
+    offsets = section_offsets(project, {row_id: design.meridional_channel
+        for row_id, _, design, _, _ in views})
+    result, indices = None, {}
+    for row_id, label, design, section, width in views:
+        local = (section_mesh_figure(section, design, width, offset=offsets[row_id], label=label) if mesh else
+            section_figure(design, offset=offsets[row_id], label=label))
+        if result is None:
+            result = figure(*_section_axes(design, mesh=mesh))
+            if len(projects.active_rows(project)) > 1:
+                result.update_layout(title=("Machine blade-to-blade mesh" if mesh else
+                    "Machine blade-to-blade geometry") + " · η = 0.5")
+        if mesh:
+            indices[row_id] = len(result.data)
+        result.add_traces(local.data)
+    return result, indices
 
 
 def section_mesh_placeholder(title):
@@ -91,6 +164,47 @@ def _zero_height_origin(result, height_max):
                        minallowed=0, constrain="domain")
 
 
+def meridional_offset(design, placement):
+    """Radial rows are positioned by radius; other rows translate streamwise."""
+    return _mapping_offset(design.meridional_channel, placement)
+
+
+def _mapping_offset(mapping, placement):
+    radial = not mapping.is_linear and all(
+        np.allclose(curve.c[:, 1], curve.c[0, 1], rtol=0, atol=1e-12)
+        for curve in (mapping.definition.hub, mapping.definition.shroud))
+    return 0.0 if radial else float((placement or {}).get("streamwise_offset_mm", 0))
+
+
+def _flow_domain_extensions(result, design, *, label="", offset=0):
+    """Map actual inlet/outlet caps and their endwall extensions into (r,z).
+
+    Use the same span-dependent sections as the mesh sweep, including shared
+    physical interfaces. Sampling these curves never generates a mesh or
+    repeats the reference blade-placement optimisation.
+    """
+    mapping = design.meridional_channel
+    height_max = 0.0
+    for name, blade_station in (("inlet", 0.0), ("outlet", 1.0)):
+        cap, walls = [], []
+        for eta in np.linspace(0, 1, 17):
+            _, curves = design.section(float(eta))
+            q = curves[name][0]
+            station = (-q[1] / mapping.reference_chord if mapping.is_linear else
+                float(mapping.parameter_from_prime(-q[1] / mapping.reference_radius, float(eta))))
+            cap.append(mapping.meridional_points(station, float(eta)))
+            if eta in (0, 1):
+                walls.append(mapping.meridional_points(np.linspace(blade_station, station, 25), float(eta)))
+        # An open U joins the two blade edges to the domain cap. Leaving the
+        # blade-side edge open keeps the solid blade outline visually distinct.
+        outline = np.vstack((walls[0], np.asarray(cap)[1:], walls[1][-2::-1]))
+        result.add_trace(go.Scatter(x=outline[:, 1] + offset, y=outline[:, 0], mode="lines",
+            name=f"{label + ' ' if label else ''}{name} flow domain",
+            line=dict(color="#72858e", width=1.2, dash="dash")))
+        height_max = max(height_max, float(outline[:, 0].max()))
+    return height_max
+
+
 def meridional_figure(design, numerics, section=None, *, geometry_only=False, edge_width=0.35):
     title = "Meridional geometry" if geometry_only else "Meridional grid projection"
     if design.meridional_channel.is_linear:
@@ -121,7 +235,8 @@ def meridional_figure(design, numerics, section=None, *, geometry_only=False, ed
         lines[:, :-1] = rz.transpose(1, 0, 2)
         result.add_trace(go.Scatter(x=lines[:, :, 1].ravel(), y=lines[:, :, 0].ravel(),
             mode="lines", line=dict(color=MESH_EDGE, width=edge_width), showlegend=False))
-    height_max = max(float(np.max(rz[..., 0])), float(np.max(outline[:, 0])))
+    height_max = max(float(np.max(rz[..., 0])), float(np.max(outline[:, 0])),
+                     _flow_domain_extensions(result, design))
     _zero_height_origin(result, height_max)
     return result, data
 
@@ -146,21 +261,17 @@ def assembly_meridional_figure(views, planned_rows=(), *, interfaces=()):
     envelopes = {}
     for label, design, placement in views:
         outline = _meridional_envelope(design)
-        mapping = design.meridional_channel
-        is_radial = (not mapping.is_linear and all(
-            np.allclose(curve.c[:, 1], curve.c[0, 1], rtol=0, atol=1e-12)
-            for curve in (mapping.definition.hub, mapping.definition.shroud)
-        ))
-        offset = 0.0 if is_radial else float((placement or {}).get("streamwise_offset_mm", 0.0))
+        offset = meridional_offset(design, placement)
         result.add_trace(go.Scatter(
             x=outline[:, 1] + offset, y=outline[:, 0], mode="lines", name=label,
             line=dict(color=EDGE, width=1.5), fill="toself", fillcolor=BLADE_FILL,
             hovertemplate=f"{label}<br>%{{x:.3g}} mm, %{{y:.3g}} mm<extra></extra>",
         ))
         envelopes[label] = outline
-        height_max = max(height_max, float(outline[:, 0].max()))
+        height_max = max(height_max, float(outline[:, 0].max()),
+                         _flow_domain_extensions(result, design, label=label, offset=offset))
     # A pending row has channel dimensions, but no blade solution. Show only
-    # that prescribed envelope with a dashed outline; never fabricate a blade.
+    # the prescribed LE-to-TE extent, not a computed blade surface or domain.
     from ...geometry.meridional_channel import geometry_from_machine
     for label, dimensions, placement in planned_rows:
         if dimensions["type"] == "linear":
@@ -174,7 +285,7 @@ def assembly_meridional_figure(views, planned_rows=(), *, interfaces=()):
         offset = float(placement.get("streamwise_offset_mm", 0))
         result.add_trace(go.Scatter(x=outline[:, 1] + offset, y=outline[:, 0], mode="lines",
             name=f"{label} meridional channel (planning)",
-            line=dict(color=EDGE, width=1.3, dash="dash"), fill="toself", fillcolor="rgba(184,190,194,0.15)"))
+            line=dict(color=EDGE, width=1.3), fill="toself", fillcolor="rgba(184,190,194,0.15)"))
         envelopes[label] = outline
         height_max = max(height_max, float(outline[:, 0].max()))
     for interface in interfaces:
@@ -195,6 +306,34 @@ def assembly_meridional_figure(views, planned_rows=(), *, interfaces=()):
             hovertemplate=f"Shared interface<br>{'z' if axial else 'r'} = {coordinate:.4g} mm<extra></extra>"))
     _zero_height_origin(result, height_max)
     return result
+
+
+def assembly_meridional_mesh_figure(entries):
+    """Combine only generated row grids in physical assembly coordinates.
+
+    Return trace indices by row so width-only edits can update SVG styles
+    without transferring or rebuilding numerical mesh data.
+    """
+    result, indices, details, height_max = None, {}, {}, 0.0
+    for row_id, label, design, numerics, section, placement, width in entries:
+        local, data = meridional_figure(design, numerics, section, edge_width=width)
+        if result is None:
+            result = figure("Machine meridional grid projection", *_meridional_axes(design))
+        offset = meridional_offset(design, placement)
+        indices[row_id] = []
+        for index, trace in enumerate(local.data):
+            if 1 <= index <= numerics["span_layers"] + 2:
+                indices[row_id].append(len(result.data))
+            trace.x = np.asarray(trace.x) + offset
+            trace.name = f"{label}: {trace.name}" if trace.name else label
+            trace.legendgroup = row_id
+            result.add_trace(trace)
+        height_max = max(height_max, local.layout.yaxis.range[1] / 1.05)
+        details[row_id] = data
+    if result is None:
+        result = figure("Generate a 2D mesh for a plotted row", "z [mm]", "r [mm]")
+    _zero_height_origin(result, height_max)
+    return result, indices, details
 
 
 def histogram(name, metric):

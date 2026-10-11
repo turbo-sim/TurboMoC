@@ -330,7 +330,7 @@ def auto_center_flow_domain(blade, baseline, *, max_shift_pitch=0.5, shift_toler
                             clearance_samples=200):
     """Maximize the smaller Euclidean gap with one rigid x translation.
 
-    max_shift_pitch bounds |shift| / pitch. shift_tolerance is in mm.
+    max_shift_pitch bounds ``|shift| / pitch``. shift_tolerance is in mm.
     A coarse search brackets a local bounded solve; it is not a global proof.
     """
     _positive(max_shift_pitch, "max_shift_pitch")

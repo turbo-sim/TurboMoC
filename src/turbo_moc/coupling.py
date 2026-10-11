@@ -32,19 +32,20 @@ def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U):
 
     Returns
     -------
-    dict with keys:
-        p_static, T_static, rho_static : the stator exit static state
-        M_abs, V_abs : absolute Mach/velocity at stator exit
-        a : local speed of sound (same in both frames)
-        W_rel, M_rel, beta_rel_deg : relative velocity/Mach/flow angle
-        P0_rel, T0_rel : relative-frame stagnation state (from the
-            isentropic state at the stator exit's own entropy and the
-            rothalpy-consistent relative stagnation enthalpy)
-        U : the blade speed used
-        is_supersonic : M_rel > 1 -- the vortex-flow method requires a
-            supersonic relative inflow; False is a hard warning, not
-            just a style note, since the method's geometry is undefined
-            otherwise.
+    dict
+        Rotor inlet conditions with the following keys:
+
+        - ``p_static``, ``T_static``, ``rho_static``: stator exit static state.
+        - ``M_abs``, ``V_abs``: absolute Mach number and velocity at stator exit.
+        - ``a``: local speed of sound, the same in both frames.
+        - ``W_rel``, ``M_rel``, ``beta_rel_deg``: relative velocity, Mach number,
+          and flow angle.
+        - ``P0_rel``, ``T0_rel``: relative stagnation state at the stator exit's
+          entropy and the rothalpy-consistent relative stagnation enthalpy.
+        - ``U``: blade speed used.
+        - ``is_supersonic``: whether ``M_rel > 1``. The vortex-flow method
+          requires supersonic relative inflow; otherwise its geometry is
+          undefined.
     """
     wall = nozzle_result["wall_final"]
     p_static = float(wall["p"][-1])

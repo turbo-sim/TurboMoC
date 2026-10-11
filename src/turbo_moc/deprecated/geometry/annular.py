@@ -6,7 +6,7 @@ Unlike turbo_moc.geometry.radial (which maps a blade's CHORDWISE position to
 radius, for radial-flow-style visualization), this module keeps the blade's
 axial (chordwise) stations fixed across span and instead sweeps a SPAN
 parameter r from r_hub to r_shroud, wrapping the blade's pitchwise extent
-circumferentially at each radius:
+circumferentially at each radius::
 
     z_i     = y                          (axial, unchanged across span)
     x_i     = x * (r_i / r_hub)          if flare == "pitch_scale"

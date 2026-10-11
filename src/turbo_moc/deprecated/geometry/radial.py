@@ -122,7 +122,7 @@ def conformal_length_scale(chord, x1, r1, r2, c_axial):
     w = C * exp(a*u) with a = log(r2/r1)/c_axial and C a constant complex
     number -- a holomorphic (complex-differentiable) function of u. For any
     holomorphic map, the local length-magnification factor is exactly
-    |dw/du| = |a| * |w| = |a| * r (the map's own r-formula, at this
+    ``|dw/du| = |a| * |w| = |a| * r`` (the map's own r-formula, at this
     chordwise coordinate; the absolute value matters here -- this module's
     own _reference_point_and_scale anchors x1 at the chord MAXIMUM, which
     makes c_axial = min(chord)-max(chord), hence a, negative by
@@ -226,12 +226,12 @@ def implied_n_blades_radial(blade_data, r1, r2, source="stator"):
 def consistent_radial_wrap(blade_data, r1, r2_target, source="stator"):
     """Blade count and outer radius that keep the designed 2D passage.
 
-    Under the log-spiral map one 2D pitch p turns by |a| p, a = ln(r2/r1) /
+    Under the log-spiral map one 2D pitch p turns by ``|a| p``, a = ln(r2/r1) /
     c_axial, at every radius; the copies are laid out 2*pi/N apart. Both
-    agree only for N = 2*pi / (|a| p) (implied_n_blades_radial, which is
+    agree only for ``N = 2*pi / (|a| p)`` (implied_n_blades_radial, which is
     exactly this, independent of where it is evaluated). So N is the
     nearest integer to that count at (r1, r2_target), and r2 is then moved
-    to the radius where it is exact:
+    to the radius where it is exact::
 
         |ln(r2/r1)| = 2*pi |c_axial| / (N p),   same side of r1 as r2_target
 

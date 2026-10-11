@@ -17,7 +17,7 @@ The canonical implementation is now under `src/turbo_moc/`, with the current app
 | D5 | Require an up-to-date reference mesh before volume generation. | Both the UI and job service enforce this. The sweep reads the persisted topology/definition. |
 | D6 | Originally boundaries, slice and worst-cell inspection; simplified by the latest UI decision. | Main viewer exposes boundary surfaces, edges and blade-count sliders. Slice/worst-cell extraction remains tested in the backend; it is no longer an app control. |
 | A1 | Retain true 2D export and 3D extrusion for linear cascades. | Independent 2D/3D products; one span element remains an optional 3D setting. Annular 2D exports are labeled conformal references. |
-| A2 | Two persistent Geometry generation/Mesh generation workspaces, with settings grouped by row. | Shared physical views; independent calculation scope and inspected-row section/report; one anchored terminal. |
+| A2 | Two persistent Geometry generation/Mesh generation workspaces, with settings grouped by row. | Shared diagrams for checked rows; independent calculation scope and inspected-row quality report; one anchored terminal. |
 | A3 | Ordered rows with stable IDs and stator/rotor roles. | Each row owns geometry and mesh inputs; MoC stators and vortex rotors share the canonical mapping and mesh stages. |
 
 ## Row-based architecture and current scope
@@ -31,7 +31,7 @@ follows the specified radii rather than a separate inflow/outflow code path.
 Each row has a stable ID, a role, independent geometry/mesh settings and its
 own scientific artifact references. The sidebar shows every active row in
 a collapsible group; the workspace selects geometry or meshing controls. Row
-inspection controls section plots and the report, while calculation checkboxes
+inspection controls the quality report, while calculation checkboxes
 select rows for sequential jobs and independent visibility checkboxes select
 the rows assembled in shared
 physical views. Axial rotor interspace derives its relative LE origin from the greater
@@ -163,7 +163,7 @@ Feedback still useful: what geometry update latency and geometric display error 
 
 **Next:** a shared field schema for labels, units, bounds, tooltips and stage validation. Currently controls are generated from readable YAML paths, with stage-specific backend validation. Editing keeps the last validated project without resetting adjacent valid settings when one visible field is invalid. Structural changes explicitly report discarded invalid edits; numerical job guards require a valid current configuration. Obsolete dynamic axial-gap controls cannot overwrite a newly selected row/family. Comprehensive per-field inline validation remains future work.
 
-Keep Geometry generation and Mesh generation as the two primary workspaces. In Geometry generation, show the selected-row section and shared meridional/extrusion projection together at equal heights; show the available 3D assembly below. In Mesh generation, retain the section/grid views above the collapsible 3D viewer and selected-row report. Annular sections use conformal coordinates; linear sections use physical distances. Use black blade outlines and grey fill, with the passage reference hidden by default. Stack paired plots on smaller screens while retaining their coordinate labels.
+Keep Geometry generation and Mesh generation as the two primary workspaces. In Geometry generation, show shared blade-to-blade and meridional/extrusion diagrams together at equal heights; show the available 3D assembly below. In Mesh generation, retain the shared section/grid diagrams above the collapsible 3D viewer and selected-row quality report. All diagrams follow Plot rows. Multirow annular sections use a common midspan conformal origin, accumulating $\int ds/r$ through each row and physical interspace and applying angular phase. Single-row linear sections use physical distances. Use black blade outlines and grey fill, with the passage reference hidden by default. Stack paired plots on smaller screens while retaining their coordinate labels.
 
 The report beside the 3D mesh is a good arrangement: the viewer stays available while the statistics scroll independently. Resizable panes accommodate different monitors. A future maximize-view button could help large meshes; combining all histograms into tiny cards would reduce readability.
 
@@ -390,7 +390,7 @@ The following are optional extensions, with scope to be agreed before implementa
 
 - [x] Ordered project schema, stable row IDs, active-row validation and legacy flat-stator adaptation.
 - [x] Geometry generation/Mesh generation workspaces; collapsible settings for all active rows; independent retained artifacts.
-- [x] Shared physical machine views and independently inspected-row section/report.
+- [x] Shared machine diagrams and independently inspected-row quality report.
 - [x] Stator/rotor/stator+rotor modes, paired-linear restriction and vortex rotor controls.
 - [x] Linear chord/height mapping with scaled source pitch and no radius/physical blade-count input.
 - [x] Translational linear periodicity in volume assembly, quality and reciprocal CGNS metadata.
@@ -485,9 +485,10 @@ CGNS coordinate multipliers must agree across rows. The stage manifest maps
 row IDs to exported zone and boundary names. No solver flow-interface model or
 rotating-frame assignment is inferred from packaging.
 
-- [x] Independent per-row calculation and plot-visibility checkboxes, with Inspect row for the section/report.
+- [x] Independent per-row calculation and plot-visibility checkboxes, with Inspect row for the quality report.
 - [x] Compact row controls; static calculation guidance and interspace details appear on hover.
-- [x] Shared meridional mesh projection of visible rows with current 2D meshes; row-local blade-to-blade inspection.
+- [x] Shared meridional mesh projection of visible rows with current 2D meshes.
+- [x] Shared blade-to-blade geometry and mesh chart for checked rows, with midspan conformal offsets derived from physical interspace and angular phase; fixed origin when hiding rows.
 - [x] Solid meridional blade extents and dashed actual inlet/outlet flow-domain extensions; zero radius/span origin retained.
 - [x] Sequential design/2D/3D row jobs with current dependency handoff and prerequisite gates.
 - [x] Live cumulative logs, queue progress, per-row publication and failure/cancellation handling.

@@ -270,7 +270,12 @@ def read_adf(filename: str) -> AdfNode:
     """Read a complete ADF (CGNS) file into an :class:`AdfNode` tree."""
     with open(filename, "rb") as fh:
         buf = fh.read()
-    return _AdfReader(buf, filename).read_root()
+    return read_adf_bytes(buf, str(filename))
+
+
+def read_adf_bytes(data: bytes, filename: str = "<memory>") -> AdfNode:
+    """Read an ADF image, including a mesh stored inside a project ZIP."""
+    return _AdfReader(data, filename).read_root()
 
 
 # ----------------------------------------------------------------------------
@@ -385,8 +390,13 @@ class _AdfWriter:
 
 def write_adf(filename: str, root: AdfNode) -> None:
     """Write an :class:`AdfNode` tree as a new little-endian ADF (CGNS) file."""
-    image = _AdfWriter().finish(root)
+    image = serialize_adf(root)
     with open(filename, "wb") as fh:
         fh.write(image)
+
+
+def serialize_adf(root: AdfNode) -> bytes:
+    """Serialize a tree without creating an intermediate file."""
+    return _AdfWriter().finish(root)
 
 

@@ -128,7 +128,7 @@ class MeridionalChannel:
     """Map a common hub/shroud definition without axial/radial specialization.
 
     P(u, eta) = (1-eta)*hub(u) + eta*shroud(u), with P = (r, z).
-    m'(u, eta) = integral_0^u |dP/du|/r du. Blade sections share the MoC
+    ``m'(u, eta) = integral_0^u |dP/du|/r du``. Blade sections share the MoC
     template and are scaled by their conformal LE-to-TE length. Extensions
     follow wall endpoint tangents beyond u=0 and u=1.
     """

@@ -250,7 +250,7 @@ def radial_section_coordinates(xy, reference, z=0.0):
 
 def radial_length_scale(reference, radius):
     """Physical length of one 2D-plane unit at `radius` (the map's exact
-    local magnification |a| r, a = ln(r2/r1) / c_axial)."""
+    local magnification ``|a| r``, a = ln(r2/r1) / c_axial)."""
     return abs(np.log(reference["r2"] / reference["r1"]) / reference["c_axial"]) * float(radius)
 
 

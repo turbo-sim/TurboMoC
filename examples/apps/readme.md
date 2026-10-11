@@ -26,12 +26,13 @@ upstream stator result. Check **Stator** and **Rotor** under **Apply calculation
 and click **Compute blade design** to compute the stator first, then the rotor.
 Its 1000 RPM sample speed
 uses the rotor's 105 mm midspan inlet radius. Selecting a row changes the
-section plots and quality report through **Inspect row** while keeping the shared
+quality report through **Inspect row** while keeping the shared
 machine view. The calculation checkboxes separately control which rows run.
 **Plot rows** checkboxes control which rows appear in geometry and mesh views;
 hiding a row retains its calculation results. Meridional mesh projections show
-checked rows with current 2D meshes together, while the blade-to-blade section
-and report inspect one row. Solid meridional outlines show the blade extent;
+checked rows with current 2D meshes together. Blade-to-blade geometry and mesh
+also show every checked row in a shared midspan conformal chart, including the
+physical interspace and angular phase. Solid meridional outlines show the blade extent;
 dashed outlines show inlet/outlet flow-domain extensions. Hover over the compact
 control strip for interspace details and guidance.
 These are the only app YAML samples; the package has Python initialization

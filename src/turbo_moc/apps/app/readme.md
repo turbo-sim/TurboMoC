@@ -4,13 +4,15 @@ This directory owns the browser UI and its local job service. Shared numerical
 code lives in [geometry](../../geometry) and [meshing](../../meshing).
 Workflow runners live in [examples/gmsh_3D](../../../../examples/gmsh_3D/readme.md).
 App launchers live under `examples/apps/`; editable YAML is under `examples/apps/cases/`.
-The [theory guide](../../../../z_information/theory_guide.md) and [roadmap](../../../../z_information/roadmap.md) live
-under `z_information/`.
+The [theory guide](../../../../docs/internal_information/theory_guide.md) and
+[roadmap](../../../../docs/internal_information/roadmap.md) live under `docs/internal_information/`.
 
 | File | Responsibility |
 | --- | --- |
 | `application.py` | Dash factory, layout, controls and callbacks. |
 | `workflow.py` | Stage identities, selected-result handoff, derived-geometry reuse and worker launch/poll/cancel. |
+| `calculations.py` | Calculation scope, prerequisite checks and sequential row jobs with fresh dependency handoff. |
+| `project_export.py` | Current-stage checks, combined CGNS packaging, reports and project download. |
 | `worker.py` | Isolated numerical execution with live progress and logs. |
 | `preview.py` | Smooth, capped geometry tessellation and display normals. |
 | `plots.py` | Labeled 2D engineering views and quality histograms. |
@@ -32,7 +34,7 @@ CLI, without importing historical folders or a second numerical implementation.
 The UI has two persistent workspaces, **Geometry generation** and **Mesh generation**, with
 settings grouped by row. The sidebar shows every active row in a collapsible
 group, with geometry or meshing settings chosen by the workspace. The selected
-row supplies section plots, generation actions and the quality report. Shared physical views
+row supplies the quality report. All geometry and mesh diagrams
 assemble available rows. Machine mode activates stator, rotor or both, while
 the independent geometry type chooses linear, axial or radial mapping.
 Default row labels are Stator and Rotor; workspace tabs have no numbers,
@@ -41,6 +43,40 @@ Linear cascade is unavailable for the combined mode; mixed flow is outside
 the current interface. The rotor provider uses the existing vortex-flow method;
 the earlier planning-only `conventional` value migrates to `vortex` when loading
 an old placeholder. It is not exposed as an alternative rotor solver.
+
+**Apply calculations to** provides an independent checkbox for each active row.
+Check both Stator and Rotor to calculate both; uncheck all rows to disable the
+calculation buttons. Selection order does not change machine execution order.
+The single **Compute blade design** button runs the stator MoC before the rotor
+vortex method when both are selected. Each successful result is published before
+the next row starts, so a coupled rotor consumes the newly computed stator exit.
+**Generate 2D mesh** and **Generate 3D mesh** run the selected rows sequentially,
+skipping already-current meshes. All selected rows need current blade designs;
+3D generation also requires current 2D meshes for every selected row. These
+dependencies are checked before a mesh queue begins. **Inspect row** selects the
+quality report independently of calculation scope and the shared diagrams.
+
+**Plot rows** independently controls geometry and mesh visibility, preserving
+hidden rows' results. All diagrams, including blade-to-blade geometry and mesh,
+show checked rows together. Multirow blade-to-blade plots use a common midspan
+conformal chart: the first active row's leading edge defines $m'=0$, and row
+offsets accumulate $\int ds/r$ through blade rows and the physical interspace.
+Angular phase is included with the clockwise chart convention. These display
+translations preserve row-local numerical meshes and CGNS export. Hiding a row
+keeps the chart origin fixed. If the inspected row is hidden, inspection switches to the first
+visible row. Meridional mesh projections include only current, generated 2D
+meshes. Solid outlines mark the LE-to-TE blade extent; dashed outlines mark
+actual inlet/outlet flow-domain extensions, including shared interfaces.
+Pending designs show a pale prescribed blade extent without inventing a flow
+domain. Calculation, visibility and inspection controls share one compact
+strip, with instructions and physical interspace details available on hover.
+
+Every queue retains its submitted project snapshot. Progress identifies the
+active row and position in the queue, while the terminal retains live output
+from successive rows. Completion updates that row's plots and opens the relevant
+workspace. Failure stops the queue; cancellation stops its active worker and
+remaining rows. Successful earlier results remain available. Overlapping polling
+requests cannot launch the same successor twice.
 
 Rotor inputs are relative-frame stagnation pressure [Pa], temperature [K],
 inlet Mach number and flow angle [degrees from the meridional direction], plus
@@ -67,7 +103,7 @@ derived from this target at every span station. The internal chord-extension
 inputs are hidden; shaded readouts show the interface coordinate and physical
 hub/midspan/tip extensions in millimetres. The original YAML values remain
 available for single-row operation. Stator inlet and rotor outlet extensions
-remain editable. See the [shared-interface design](../../../../z_information/roadmap.md#multirow-flow-domain-consistency-shared-physical-interface).
+remain editable. See the [shared-interface design](../../../../docs/internal_information/roadmap.md#multirow-flow-domain-consistency-shared-physical-interface).
 
 Paired domains require a positive blade gap. Axial rows must share hub radius
 and blade height; radial rows must share blade height and flow direction.
@@ -120,7 +156,7 @@ mesh datasets remain in row-local coordinates; the viewer applies placement
 once. Paired 3D CGNS exports apply the same axial translation and angular phase
 to the exported nodes. A retained outdated mesh uses its recorded placement,
 so editing the gap does not move an old mesh into an apparently updated stage.
-Each row is exported independently; solver interface pairing, pitch-change
+The stage export retains independent row zones; solver interface pairing, pitch-change
 handling and rotating reference frames remain downstream solver setup.
 The annular 2D mesh remains a conformal reference grid, not a shared physical
 2D stage mesh. Single-row export keeps its established local coordinate basis.
@@ -132,7 +168,7 @@ workspace and active row groups.
 
 The Mesh generation workspace combines 2D section/grid views and the 3D boundary/report
 view. Each mesh-generation job also writes its Fluent-compatible CGNS/ADF
-output; separate export actions are no longer needed. **Download project (.zip)**
+output; separate conversion actions are no longer needed. **Export project (.zip)**
 beside the generation controls packages current, completed meshes. Temporary MSH files are internal to conversion
 and are removed; MSH and internal NPZ datasets are not downloadable. Meridional/grid
 captions retain the mapped first-layer-height and span-spacing estimates,
@@ -141,9 +177,35 @@ support true 2D export and physical 3D extrusion, including an optional one-cell
 span. The project ZIP includes 2D CGNS files only for linear cascades; axial and
 radial cases contribute their physical 3D meshes.
 
-[project_export.py](project_export.py) builds the archive from the selected row
-jobs. It contains the final `project.yaml`, `README.txt`, row-specific CGNS files
-under `meshes/`, one consolidated `mesh_report.json`, and one `activity.log`.
+[project_export.py](project_export.py) builds the archive from every active row,
+independently of the calculation and inspection selectors. Annular export
+requires a current 3D mesh for each active row. The top-level `stage.cgns` contains
+one fluid zone per row in machine coordinates. For a linear cascade it contains
+the current 3D extrusion when available, otherwise the true 2D mesh. If both
+linear meshes are available, `stage_2d.cgns` holds the additional true 2D grid.
+Different-dimensional meshes are never combined into one stage base.
+
+The archive also contains the final `project.yaml`, `README.txt`, unchanged
+individual CGNS files under `meshes/`, one consolidated `mesh_report.json`, and
+one `activity.log`. [cgns_stage.py](../../io/cgns_stage.py) combines the canonical
+row exports. It prefixes zone, fluid-element-section, boundary and family names
+with the stable row ID, and updates periodic donor-zone references. Local
+connectivity, parent indices, coordinate arrays, boundary types and periodic
+transforms remain unchanged. Long names use stable suffixes to respect ADF's
+32-character limit. Every row must use the same CGNS coordinate multiplier.
+
+The stator outlet and rotor inlet remain separate faces and vertices, even at
+the shared physical interface. The report records their stage zone/boundary
+names. Configure their flow coupling and the rotor reference frame in the CFD
+solver; packaging does not choose a mixing-plane or transient interface model.
+The combined format preserves the existing CGNS 3.4/ADF export conventions.
+Automated readback and real Gmsh export checks establish topology preservation.
+A small two-row stage has also passed a Fluent 24.2 import and mesh check,
+retaining two fluid regions and all 14 boundary patches. Fluent qualifies
+their names, for example `stator_1_fluid.stator_1_outlet`, and initially treats
+the patches as walls. Assign inlet/outlet, periodic and inter-row interface
+types explicitly in the solver. Production-case import acceptance, periodic
+pairing and CFX acceptance remain separate checks; no CFD solve was performed.
 The report groups complete summary and quality data by row and mesh dimension.
 The log includes each relevant computation stage once. The README records mesh
 counts, boundaries, units, coordinate scaling and unavailable meshes.
@@ -155,8 +217,7 @@ current MoC/vortex profile solutions. Paired assembly placement is part of the
 mesh/export dependency; a solitary row's display placement remains a view
 setting. Span edits invalidate 3D results while retaining a current linear
 2D mesh. The ZIP covers
-active rows with available artifacts of either role, without changing their
-generation capabilities. MoC results, job bookkeeping and internal datasets
+all active rows with a complete current stage. MoC results, job bookkeeping and internal datasets
 stay outside the archive.
 
 The dense reference mesh uses Plotly `Scattergl` for its many unique cell
@@ -169,7 +230,7 @@ axis and `uirevision` changes, retained the same two internal canvases and
 exactly two GL contexts with no errors or warnings. These display changes
 leave scientific meshes and exported connectivity untouched.
 
-Every **Compute MoC** action solves afresh. Its successful job writes
+Every **Compute blade design** action solves the selected profiles afresh. A successful stator job writes
 `moc_result.json`; downstream stages read only the explicitly selected job.
 There is no MoC cache lookup or reuse policy. The fitted-template and derived
 geometry stores retain rapid design iteration for that selected result. A new
@@ -211,7 +272,7 @@ resources from outside the checkout without changing package files. A real
 final-wheel Edge workflow passes 17 checks with zero exceptions, errors or
 warnings, including live MoC progress, both meshes, export, meridional gating,
 navigation, native sidebar edge-width edits and renderer/camera retention.
-The [merging summary](../../../../z_information/merging_summary.md) records the overlapping
+The [merging summary](../../../../docs/internal_information/merging_summary.md) records the overlapping
 regression suites, final focused retest and optional dependency limits.
 
 The 3D adapter owns a persistent React root inside each Dash viewport and
@@ -220,7 +281,7 @@ one View and stable actor pool update data and hide unused actors without
 Dash remounts. New datasets/copy counts fit; surface/width edits retain the
 camera. A focused 50-edit audit also verified actual View/canvas and camera
 stability without errors or warnings. No new frontend package/CDN is needed.
-The [migration record](../../../../z_information/migration.md) records current and historical
+The [migration record](../../../../docs/internal_information/migration.md) records current and historical
 checks, review artifacts, manual acceptance and remaining solver integration.
 
 
@@ -230,7 +291,7 @@ package migration preserves nozzle diagnostics, control-point editing,
 sizing and CAD tools in that app. Vortex rotor design is now also integrated
 with the current app's row and mesh workflow. Other retained capabilities and
 their integration checklist are documented in the
-[root merging summary](../../../../z_information/merging_summary.md).
+[root merging summary](../../../../docs/internal_information/merging_summary.md).
 
 
 Atomic job-status reads retry short Windows `PermissionError` sharing locks;

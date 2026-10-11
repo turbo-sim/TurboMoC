@@ -15,7 +15,7 @@ from dash import ALL, Dash, Input, Output, Patch, State, ctx, dcc, html, no_upda
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
-from . import workflow as flow, plots, project_export
+from . import workflow as flow, plots, project_export, calculations
 from ...meshing import meshing_3d as mesh
 from ... import configuration_project as project_model
 from ...configuration_rotor import default_axial_interspace_mm
@@ -385,19 +385,32 @@ def create_app(config_file=None, output_dir=None):
                 dcc.Tabs(id="workspace", value="design", children=[
                     dcc.Tab(label="Geometry generation", value="design"),
                     dcc.Tab(label="Mesh generation", value="mesh")]),
-                html.Div([html.Label("Selected row"), dcc.Dropdown(id="selected-row", clearable=False,
-                    value=row["id"], options=[{"label": row_label(r), "value": r["id"]}
-                    for r in project_model.active_rows(project)]), html.Small(id="row-status")],
-                    className="row-selector"),
+                html.Div([
+                    html.Div([html.Label("Apply calculations to"),
+                        dcc.Checklist(id="calculation-scope", inline=True,
+                            value=[r["id"] for r in project_model.active_rows(project)],
+                            options=calculations.scope_options(project), className="row-checklist")],
+                        id="calculation-controls", className="row-control-group",
+                        title="Checked rows calculate sequentially in machine order. Plot visibility is independent."),
+                    html.Div([html.Label("Plot rows"),
+                        dcc.Checklist(id="plotted-rows", inline=True,
+                            value=[r["id"] for r in project_model.active_rows(project)],
+                            options=calculations.scope_options(project), className="row-checklist")],
+                        className="row-control-group",
+                        title="Show these rows in the geometry and mesh diagrams. Hiding a row preserves its results."),
+                    html.Div([html.Label("Inspect row"),
+                        dcc.Dropdown(id="selected-row", clearable=False, value=row["id"],
+                            options=calculations.scope_options(project))], className="row-control-group row-inspector",
+                        title="Choose the row for the mesh quality report. Plot rows controls every geometry and mesh diagram."),
+                ], id="interspace-note", className="row-controls"),
                 html.Div(id="validation", className="message"),
-                html.Div(id="interspace-note", className="assembly-info"),
                 html.Div([html.Div([html.Button(label, id=name, n_clicks=0,
                     disabled=name=="cancel") for name, label in zip(ACTIONS,
-                    ("Compute rotor blade" if row["role"] == "rotor" else "Compute MoC",
+                    ("Compute blade design",
                      "Generate 2D mesh", "Generate 3D mesh", "Cancel job"))],
                     className="actions"), html.Div([html.Span(id="spinner"), html.Span("Ready", id="job-status"),
                     html.Progress(id="job-progress", max=1, value=0)], className="job-strip"),
-                    html.Button("Download project (.zip)", id="download-project", n_clicks=0,
+                    html.Button("Export project (.zip)", id="download-project", n_clicks=0,
                         disabled=True, title=project_export.NO_MESH)], className="action-bar"),
                 html.Div(id="job-error", className="message"),
                 html.Div(id="project-download-message", className="message"),
@@ -432,6 +445,28 @@ def create_app(config_file=None, output_dir=None):
                     children="No background job yet.")], open=False, className="terminal", id="terminal"),
             ])], className="shell")], id="app")
     app.layout = layout
+
+    @app.callback(Output("calculation-scope", "options"), Output("calculation-scope", "value"),
+        Output("plotted-rows", "options"), Output("plotted-rows", "value"),
+        Input("base-project", "data"), State("calculation-scope", "value"),
+        State("plotted-rows", "value"), State("plotted-rows", "options"))
+    def calculation_scope(project, scope, plotted, previous_options):
+        options = calculations.scope_options(project)
+        available = {item["value"] for item in options}
+        old = {item["value"] for item in (previous_options or [])}
+        # Preserve deliberate empty selections during settings edits, but make
+        # newly activated rows visible and selected by default.
+        def reconcile(values):
+            chosen = set(values or []) | (available - old)
+            return [item["value"] for item in options if item["value"] in chosen]
+        return options, reconcile(scope), options, reconcile(plotted)
+
+    @app.callback(Output("selected-row", "value", allow_duplicate=True),
+        Input("plotted-rows", "value"), State("selected-row", "value"),
+        State("base-project", "data"), prevent_initial_call=True)
+    def visible_inspector(plotted, selected, project):
+        visible = [r["id"] for r in project_model.active_rows(project) if r["id"] in (plotted or [])]
+        return visible[0] if visible and selected not in visible else no_update
 
     @app.callback(Output("loaded-project", "data"), Output("configuration-download", "data"),
         Output("configuration-message", "children"),
@@ -614,37 +649,41 @@ def create_app(config_file=None, output_dir=None):
     @app.callback(Output("geometry-data", "data"), Output("geometry-key", "data"),
         Output("design-section", "figure"), Output("meridional_channel", "figure"),
         Output("design-basis", "children"), Output("assembly-basis", "children"),
-        Input("config", "data"), Input("row-references", "data"), State("geometry-key", "data"))
-    def geometry(state, registry, previous_key):
+        Input("config", "data"), Input("row-references", "data"),
+        Input("plotted-rows", "value"), State("geometry-key", "data"))
+    def geometry(state, registry, visible=None, previous_key=None):
         if not state or not state.get("valid"):
             return None, None, empty("Selected blade row"), empty("Machine geometry"), "", ""
         ready = list(ready_rows(state, registry))
         active = project_model.active_rows(state["project"])
+        visible = {r["id"] for r in active} if visible is None else set(visible)
         placements = {r["id"]: project_model.assembly_placement(state["project"], r["id"]) for r in active}
+        chart_rows = [(r["id"], r["geometry"]["meridional_channel"], placements[r["id"]]) for r in active]
         planning = [(row_label(r), r["geometry"]["meridional_channel"], placements[r["id"]])
-            for r in active if r["id"] not in {item[0]["id"] for item in ready}]
+            for r in active if r["id"] in visible and r["id"] not in {item[0]["id"] for item in ready}]
         try:
             interfaces = project_model.shared_interfaces(state["project"])
             interface_error = ""
         except ValueError as exc:
             interfaces, interface_error = [], str(exc)
-        key = flow.digest([state["row_id"], planning, interfaces, interface_error, [(r["id"], k["geometry"], placements[r["id"]])
+        data_key = flow.digest([(r["id"], k["geometry"], placements[r["id"]]) for r, _, _, k in ready])
+        interfaces = [item for item in interfaces if {item["upstream_id"], item["downstream_id"]} <= visible]
+        key = flow.digest([sorted(visible), chart_rows, planning, interfaces, interface_error, [(r["id"], k["geometry"], placements[r["id"]])
             for r, _, _, k in ready]])
         if key == previous_key:
             return (no_update,) * 6
-        datasets, views, errors = [], [], []
-        section, basis = empty("Selected blade row"), (
-            "Compute the rotor blade to display its geometry." if state.get("role") == "rotor"
-            else "Compute MoC for this row to display its geometry.")
+        datasets, views, errors, section_views, basis_notes = [], [], [], [], []
+        basis = "Compute blade designs for the plotted rows to display their geometry."
         for row, config, reference, keys in ready:
             try:
                 design = flow.get_design(config, reference)
                 dataset = deepcopy(cached_preview(keys["geometry"], design))
                 dataset.update(id=row["id"], label=row_label(row), placement=placements[row["id"]])
                 datasets.append(dataset)
-                views.append((row_label(row), design, placements[row["id"]]))
-                if row["id"] == state["row_id"]:
-                    section = plots.section_figure(design)
+                if row["id"] in visible:
+                    views.append((row_label(row), design, placements[row["id"]]))
+                if row["id"] in visible:
+                    section_views.append((row["id"], row_label(row), design, None, 0))
                     method = "vortex-method" if row["role"] == "rotor" else "MoC"
                     basis = (f"Physical linear cascade section [mm]; uniformly scaled {method} blade and pitch."
                         if dataset.get("is_linear") else
@@ -658,10 +697,15 @@ def create_app(config_file=None, output_dir=None):
                         if abs(pitch_ratio - 1) > 0.01:
                             basis += (" Blade count/chord change the vortex design pitch; the original cascade "
                                       "flow solution then serves as a profile design reference.")
+                    basis_notes.append(f"{row_label(row)}: {basis}")
             except (ValueError, OSError, RuntimeError) as exc:
                 errors.append(f"{row_label(row)}: {exc}")
-        if not state.get("supported"):
-            basis = state.get("dependency_error", "Resolve the inlet conditions to compute this row.")
+        section, _ = plots.assembly_section_figure(state["project"], section_views)
+        if section_views:
+            basis = ("Shared midspan conformal chart: m′ starts at the first active row's leading edge; "
+                "physical interspace and angular phase are included. " if len(active) > 1 else "") + " ".join(basis_notes)
+        elif not visible:
+            basis = "Check a row under Plot rows to display its geometry."
         note = ("Shared machine view. Adjacent row domains meet at the marked physical interface; "
                 "3D CGNS meshes use this assembly placement. Each row remains a separate mesh; "
                 "solver interface coupling is configured in the CFD solver." if interfaces else
@@ -669,59 +713,95 @@ def create_app(config_file=None, output_dir=None):
         if interface_error:
             note = f"Shared interface unavailable: {interface_error}"
         if planning:
-            note += " Dashed envelopes show prescribed meridional channels for rows awaiting a current blade design."
+            note += " Pale envelopes show prescribed blade extents awaiting a current blade design."
+        note += " Solid outlines: blade extent; dashed outlines: inlet/outlet flow-domain extensions."
         if errors:
             note += " " + " ".join(errors)
-        return {"key": key, "rows": datasets}, key, section, plots.assembly_meridional_figure(
+        return {"key": data_key, "rows": datasets}, key, section, plots.assembly_meridional_figure(
             views, planning, interfaces=interfaces), basis, note
 
     @app.callback(Output("reference-plot", "figure"), Output("meridional-plot", "figure"),
         Output("reference-basis", "children"), Output("meridional-basis", "children"),
-        Input("config", "data"), Input("row-references", "data"), State("reference-plot", "figure"))
-    def mesh_setup(state, registry, previous):
-        if not state or not state.get("valid") or not state.get("supported"):
-            return plots.section_mesh_placeholder("Selected-row 2D mesh"), empty("Span grid projection"), (
-                (state or {}).get("dependency_error", "Select a valid blade row.")), ""
-        refs, config = selected_references(state, registry), state["config"]
-        reference = refs.get("reference")
-        if not flow.current(reference, state["reference"]):
-            return plots.section_mesh_placeholder("2D reference mesh"), empty("Span grid projection"), "Generate an up-to-date 2D mesh for this row.", ""
-        numerics = config["mesh"]["numerics"]
-        render_key = flow.digest([state["row_id"], reference["job"], state["reference"],
-            numerics["span_layers"], numerics["span_stretch"]])
-        widths = config["mesh"]["visualization"]
+        Input("config", "data"), Input("row-references", "data"),
+        Input("plotted-rows", "value"), State("reference-plot", "figure"))
+    def mesh_setup(state, registry, visible=None, previous=None):
+        if not state or not state.get("valid"):
+            return plots.section_mesh_placeholder("Selected-row 2D mesh"), empty("Span grid projection"), "Select a valid blade row.", ""
+        active = project_model.active_rows(state["project"])
+        visible = {r["id"] for r in active} if visible is None else set(visible)
+        available = []
+        for row in active:
+            if row["id"] not in visible:
+                continue
+            try:
+                config = (state["config"] if row["id"] == state["row_id"] and state.get("supported") else
+                    flow.resolved_configuration(state["project"], row["id"], registry))
+                refs = (registry or {}).get(row["id"], {})
+                reference = refs.get("reference")
+                key = flow.keys(config, refs.get("nozzle"))["reference"]
+                if flow.current(reference, key):
+                    available.append((row, config, reference, key))
+            except (ValueError, OSError, RuntimeError):
+                continue
+        # The shared projection contains only rows with a current 2D mesh.
+        # Shift all row charts into one assembly m'-theta frame, using the same
+        # physical interspace as the meridional view. Never mutate mesh nodes.
+        chart_rows = [(r["id"], r["geometry"]["meridional_channel"],
+            project_model.assembly_placement(state["project"], r["id"])) for r in active]
+        render_key = flow.digest([sorted(visible), chart_rows, [(r["id"], ref["job"], key,
+            cfg["mesh"]["numerics"]["span_layers"], cfg["mesh"]["numerics"]["span_stretch"],
+            project_model.assembly_placement(state["project"], r["id"])) for r, cfg, ref, key in available]])
+        widths = {r["id"]: cfg["mesh"]["visualization"]["section_edge_width"] for r, cfg, _, _ in available}
         meta = (previous or {}).get("layout", {}).get("meta", {})
         if meta.get("mesh_key") == render_key:
-            if meta.get("edge_width") == widths["section_edge_width"]:
+            if meta.get("widths") == widths:
                 return (no_update,) * 4
             section_patch, span_patch = Patch(), Patch()
-            section_patch["data"][0]["line"]["width"] = widths["section_edge_width"]
-            for index in range(1, numerics["span_layers"] + 3):
-                span_patch["data"][index]["line"]["width"] = widths["section_edge_width"]
-            section_patch["layout"]["meta"]["edge_width"] = widths["section_edge_width"]
+            for row_id, index in meta.get("section_traces", {}).items():
+                section_patch["data"][index]["line"]["width"] = widths[row_id]
+            for row_id, indices in meta.get("span_traces", {}).items():
+                for index in indices:
+                    span_patch["data"][index]["line"]["width"] = widths[row_id]
+            section_patch["layout"]["meta"]["widths"] = widths
             return section_patch, span_patch, no_update, no_update
-        section, design = reference_artifact(reference["session"], reference["job"])
-        section_plot = plots.section_mesh_figure(section, design, edge_width=widths["section_edge_width"])
-        section_plot.update_layout(meta={"mesh_key": render_key, "edge_width": widths["section_edge_width"]})
-        span_plot, span_data = plots.meridional_figure(design, numerics, section,
-            edge_width=widths["section_edge_width"])
-        basis = ("Actual physical 2D mesh [mm]; translational periodicity."
-            if design.meridional_channel.is_linear else "Actual reference conformal mesh; annular 2D export uses this basis.")
-        if numerics["inflation_layers"]["enabled"]:
-            lower, upper = span_data["estimated_first_height_mm"]
-            basis += (f" Sampled mapped first-layer height: {lower:.3g}–{upper:.3g} mm"
-                      " in the blade surface; this is not a measured 3D wall-normal distance.")
-        span_basis = ("Projected span nodes and grid lines; a preview of the sweep, not a separate volume mesh."
-            f" {span_data['span_layers']} span layers; projected spacing"
-            f" {span_data['min_span_spacing_mm']:.3g}–{span_data['max_span_spacing_mm']:.3g} mm.")
+        basis = "Generate an up-to-date 2D mesh for a plotted row." if visible else "Check a row under Plot rows to display its mesh."
+        entries, section_entries, basis_notes = [], [], []
+        for row, config, reference, _ in available:
+            section, design = reference_artifact(reference["session"], reference["job"])
+            width = widths[row["id"]]
+            entries.append((row["id"], row_label(row), design, config["mesh"]["numerics"], section,
+                project_model.assembly_placement(state["project"], row["id"]), width))
+            section_entries.append((row["id"], row_label(row), design, section, width))
+            if config["mesh"]["numerics"]["inflation_layers"]["enabled"]:
+                basis_notes.append((row["id"], row_label(row)))
+        section_plot, section_indices = plots.assembly_section_figure(state["project"], section_entries, mesh=True)
+        span_plot, indices, details = plots.assembly_meridional_mesh_figure(entries)
+        section_plot.update_layout(meta={"mesh_key": render_key, "widths": widths,
+            "span_traces": indices, "section_traces": section_indices})
+        if entries:
+            basis = ("Actual physical 2D mesh [mm]; translational periodicity." if entries[0][2].meridional_channel.is_linear else
+                "Actual reference meshes in a shared midspan conformal chart; assembly interspace and angular phase included.")
+            for row_id, label in basis_notes:
+                lower, upper = details[row_id]["estimated_first_height_mm"]
+                basis += f" {label}: sampled mapped first-layer height {lower:.3g}–{upper:.3g} mm."
+            if basis_notes:
+                basis += " These in-surface estimates are not measured 3D wall-normal distances."
+        span_basis = ("Projected reference-boundary nodes and span lines for plotted rows with current 2D meshes; "
+            "a sweep preview, not a separate volume mesh. Solid: blade extent; dashed: inlet/outlet domain.") if entries else ""
+        for row_id, label, *_ in entries:
+            data = details[row_id]
+            span_basis += (f" {label}: {data['span_layers']} span layers; spacing "
+                f"{data['min_span_spacing_mm']:.3g}–{data['max_span_spacing_mm']:.3g} mm.")
         return section_plot, span_plot, basis, span_basis
 
     @app.callback(Output("volume-data", "data"), Output("report", "children"),
-        Input("config", "data"), Input("row-references", "data"))
-    def mesh_view(state, registry):
+        Input("config", "data"), Input("row-references", "data"), Input("plotted-rows", "value"))
+    def mesh_view(state, registry, visible=None):
         if not state or not state.get("valid"):
             return None, "Correct the configuration before inspecting the mesh."
         datasets, selected_report = [], "Generate a 3D mesh for the selected row to see its report."
+        if visible is not None and state["row_id"] not in visible:
+            selected_report = "Check the inspected row under Plot rows to show its quality report."
         for row in project_model.active_rows(state["project"]):
             reference = (registry or {}).get(row["id"], {}).get("volume")
             if not reference:
@@ -745,7 +825,7 @@ def create_app(config_file=None, output_dir=None):
                     cfg = project_model.row_configuration(state["project"], row["id"])
                     dataset["num_blades"] = definition.get("num_blades", cfg["meridional_channel"]["num_blades"])
                 datasets.append(dataset)
-                if row["id"] == state["row_id"]:
+                if row["id"] == state["row_id"] and (visible is None or row["id"] in visible):
                     selected_report = report_panel(summary, report)
             except (OSError, ValueError, KeyError) as exc:
                 if row["id"] == state["row_id"]:
@@ -756,81 +836,126 @@ def create_app(config_file=None, output_dir=None):
     @app.callback(Output("job", "data"), Output("job-error", "children"),
         *[Input(action, "n_clicks") for action in ACTIONS],
         State("config", "data"), State("session", "data"), State("job", "data"),
-        State("job-completion", "data"), State("row-references", "data"), prevent_initial_call=True,
+        State("job-completion", "data"), State("row-references", "data"),
+        State("calculation-scope", "value"), prevent_initial_call=True,
         running=[(Output("launch-busy", "data"), True, False)])
     def launch(*arguments):
-        state, session, handle, completed, registry = arguments[-5:]
+        state, session, handle, completed, registry, scope = arguments[-6:]
         action = ctx.triggered_id
         running = bool(handle and completed != handle["job"])
         if action == "cancel":
             if running:
-                flow.cancel_job(handle)
+                calculations.cancel(handle)
             return no_update, ""
         if running:
             return no_update, "Wait for the active row job or cancel it first."
-        if not state or not state.get("valid") or not state.get("supported"):
-            return no_update, (state or {}).get("dependency_error", "Select a valid blade row.")
+        if not state or not state.get("valid"):
+            return no_update, "Correct the invalid settings before calculating."
         try:
-            handle = flow.start_job(session, action, state["config"], selected_references(state, registry),
-                row_id=state["row_id"], row_role=state["role"], project=state["project"], registry=registry)
-            return handle, ""
+            handle = calculations.start(session, state["project"], scope if scope is not None else state["row_id"], action, registry)
+            return (handle, "") if handle else (no_update, "All selected meshes are already current.")
         except (ValueError, OSError, RuntimeError) as exc:
             return no_update, str(exc)
 
     @app.callback(Output("row-references", "data"), Output("job-completion", "data"),
         Output("job-status", "children"), Output("job-progress", "value"), Output("activity", "children"),
         Output("spinner", "className"), Output("workspace", "value"),
-        Output("selected-row", "value", allow_duplicate=True), Input("poll", "n_intervals"), Input("job", "data"),
+        Output("selected-row", "value", allow_duplicate=True),
+        Output("job", "data", allow_duplicate=True), Input("poll", "n_intervals"), Input("job", "data"),
         State("job-completion", "data"), State("row-references", "data"), State("base-project", "data"),
+        State("plotted-rows", "value"),
         prevent_initial_call=True)
-    def poll(_, handle, completed, registry, project):
+    def poll(_, handle, completed, registry, project, visible=None):
         if not handle or completed == handle["job"]:
-            return (no_update,) * 8
+            return (no_update,) * 9
+        if calculations.cancellation_requested(handle):
+            calculations.cancel(handle)
         status, log = flow.poll_job(handle)
         done = status["state"] != "running"
-        refs, destination, selected = no_update, no_update, no_update
+        refs, destination, selected, next_handle = no_update, no_update, no_update, None
         if status["state"] == "complete":
             result = json.loads((flow.directory(handle) / "result.json").read_text(encoding="utf-8"))
             refs = deepcopy(registry or {})
             row_id = handle.get("row_id", "stator_1")
             refs.setdefault(row_id, {})[handle["action"]] = result["reference"]
-            if handle["action"] in ("reference", "volume") and row_id in {
+            if row_id in {
                     r["id"] for r in project_model.active_rows(project)}:
-                destination = "mesh"
-                selected = row_id
-        elapsed = time.time() - handle["started"]
-        message = f"{status['message']} · {elapsed:.1f} s"
-        return (refs, handle["job"] if done else no_update, message, status.get("fraction"), log,
-                "spinner running" if not done else "", destination, selected)
+                destination = "design" if handle["action"] == "nozzle" else "mesh"
+                if visible is None or row_id in visible:
+                    selected = row_id
+            try:
+                next_handle = calculations.advance(handle, refs, log)
+            except (ValueError, OSError, RuntimeError) as exc:
+                status = {**status, "state": "failed", "message": f"Queue stopped: {exc}", "fraction": None}
+                log += f"\n{status['message']}\n"
+        queue = handle.get("queue", {})
+        elapsed = time.time() - queue.get("started", handle["started"])
+        count = len(queue.get("rows", [handle.get("row_id")]))
+        index = queue.get("index", 0)
+        label = row_label(project_model.get_row(queue.get("project", project), handle.get("row_id", "stator_1")))
+        message = f"{label}: {status['message']} · row {index + 1} of {count} · {elapsed:.1f} s"
+        fraction = status.get("fraction")
+        fraction = None if fraction is None else (index + fraction) / count
+        log = (queue.get("log", "") + log)[-60000:]
+        if next_handle:
+            next_row = project_model.get_row(next_handle["queue"]["project"], next_handle["row_id"])
+            message = f"{row_label(next_row)}: starting {calculations.STAGE_LABELS[handle['action']]} · row {next_handle['queue']['index'] + 1} of {count}"
+        elif done and status["state"] == "complete" and calculations.cancellation_requested(handle):
+            message += " · Remaining calculations cancelled."
+        elif done and status["state"] == "complete":
+            fraction = 1  # Remaining rows may have had already-current meshes.
+        return (refs, handle["job"] if done else no_update, message, fraction, log,
+                "spinner running" if not done or next_handle else "", destination, selected,
+                next_handle if next_handle else no_update)
+
+    @app.callback(Output("job-status", "title"), Input("job-status", "children"))
+    def progress_title(message):
+        return message or ""
 
     @app.callback(*[Output(action, "disabled") for action in ACTIONS],
-        Output("volume-status", "children"), Output("row-status", "children"),
+        Output("volume-status", "children"), Output("calculation-controls", "title"),
         Input("config", "data"), Input("row-references", "data"), Input("job", "data"),
-        Input("job-completion", "data"), Input("launch-busy", "data"))
-    def readiness(state, registry, handle, completed, launching):
+        Input("job-completion", "data"), Input("launch-busy", "data"),
+        Input("calculation-scope", "value"))
+    def readiness(state, registry, handle, completed, launching, scope=None):
         busy = bool(launching or (handle and completed != handle["job"]))
         supported = bool(state and state.get("valid") and state.get("supported"))
         refs = selected_references(state, registry)
         current = {stage: supported and flow.current(refs.get(stage), state[stage])
                    for stage in ("nozzle", "reference", "volume")}
-        rotor = bool(state and state.get("role") == "rotor")
-        supersonic = not rotor or not supported or state["config"]["rotor_design"]["M_inlet"] > 1
-        disabled = (busy or not supported or not supersonic, busy or not current["nozzle"], busy or not current["reference"],
-                    not busy)
+        available, reasons = [], []
+        for action in ("nozzle", "reference", "volume"):
+            try:
+                if not state or not state.get("valid"):
+                    raise ValueError("Correct the invalid settings before calculating.")
+                calculations.check_prerequisites(state["project"], scope if scope is not None else state["row_id"], action, registry)
+                available.append(True)
+                reasons.append("")
+            except (ValueError, OSError, RuntimeError, KeyError) as exc:
+                available.append(False)
+                reasons.append(str(exc))
+        disabled = (*(busy or not value for value in available), not busy)
         message = ""
         if refs.get("volume") and not current["volume"]:
             message = "Displayed mesh belongs to an earlier configuration; regenerate it to obtain an updated CGNS mesh."
-        scope = (f"Actions apply to {row_label(project_model.get_row(state['project'], state['row_id']))}." if supported else
-                 (state or {}).get("dependency_error", "Select a valid blade row."))
-        if not supersonic:
-            scope += " The vortex method requires a supersonic relative inlet (Mach > 1)."
-        return (*disabled, message, scope)
+        scope_note = "Select a valid calculation scope."
+        if state and state.get("valid"):
+            try:
+                selected_rows = calculations.scoped_rows(state["project"], scope if scope is not None else state["row_id"])
+                scope_note = f"Calculations: {' + '.join(row_label(row) for row in selected_rows)}."
+            except ValueError:
+                scope_note = "Check at least one row to calculate."
+            scope_note += " Rows run in machine order; plot visibility is independent."
+            reason = next((item for item in reasons if item), "")
+            if reason:
+                scope_note += " " + reason
+        return (*disabled, message, scope_note)
 
     @app.callback(Output("nozzle", "children"), Input("config", "data"))
     def design_action_label(state):
-        return "Compute rotor blade" if (state or {}).get("role") == "rotor" else "Compute MoC"
+        return "Compute blade design"
 
-    @app.callback(Output("interspace-note", "children"), Input("config", "data"))
+    @app.callback(Output("interspace-note", "title"), Input("config", "data"))
     def interspace_note(state):
         if not state or not state.get("valid"):
             return ""
@@ -852,8 +977,8 @@ def create_app(config_file=None, output_dir=None):
             if interface:
                 coordinate_name = "z" if spacing["geometry_type"] == "axial" else "r"
                 description += f" Shared interface: {coordinate_name} = {interface['coordinate_mm']:g} mm (mid-gap)."
-            messages.append(html.Span(f"{upstream} → {downstream} · {description}"))
-        return messages
+            messages.append(f"{upstream} → {downstream} · {description}")
+        return "\n".join(messages)
 
     @app.callback(Output("download-project", "disabled"), Output("download-project", "title"),
         Input("config", "data"), Input("row-references", "data"), Input("job", "data"),
@@ -864,12 +989,10 @@ def create_app(config_file=None, output_dir=None):
         if not state or not state.get("valid"):
             return True, "Correct the configuration before downloading the project."
         try:
-            meshes, omitted = project_export.collect_meshes(state["project"], registry)
-        except (ValueError, TypeError, KeyError):
-            return True, "Correct the configuration before downloading the project."
-        if not meshes:
-            return True, project_export.NO_MESH
-        title = f"Download {len(meshes)} mesh file(s), the final YAML, README, mesh report and activity log."
+            meshes, omitted, stages = project_export.stage_meshes(state["project"], registry)
+        except (ValueError, TypeError, KeyError) as exc:
+            return True, str(exc)
+        title = "Download the complete stage CGNS, individual row files, final YAML, mesh report and activity log."
         if omitted:
             title += " Unavailable or outdated meshes are listed in the README."
         return False, title
@@ -891,12 +1014,12 @@ def create_app(config_file=None, output_dir=None):
         except (OSError, ValueError, KeyError, TypeError) as exc:
             return no_update, f"Cannot download project: {exc}"
 
-    app.clientside_callback("function(data, copies, surfaces) { return window.dash_clientside.studio.render(data, copies, surfaces, [], 1, 'geometry'); }",
+    app.clientside_callback("function(data, copies, surfaces, rows) { return window.dash_clientside.studio.render(data, copies, surfaces, [], 1, 'geometry', rows); }",
         Output("geometry-scene", "children"), Output("geometry-note", "children"), Input("geometry-data", "data"),
-        Input("geometry-copies", "value"), Input("geometry-surfaces", "value"))
-    app.clientside_callback("function(data, copies, surfaces, edges, width) { return window.dash_clientside.studio.render(data, copies, surfaces, edges, width, 'mesh'); }",
+        Input("geometry-copies", "value"), Input("geometry-surfaces", "value"), Input("plotted-rows", "value"))
+    app.clientside_callback("function(data, copies, surfaces, edges, width, rows) { return window.dash_clientside.studio.render(data, copies, surfaces, edges, width, 'mesh', rows); }",
         Output("mesh-scene", "children"), Output("mesh-note", "children"), Input("volume-data", "data"), Input("mesh-copies", "value"),
-        Input("mesh-surfaces", "value"), Input("mesh-edges", "value"), Input("mesh-width", "data"))
+        Input("mesh-surfaces", "value"), Input("mesh-edges", "value"), Input("mesh-width", "data"), Input("plotted-rows", "value"))
     return app
 
 

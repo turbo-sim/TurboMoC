@@ -8,6 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import yaml
 
 from ... import configuration_project as projects
+from ...io.cgns_stage import combine_rows
 from . import workflow as flow
 
 
@@ -96,6 +97,23 @@ def collect_meshes(project, registry):
     return meshes, omitted
 
 
+def stage_meshes(project, registry):
+    """Require a complete stage; calculation scope never limits export scope."""
+    meshes, omitted = collect_meshes(project, registry)
+    active = {row["id"] for row in projects.active_rows(project)}
+    complete = {stage: [mesh for mesh in meshes if mesh["stage"] == stage]
+                for stage in ("volume", "reference")}
+    complete = {stage: items for stage, items in complete.items()
+                if {item["row"]["id"] for item in items} == active}
+    if "volume" not in complete and (project["machine"]["geometry_type"] != "linear"
+                                     or "reference" not in complete):
+        raise ValueError(NO_MESH + " Every active row must be current. " + " ".join(omitted))
+    for items in complete.values():
+        if len({item["row"]["mesh"]["cgns"]["length_scale"] for item in items}) != 1:
+            raise ValueError("All rows must use the same CGNS length_scale for a shared physical stage.")
+    return meshes, omitted, complete
+
+
 def _timestamp(value):
     return datetime.fromtimestamp(value, timezone.utc).isoformat(timespec="seconds")
 
@@ -123,19 +141,25 @@ def _logs(meshes):
 
 
 def build_archive(project, registry):
-    """Return a ZIP containing exactly the user's selected deliverable types."""
-    meshes, omitted = collect_meshes(project, registry)
-    if not meshes:
-        raise ValueError(NO_MESH)
+    """Return the complete active stage plus settings and per-row diagnostics."""
+    meshes, omitted, stages = stage_meshes(project, registry)
+    combined = {}
+    for stage, items in stages.items():
+        name = "stage_2d.cgns" if stage == "reference" and "volume" in stages else "stage.cgns"
+        combined[name] = combine_rows([(item["row"]["id"], item["path"]) for item in items])
     now = datetime.now(timezone.utc)
     generated = now.isoformat(timespec="seconds")
-    report = {"created_utc": generated, "machine": project["machine"], "rows": {}, "interfaces": []}
+    report = {"created_utc": generated, "machine": project["machine"], "rows": {}, "interfaces": [],
+              "stage_files": {name: manifest for name, (_, manifest) in combined.items()}}
     interfaces = {}
     readme = ["TurboMoC project", f"Packaged: {generated}",
               f"Machine: {project['machine']['geometry_type']}; design mode: {project['machine']['design_mode']}", "",
               "CONTENTS", "project.yaml - final settings; load this file in TurboMoC to reproduce the design.",
               "mesh_report.json - consolidated mesh statistics and quality results, grouped by row and dimension.",
-              "activity.log - computation logs for the included meshes and their preceding stages.", "", "MESHES"]
+              "activity.log - computation logs for the included meshes and their preceding stages.",
+              "stage.cgns - the complete active machine, with a separate fluid zone for each row.",
+              "stage_2d.cgns - optional separate true 2D linear mesh when a 3D mesh is also available.",
+              "meshes/ - unchanged individual row exports for diagnostics.", "", "MESHES"]
     for mesh in meshes:
         row, stage, folder = mesh["row"], mesh["stage"], mesh["folder"]
         dimension = "3d" if stage == "volume" else "2d"
@@ -179,6 +203,12 @@ def build_archive(project, registry):
         readme.append("  Boundaries: " + ", ".join(f"{name} ({kind})" for name, kind in boundaries.items()
             if stage == "volume" or name not in ("hub", "shroud")) + ".")
     report["interfaces"] = list(interfaces.values())
+    for interface in report["interfaces"]:
+        for side in interface["exported_boundaries"]:
+            stage_row = combined["stage.cgns"][1]["rows"][side["row_id"]]
+            side["stage_file"] = "stage.cgns"
+            side["zone"] = stage_row["zone"]
+            side["stage_boundary"] = stage_row["boundaries"][side["boundary"]]
     if interfaces:
         readme.extend(["", "SHARED PHYSICAL INTERFACES"])
         for interface in interfaces.values():
@@ -191,7 +221,9 @@ def build_archive(project, registry):
         "Each mesh is one periodic passage. Multirow 3D meshes use machine coordinates with the recorded placement applied; additional displayed blades are not exported.",
         "Single-row meshes and linear 2D meshes retain their original physical coordinates.",
         "Configure periodic_left/periodic_right pairing in the CFD solver (translational for linear, rotational for annular).",
-        "Adjacent rows share a physical interface, not necessarily matching nodes or blade counts. The inlet/outlet boundary names are preserved; configure row-interface coupling in the CFD solver.",
+        "Stage zones, fluid element sections and boundary names are prefixed with their stable row IDs. Periodic donor-zone references are updated; local node/element indices are unchanged.",
+        "Fluent 24.2 qualifies imported names with the zone, e.g. stator_1_fluid.stator_1_outlet. It initially imports these boundary patches as walls; assign the required inlet/outlet, periodic and inter-row interface types in the solver.",
+        "Adjacent rows share a physical interface, not necessarily matching nodes or blade counts. The two interface sides stay separate; configure row-interface coupling in the CFD solver. No flow interface model is assigned by this archive.",
         "2D CGNS files are included only for linear cascades; axial/radial exports contain physical 3D meshes.",
         "Only completed meshes matching the final settings and selected computation chain are included.",
         "The project YAML also retains any inactive rows; their meshes are not included."])
@@ -203,6 +235,8 @@ def build_archive(project, registry):
         archive.writestr("README.txt", "\n".join(readme) + "\n")
         archive.writestr("mesh_report.json", json.dumps(report, indent=2, ensure_ascii=False) + "\n")
         archive.writestr("activity.log", _logs(meshes))
+        for name, (data, _) in combined.items():
+            archive.writestr(name, data)
         for mesh in meshes:
             archive.write(mesh["path"], mesh["file"])
     return stream.getvalue(), f"turbo_moc_project_{now:%Y-%m-%d_%H-%M-%S}.zip"

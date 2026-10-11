@@ -125,13 +125,15 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         actor: Object.assign({}, actor.props.actor, {visibility: false})
       })}));
     },
-    render: function(data, copies, selected, edges, width, pane) {
+    render: function(data, copies, selected, edges, width, pane, plottedRows) {
       const studio = window.dash_clientside.studio;
       const previous = studio.scenes[pane];
-      const rows = data && (data.rows || [data]);
+      const rows = data && (data.rows || [data]).filter(row =>
+        plottedRows == null || plottedRows.includes(row.id || 'stator_1'));
       if (!rows || !rows.length) {
         if (previous && previous.observer) previous.observer.disconnect();
-        const note = pane === "mesh" ? "Generate a current 3D mesh to show its boundary cells."
+        const note = plottedRows && !plottedRows.length ? "Check a row under Plot rows to display it."
+                   : pane === "mesh" ? "Generate a current 3D mesh to show its boundary cells."
                                     : "Compute current MoC to show geometry.";
         if (!previous) return [window.dash_clientside.no_update, note];
         const hidden = Object.assign({}, previous, {key: "empty", active: false,
@@ -147,7 +149,9 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       const names = selected || [];
       const showEdges = pane === "mesh" && (edges || []).includes("edges");
       const lineWidth = Number(width) > 0 ? Number(width) : 0.35;
-      const key = [data.key, count, names.join(",")].join("|");
+      // Visibility changes actor selection, but retains the numerical data key
+      // and camera. No regeneration or removal of hidden row results is needed.
+      const key = [data.key, count, names.join(","), rows.map(row => row.id).join(",")].join("|");
       const note = count + " displayed blade passage(s) · XYZ [mm] · " +
         (pane === "mesh" ? "actual volume boundary cells" : "geometry display tessellation") +
         ". Drag to rotate; scroll to zoom.";

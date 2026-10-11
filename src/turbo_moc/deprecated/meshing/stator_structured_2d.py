@@ -3,7 +3,7 @@
 TurboGrid-like topology on the same fluid domain as the unstructured mesh
 (stator_mesh_2d.stator_flow_domain): an O-grid around the blade carries the
 boundary layer -- exactly `num_layers` cells at `growth_ratio`, first cell
-`first_height` -- and five H-blocks fill the passage:
+`first_height` -- and five H-blocks fill the passage::
 
             inlet
      +------------------+
