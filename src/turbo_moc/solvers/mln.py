@@ -13,6 +13,7 @@ Replaces Stage 3 (kernel) with a centred-expansion-fan construction:
 Stage 4 (reflex / turning section) is inherited unchanged.
 """
 
+import logging
 import time
 import json
 import numpy as np
@@ -22,13 +23,14 @@ from turbo_moc.core.classes import (
     rotation_around_center, jitted_calculate_static_properties,
     DistCalc, RotVec, MakeVec, vecDotVec,
 )
-from turbo_moc.io.post_process import printProgress
+from turbo_moc.reporting import StageProgress, format_pressure
 import matplotlib.pyplot as plt
 import jaxprop as jxp
 import jax
 
 jxp.set_plot_options()
 colors = jxp.COLORS_PYTHON
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -155,10 +157,10 @@ class MOCSolverMLN:
         # See turbo_moc.solvers.conventional.MOCSolver's __init__ for why a
         # pre-built FluidManager can be reused across a geometry sweep.
         if fluid_manager is not None:
-            print('Reusing provided Fluid Manager...')
+            logger.debug("  MoC: reusing the provided fluid manager.")
             self.fluid_manager = fluid_manager
         else:
-            print('Initializing Fluid Manager...')
+            logger.info("  MoC: initializing fluid properties")
             self.fluid_manager = FluidManager(
                 fluid_name=self.fluid_name, backend="HEOS",
                 P0=self.P0, T0=self.T0, Q0=self.Q0
@@ -194,7 +196,8 @@ class MOCSolverMLN:
 
     def _stage1_sauer_smooth(self, progress_callback=None):
         """Real Sauer transonic sonic line (identical to turbo_moc/)."""
-        print('\n\t=== Stage 1: Sauer sonic line ===\n')
+        stage = StageProgress(logger, 1, "Sauer sonic line", "1 of 4", progress_callback, name="sonic line")
+        stage.begin()
         y_vals = np.linspace(0, self.y_t, self.n)
         for i, y_val in enumerate(y_vals):
             p = InternalPoint(self.fluid_manager)
@@ -204,7 +207,8 @@ class MOCSolverMLN:
             p.SauerMain()
             self.Sauer.append(p)
             self.sauer_main.append(p)
-            printProgress(i+1, self.n, '1 of 4', on_progress=progress_callback)
+            stage.update((i + 1) / self.n)
+        stage.finish()
 
     def _stage1_flashing_front(self, progress_callback=None):
         """
@@ -217,7 +221,9 @@ class MOCSolverMLN:
         corresponding to the flashing critical state found by
         jax_solve_critical_state's FLASHING_JUMP fallback.
         """
-        print('\n\t=== Stage 1: Flashing throat front ===\n')
+        stage = StageProgress(logger, 1, "Throat front (uniform post-jump state)", "1 of 4",
+                              progress_callback, name="throat front")
+        stage.begin()
         v_jump = float(jnp.sqrt(2 * (self.fluid_manager.h0 - self.fluid_manager.critical_state["h"])))
 
         y_vals = np.linspace(0, self.y_t, self.n)
@@ -230,7 +236,8 @@ class MOCSolverMLN:
             p.ThermoFlowProp()
             self.Sauer.append(p)
             self.sauer_main.append(p)
-            printProgress(i+1, self.n, '1 of 4', on_progress=progress_callback)
+            stage.update((i + 1) / self.n)
+        stage.finish()
 
     # ------------------------------------------------------------------
     # STAGE 2 — MLN: use Sauer line directly as IVP (no marching needed)
@@ -260,16 +267,17 @@ class MOCSolverMLN:
         multi-point front, adding "interior" points that carried no
         independent new information.
         """
+        # Instantaneous: no marching, the stage only selects the initial line.
+        title = ("Initial-value line (throat corner only, no marching)" if self.flashing
+                 else "Initial-value line (sonic line, no marching)")
+        stage = StageProgress(logger, 2, title, "2 of 4", progress_callback, name="initial-value line")
+        stage.begin()
         if self.flashing:
-            print('\n=== Stage 2 MLN (flashing): corner point only (no marching) ===\n')
             self.IVP = [self.Sauer[-1]]   # single corner point (y = y_t)
-            print('  IVP line set to the throat corner point only.')
         else:
-            print('\n=== Stage 2 MLN: using Sauer line as IVP (no marching) ===\n')
             self.IVP = list(reversed(self.Sauer))   # IVP[0] = Sauer wall pt (y = y_t)
-            print(f'  IVP line set to Sauer line: {len(self.IVP)} points.')
-        if progress_callback is not None:
-            progress_callback(1.0, '2 of 4')  # instantaneous, no marching loop to report mid-progress on
+        logger.debug("  MoC initial-value line: %d point(s).", len(self.IVP))
+        stage.finish()
 
     # ------------------------------------------------------------------
     # STAGE 2 (flashing variant) — IVP marching, ported from moc_tool_flashing
@@ -287,12 +295,14 @@ class MOCSolverMLN:
         NOTE: mutates self.Sauer in place; run_stage_1_sauer already cached the
         true throat-corner x in self.throat_corner_x before this runs.
         """
-        print('\n=== Stage 2 MLN (flashing): IVP marching ===\n')
+        stage = StageProgress(logger, 2, "Initial-value line", "2 of 4", progress_callback,
+                              name="initial-value line")
+        stage.begin()
         self.IVP.append(self.Sauer[-1])
         num_iterations = self.n * 2 - 2
 
         for j in range(num_iterations):
-            printProgress(j, num_iterations - 1, '2 of 4', on_progress=progress_callback)
+            stage.update(j / max(num_iterations, 1))
             k = len(self.Sauer)
             Sauer_old = self.Sauer
             Sauer_new = []
@@ -330,7 +340,8 @@ class MOCSolverMLN:
 
             self.mesh_data["stage2_fronts"].append(([float(p.x) for p in Sauer_new], [float(p.y) for p in Sauer_new]))
 
-        print(f'  IVP line built via marching: {len(self.IVP)} points.')
+        logger.debug("  MoC initial-value line: %d points after marching.", len(self.IVP))
+        stage.finish()
 
     # ------------------------------------------------------------------
     # STAGE 3 — MLN kernel: centred expansion fan from throat corner
@@ -374,7 +385,10 @@ class MOCSolverMLN:
         into the near-M=1 singularity and the fluid table's valid range.
         """
         tau = self.tau_mln[1:]
-        print('\n=== Stage 3 MLN: centred expansion fan (fixed sweep to theta*) ===\n')
+        stage = StageProgress(logger, 3, f"Expansion fan (prescribed sweep to {tau[-1]:.2f} deg)", "3 of 4",
+                              progress_callback, name="fan")
+        stage.begin()
+        outcome = "stopped early"
 
         # Fixed corner: the original Stage-1 wall point, cached in
         # run_stage_1_sauer as self.throat_corner_x (self.Sauer is mutated by
@@ -531,9 +545,11 @@ class MOCSolverMLN:
                 # drive a point outside the fluid table's valid range. Stop
                 # gracefully at the last converged front instead of crashing
                 # the whole batch -- self.IVP still holds that last-good state.
-                print(f'\n\t***** WARNING: Stage 3 stopped at angle {ang:.2f} deg '
-                      f'due to a property-solve failure ({e!s:.120}) — '
-                      f'design Mach not reached, using last valid state *****\n')
+                last = self.IVP[-1]
+                logger.warning(
+                    "  MoC fan: property solve failed at %.2f of %.2f deg (%s). Using the last valid front "
+                    "(axis Mach %.4f; design %.4f): the design exit condition is not reached.",
+                    ang, tau[-1], e, float(last.M), self.Noz_Mach)
                 break
 
             self.IVP = IVP_New
@@ -547,28 +563,23 @@ class MOCSolverMLN:
                     '-', color='#1f77b4', linewidth=0.6, zorder=2
                 )
 
-            # Progress (fixed sweep -- no early termination search)
-            t2 = time.time()
-            if c % 10 == 0:
-                print('\n\tAngle\t\tMa_axis\t\tp_axis[Pa]\tx\t\tTime')
-            print(f'\t{ang:.2f}\t\t{IVP_New[-1].M:.4f}\t\t{IVP_New[-1].p:.1f}'
-                  f'\t\t{IVP_New[-1].x:.6f}\t\t{t2-self.t0:.1f}s')
-            if progress_callback is not None:
-                # Fixed sweep, no early-termination search -- angle fraction
-                # swept is already an exact progress fraction, unlike the
-                # metric-gap-closed proxy the conventional solver's adaptive
-                # Stage 3 needs.
-                progress_callback(c / len(tau), '3 of 4')
+            # Fixed sweep, no early-termination search: the swept fraction of
+            # the prescribed angle range is an exact progress fraction.
+            logger.debug("  MoC fan ray %d: angle %.2f deg, axis M %.4f, p %s, x %.6f m",
+                         c, ang, float(IVP_New[-1].M), format_pressure(IVP_New[-1].p), float(IVP_New[-1].x))
+            axis = IVP_New[-1]
+            stage.update(c / len(tau), lambda: f"{100 * c / len(tau):.0f}% of the prescribed sweep; "
+                                               f"axis Mach {float(axis.M):.4f}")
 
         else:
             # Loop completed without a property-solve failure: reached theta*
-            print(f'\n\t***** MLN Kernel Done: swept full range to theta* = '
-                  f'{tau[-1]:.2f} deg *****\n')
+            outcome = "completed"
 
         final = self.axis_points_vec[-1] if self.axis_points_vec else self.IVP[-1]
-        print(f'\tFinal state: M={final.M:.4f} (design M_f={self.Noz_Mach:.4f}), '
-              f'p={final.p:.1f} Pa'
-              + (f' (target p_out={self.P_back:.1f} Pa)' if self.P_back is not None else ''))
+        logger.debug("  MoC fan: final axis M %.4f (design %.4f), p %s%s", float(final.M), self.Noz_Mach,
+                     format_pressure(final.p),
+                     f" (target {format_pressure(self.P_back)})" if self.P_back is not None else "")
+        stage.finish(outcome)
 
     # ------------------------------------------------------------------
     # STAGE 4 — Reflex zone (identical to turbo_moc/)
@@ -611,7 +622,8 @@ class MOCSolverMLN:
         self.IVP = refined
 
     def run_stage_4_reflex(self, refine_near_corner=False, n_sub=8, n_segments=3, progress_callback=None):
-        print('\n=== Stage 4: Reflex zone ===\n')
+        stage = StageProgress(logger, 4, "Reflex region", "4 of 4", progress_callback, name="reflex region")
+        stage.begin()
         # refine_near_corner defaults to False: measured to leave the wall
         # SHAPE unchanged in that region (segment angles drift <1 deg across
         # the whole refined stretch -- it's still effectively the same
@@ -661,9 +673,10 @@ class MOCSolverMLN:
                 self.ax1.plot((Ref_P[0].x, LocWall.x), (Ref_P[0].y, LocWall.y),
                               '-', color='lightgray', linewidth=0.6, zorder=1)
 
-            printProgress(i, len(self.IVP)-1, '4 of 4', on_progress=progress_callback)
+            stage.update(i / max(len(self.IVP) - 1, 1))
 
         self.nozzle_wall_final = self.nozzle_wall
+        stage.finish()
 
     # ------------------------------------------------------------------
     # PLOTTING
@@ -706,7 +719,7 @@ class MOCSolverMLN:
             plt.tight_layout()
 
         total = time.time() - self.t0
-        print(f'\nMLN simulation completed in {total:.2f} s')
+        logger.info("  MoC run completed in %.2f s", total)
         plt.show()
 
     # ------------------------------------------------------------------

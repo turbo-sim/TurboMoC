@@ -26,7 +26,7 @@ import numpy as np
 
 __all__ = [
     "apply_conformal_mapping", "rotate_radial_points",
-    "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial",
+    "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial", "consistent_radial_wrap",
     "conformal_length_scale", "mapped_throat_width",
 ]
 
@@ -221,6 +221,32 @@ def implied_n_blades_radial(blade_data, r1, r2, source="stator"):
     x1, c_axial, eval_chord, r_eval = _eval_reference(blade_data, r1, r2, source)
     mapped_pitch = mapped_pitch_width(blade_data, r1, r2, source=source)
     return float(2.0 * np.pi * r_eval / mapped_pitch)
+
+
+def consistent_radial_wrap(blade_data, r1, r2_target, source="stator"):
+    """Blade count and outer radius that keep the designed 2D passage.
+
+    Under the log-spiral map one 2D pitch p turns by |a| p, a = ln(r2/r1) /
+    c_axial, at every radius; the copies are laid out 2*pi/N apart. Both
+    agree only for N = 2*pi / (|a| p) (implied_n_blades_radial, which is
+    exactly this, independent of where it is evaluated). So N is the
+    nearest integer to that count at (r1, r2_target), and r2 is then moved
+    to the radius where it is exact:
+
+        |ln(r2/r1)| = 2*pi |c_axial| / (N p),   same side of r1 as r2_target
+
+    Returns n_blades, r2, and the target's non-integer implied count.
+    """
+    if r1 <= 0 or r2_target <= 0 or r1 == r2_target:
+        raise ValueError("r1 and r2 must be positive and different.")
+    n_target = implied_n_blades_radial(blade_data, r1, r2_target, source=source)
+    n_blades = max(2, int(round(n_target)))
+    curve = blade_data["blade_curve"] if source == "stator" else blade_data["blade"]
+    chord_vals = np.asarray(curve["y"] if source == "stator" else curve["x"], dtype=float)
+    pitch_vals = np.asarray(curve["x"] if source == "stator" else curve["y"], dtype=float)
+    _, _, c_axial = _reference_point_and_scale(chord_vals, pitch_vals)
+    log_ratio = np.sign(np.log(r2_target / r1)) * 2.0 * np.pi * abs(c_axial) / (n_blades * float(blade_data["pitch"]))
+    return {"n_blades": n_blades, "r2": float(r1 * np.exp(log_ratio)), "n_implied_at_target": float(n_target)}
 
 
 def wrap_blade_radial(blade_data, r1, r2, n_blades, theta0=0.0):

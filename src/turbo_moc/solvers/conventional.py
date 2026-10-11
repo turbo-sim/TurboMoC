@@ -1,14 +1,16 @@
+import logging
 import time
 import numpy as np
 from jax import numpy as jnp
 from turbo_moc.core.classes import *
-from turbo_moc.io.post_process import printProgress
+from turbo_moc.reporting import StageProgress, format_pressure
 import matplotlib.pyplot as plt
 import pandas as pd
 import json
 
 jxp.set_plot_options()
 colors = jxp.COLORS_PYTHON
+logger = logging.getLogger(__name__)
 
 class MOCSolver:
     """
@@ -66,10 +68,10 @@ class MOCSolver:
         # Rebuilding it on every solver instantiation is wasted work in a
         # design/optimization loop that holds the operating point fixed.
         if fluid_manager is not None:
-            print('Reusing provided Fluid Manager...')
+            logger.debug("  MoC: reusing the provided fluid manager.")
             self.fluid_manager = fluid_manager
         else:
-            print('Initializing Fluid Manager...')
+            logger.info("  MoC: initializing fluid properties")
             self.fluid_manager = FluidManager(
                 fluid_name=self.fluid_name, backend="HEOS", P0=self.P0, T0=self.T0, Q0=self.Q0
             )
@@ -110,7 +112,7 @@ class MOCSolver:
         so both can be generated and compared for the same case.
 
         progress_callback: optional callable(fraction: float, stage_label: str)
-        -- see printProgress's on_progress and turbo_moc.progress. Threaded through
+        -- see turbo_moc.reporting.StageProgress and turbo_moc.progress. Threaded through
         every run_stage_* method the same way, so a UI can drive one overall
         progress bar across the whole solve.
         """
@@ -118,7 +120,9 @@ class MOCSolver:
             self._run_stage_1_sauer_true_line(progress_callback=progress_callback)
             return
 
-        print('\n\n\t========= Flashing Throat Initialization =========\n')
+        stage = StageProgress(logger, 1, "Throat front (uniform post-sonic state)", "1 of 4",
+                              progress_callback, name="throat front")
+        stage.begin()
 
         # 1. Pull the REAL jumped velocity from the critical state
         # We want the V that corresponds to Mach 13, not Mach 1.
@@ -181,9 +185,10 @@ class MOCSolver:
             
             self.Sauer.append(p)
             self.sauer_main.append(p)
-            printProgress(i+1, self.n, '1 of 4', on_progress=progress_callback)
+            stage.update((i + 1) / self.n)
 
         self.axis_points_vec.append(self.Sauer[0])
+        stage.finish()
 
     def _run_stage_1_sauer_true_line(self, progress_callback=None):
         """
@@ -201,7 +206,8 @@ class MOCSolver:
         internal compute_sonic_state() call would otherwise populate it) --
         precomputed once here from the manager's own critical_state.
         """
-        print('\n\n\t========= Flashing Throat Initialization (true Sauer parabolic sonic line) =========\n')
+        stage = StageProgress(logger, 1, "Sauer sonic line", "1 of 4", progress_callback, name="sonic line")
+        stage.begin()
 
         gamma_star = float(self.fluid_manager.critical_state["cp"] / self.fluid_manager.critical_state["cv"])
 
@@ -218,20 +224,23 @@ class MOCSolver:
 
             self.Sauer.append(p)
             self.sauer_main.append(p)
-            printProgress(i + 1, self.n, '1 of 4', on_progress=progress_callback)
+            stage.update((i + 1) / self.n)
 
         self.axis_points_vec.append(self.Sauer[0])
+        stage.finish()
 
     # --------------------------------------------------------------------------
     # STAGE 2: SAUER TO IVP (IVP Marching)
     # --------------------------------------------------------------------------
     def run_stage_2_ivp(self, progress_callback=None):
         self.IVP.append(self.Sauer[-1])
-        print('\n\n========= Sauer to IVP (Stage 2)=========\n')
+        stage = StageProgress(logger, 2, "Initial-value line", "2 of 4", progress_callback,
+                              name="initial-value line")
+        stage.begin()
         num_iterations = self.n*2 - 2
 
         for j in range(0, num_iterations):
-            printProgress(j, num_iterations - 1, '2 of 4', on_progress=progress_callback)
+            stage.update(j / max(num_iterations, 1))
             k = len(self.Sauer)
             Sauer_old = self.Sauer 
             Sauer_new = []
@@ -274,6 +283,7 @@ class MOCSolver:
 
         if self.show_plot is True:
             self.ax1.plot(p.x, p.y, "o", color="black", markersize=0.5)
+        stage.finish()
 
     # --------------------------------------------------------------------------
     # STAGE 3: IVP 2 KERNEL (Kernel Marching)
@@ -385,7 +395,9 @@ class MOCSolver:
     def run_stage_3_kernel(self, progress_callback=None):
         tau_max = float(self.tau[-1])
         coarse_step = float(self.tau[1] - self.tau[0]) if len(self.tau) > 1 else 1.0
-        print('\n ========= Developing Kernal Region (Stage 3) ========= \n')
+        stage = StageProgress(logger, 3, "Kernel region", "3 of 4", progress_callback, name="kernel")
+        stage.begin()
+        outcome = "stopped early"
 
         # Termination metric: stop on STATIC PRESSURE reaching the target back
         # pressure (self.P_back) when provided, not on Mach. Pressure decreases
@@ -403,6 +415,10 @@ class MOCSolver:
         else:
             metric = lambda pt: float(pt.M)
             target = self.Noz_Mach
+        if use_pressure:
+            describe = lambda value: f"pressure {format_pressure(value)}"
+        else:
+            describe = lambda value: f"Mach {value:.4f}"
         diff_prev = metric(self.IVP[0]) - target
         diff_initial = diff_prev if diff_prev != 0 else 1.0
         ang = 0.0
@@ -414,10 +430,10 @@ class MOCSolver:
             step = self._adaptive_step(diff_prev, rate_estimate, coarse_step)
             ang_next = ang + step
             if ang_next > tau_max:
-                metric_name = 'p_target' if use_pressure else 'Noz_Mach'
-                print(f'\n\n\t***** WARNING: reached the end of tau '
-                      f'({tau_max:.2f} deg) without crossing {metric_name} — '
-                      f'result may not have reached the design exit condition *****\n\n')
+                logger.warning(
+                    "  MoC kernel: reached the end of the angular range (%.2f deg) before the target "
+                    "(%s; axis %s). Continuing with the last front: the design exit condition is not reached.",
+                    tau_max, describe(target), describe(metric(self.IVP[-1])))
                 break
 
             ivp_before_step = self.IVP
@@ -437,9 +453,10 @@ class MOCSolver:
                 # drive a point outside the fluid table's valid range. Stop
                 # gracefully at the last converged front instead of crashing
                 # the whole batch -- self.IVP still holds that last-good state.
-                print(f'\n\n\t***** WARNING: Stage 3 stopped at angle {ang_next:.2f} deg '
-                      f'due to a property-solve failure ({e!s:.120}) — '
-                      f'design Mach not reached, using last valid state *****\n\n')
+                logger.warning(
+                    "  MoC kernel: property solve failed at %.2f deg (%s). Using the last valid front "
+                    "(axis %s; target %s): the design exit condition is not reached.",
+                    ang_next, e, describe(metric(self.IVP[-1])), describe(target))
                 break
 
             diff_curr = metric(IVP_New[-1]) - target
@@ -457,11 +474,11 @@ class MOCSolver:
                 self.nozzle_wall.append(interpolated[0])
                 self.nozzle_wall_kernel.append(interpolated[0])
                 self.mesh_data["stage3_fronts"].append(([float(p.x) for p in interpolated], [float(p.y) for p in interpolated]))
-                print(f'\n\n\t***** Kernel Region Done (adaptive step reached {step:.4f} deg, '
-                      f'exact target within ({ang:.3f}, {ang_next:.3f}] deg, '
-                      f'p={interpolated[-1].p:.1f} M={interpolated[-1].M:.4f}) *****\n\n')
-                if progress_callback is not None:
-                    progress_callback(1.0, '3 of 4')
+                logger.debug(
+                    "  MoC kernel: target bracketed in (%.3f, %.3f] deg with a %.4f deg step; "
+                    "interpolated axis M %.4f, p %s.", ang, ang_next, step,
+                    float(interpolated[-1].M), format_pressure(interpolated[-1].p))
+                outcome = "reached the target"
                 break
 
             self.IVP = IVP_New
@@ -472,35 +489,34 @@ class MOCSolver:
 
             self.mesh_data["stage3_fronts"].append(([float(p.x) for p in IVP_New], [float(p.y) for p in IVP_New]))
 
-            t2 = time.time()
-            if c % 10 == 0: print('\n\tProgress\t\tAngle\t\tMa_C\t\tp_axis[Pa]\tp_target[Pa]\tx\t\tMass\t\tClockTime')
-            printProgress(IVP_New[-1].M - 1, self.Noz_Mach - 1, '3 of 4', '', 2, 15)
-            print("\t\t\t\t%2.3f\t\t%1.2f\t\t%.1f\t\t%s\t\t%1.4f\t\t%.4f\t\t%.2f\t\t" % (
-                ang_next, IVP_New[-1].M, IVP_New[-1].p,
-                f"{target:.1f}" if use_pressure else "n/a",
-                IVP_New[-1].x, MassFlowCalc(IVP_New) / 2, t2 - self.t0,))
-            if progress_callback is not None:
-                # Fraction of the initial (metric - target) gap closed so far
-                # -- uses whichever metric (pressure or Mach) Stage 3 is
-                # actually terminating on, unlike the printProgress call
-                # above (always Mach-based, even under pressure-based
-                # termination -- fine as a rough terminal indicator, not
-                # accurate enough to drive a real UI progress bar).
-                frac = 1.0 - min(1.0, max(0.0, abs(diff_curr) / abs(diff_initial)))
-                progress_callback(frac, '3 of 4')
+            if logger.isEnabledFor(logging.DEBUG):  # the mass-flow integral is for diagnostics only
+                logger.debug(
+                    "  MoC kernel step %d: angle %.3f deg, step %.4f deg, axis M %.4f, p %s, x %.4f m, "
+                    "half mass flow %.4f", c, ang_next, step, float(IVP_New[-1].M),
+                    format_pressure(IVP_New[-1].p), float(IVP_New[-1].x), float(MassFlowCalc(IVP_New) / 2))
+            # Fraction of the initial (metric - target) gap closed so far, in
+            # the metric Stage 3 actually terminates on (pressure, or Mach
+            # without a back pressure): an estimate of convergence, not of
+            # the remaining runtime. Log and callback share it.
+            frac = 1.0 - min(1.0, max(0.0, abs(diff_curr) / abs(diff_initial)))
+            front = IVP_New[-1]
+            stage.update(frac, lambda: f"{100 * frac:.0f}% of the gap to the target closed (estimate); "
+                                       f"axis {describe(metric(front))}")
 
             rate_estimate = (diff_curr - diff_prev) / step
             diff_prev = diff_curr
             ang = ang_next
+        stage.finish(outcome)
 
 
     # --------------------------------------------------------------------------
     # STAGE 4: REFLEX ZONE
     # --------------------------------------------------------------------------
     def run_stage_4_reflex(self, progress_callback=None):
-            print('\nStart: Reflex Zone (Stage 4)\n')
-            
-            print("Optimizing: Pre-calculating Fluid Properties for Stage 4...")
+            stage = StageProgress(logger, 4, "Reflex region", "4A of 4", progress_callback,
+                                  name="reflex region")
+            stage.begin()
+            logger.debug("  MoC reflex region: refreshing the final front's properties.")
             for p in self.IVP:
                 p.ThermoFlowProp() 
                 
@@ -539,7 +555,7 @@ class MOCSolver:
 
                 self.nozzle_wall.append(LocWall)
                 self.nozzle_wall_divergent.append(LocWall)
-                printProgress(i, len(self.IVP)-1, '4A of 4', on_progress=progress_callback)
+                stage.update(i / max(len(self.IVP) - 1, 1))
 
 
             # Ensure the nozzle wall starts at the throat (y_t) and ends at the axis (x_end, 0)
@@ -548,6 +564,7 @@ class MOCSolver:
             #                     [InternalPoint(self.fluid_manager, x=self.nozzle_wall[-1].x, y=0.0)]
 
             self.nozzle_wall_final = self.nozzle_wall
+            stage.finish()
 
 
     # --------------------------------------------------------------------------
@@ -613,7 +630,7 @@ class MOCSolver:
 
         # Final formatting
         total_runtime = time.time() - self.t0
-        print(f"\nCompleted MOC Simulation in {total_runtime:.4f} seconds")
+        logger.info("  MoC run completed in %.2f s", total_runtime)
         plt.xlabel("X Coordinate")
         plt.ylabel("Y Coordinate")
         plt.title("Method of Characteristics Nozzle Design")

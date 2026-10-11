@@ -148,7 +148,7 @@ def load_or_solve_nozzle(
     if cache_only:
         return None
 
-    logger.info("  Calculating a new MoC solution (solver output follows).")
+    logger.info("  Calculating a new MoC solution.")
     result = turbo_moc.design_nozzle(**parameters)
     if not usable_result(result):
         raise RuntimeError("The nozzle design did not converge to a usable wall.")

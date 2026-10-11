@@ -10,20 +10,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import turbo_moc
+from turbo_moc.reporting import logging_context
 
 from turbo_moc.geometry import parametrize_stator_blade
 
 # 1. Cyclopentane stator design conditions from Cioffi et al. (2026),
 #    Table 3. This uses the current package geometry, not an exact reproduction
 #    of the paper's control-point construction.
-data = turbo_moc.design_nozzle(
-    fluid_name="Cyclopentane",
-    P0=2.513e5,  # Stagnation pressure [Pa].
-    Q0=0.025,  # Two-phase inlet: 2.5% vapor by mass.
-    p_back=0.95e5,  # Design exit pressure [Pa].
-    solver="conventional",
-    use_true_sauer_line=True,  # Smooth sonic transition within the mixture.
-)
+# Show the solver's progress on the console (INFO; use level="DEBUG" for details).
+with logging_context():
+    data = turbo_moc.design_nozzle(
+        fluid_name="Cyclopentane",
+        P0=2.513e5,  # Stagnation pressure [Pa].
+        Q0=0.025,  # Two-phase inlet: 2.5% vapor by mass.
+        p_back=0.95e5,  # Design exit pressure [Pa].
+        solver="conventional",
+        use_true_sauer_line=True,  # Smooth sonic transition within the mixture.
+    )
 
 if not data["converged"] or not data["wall_final"]["x"]:
     raise RuntimeError("The nozzle design did not converge.")

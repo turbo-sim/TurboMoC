@@ -31,6 +31,13 @@ Install the package, design a nozzle, inspect the result, and launch the app.
 Guided applications of the solvers, geometry tools, plots, and interactive app.
 :::
 
+:::{grid-item-card} Logging and progress
+:link: logging
+:link-type: doc
+
+Console and log-file output, message levels, progress callbacks and timing.
+:::
+
 :::{grid-item-card} Theory
 :link: theory/index
 :link-type: doc
@@ -67,6 +74,7 @@ Inspect the modules, classes, and functions provided by the Python package.
 
 getting_started
 examples/index
+logging
 theory/index
 references/bibliography
 developer_guide

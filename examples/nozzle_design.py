@@ -11,18 +11,21 @@ import numpy as np
 from CoolProp.CoolProp import PropsSI
 
 import turbo_moc
+from turbo_moc.reporting import logging_context
 
 # 1. Nitrogen flashing case from Cioffi et al. (NICFD 2026), Fig. 2:
 #    20 bar stagnation pressure and 10 K inlet subcooling, expanding to 2 bar.
 P0 = 20e5
 T0 = PropsSI("T", "P", P0, "Q", 0, "Nitrogen") - 10.0
-data = turbo_moc.design_nozzle(
-    fluid_name="nitrogen",
-    P0=P0,  # Stagnation pressure [Pa].
-    T0=T0,  # Subcooled-liquid inlet temperature [K]; quality is not specified.
-    p_back=2e5,  # Back pressure [Pa].
-    solver="conventional",
-)
+# Show the solver's progress on the console (INFO; use level="DEBUG" for details).
+with logging_context():
+    data = turbo_moc.design_nozzle(
+        fluid_name="nitrogen",
+        P0=P0,  # Stagnation pressure [Pa].
+        T0=T0,  # Subcooled-liquid inlet temperature [K]; quality is not specified.
+        p_back=2e5,  # Back pressure [Pa].
+        solver="conventional",
+    )
 
 if not data["converged"] or not data["wall_final"]["x"]:
     raise RuntimeError("The nozzle design did not converge.")

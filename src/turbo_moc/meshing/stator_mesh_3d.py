@@ -1,4 +1,4 @@
-"""Swept 3D volume mesh of the app's sized axial stator (and rotor).
+"""Swept 3D volume meshes of the app's stator and rotor rows (axial and radial).
 
 The app's annular stator (turbo_moc.geometry.annular, flare "pitch_scale")
 puts every blade point at theta = -x / r_hub and z = y at EVERY radius: the
@@ -40,15 +40,15 @@ DISPLAY_PATCHES = ("blade", "hub", "shroud", "inlet", "outlet", "periodic_left",
 class SweptAnnulus:
     """The `channel` interface of passage_volume for the swept stator.
 
-    pitch_angle carries the sense of the periodic rotation: periodic_right is
-    periodic_left rotated by -pitch_angle about Z (passage_volume's
-    convention), so it is negative when periodic_right sits at lower x.
+    pitch_angle (+-2 pi / N) carries the sense of the periodic rotation:
+    periodic_right is periodic_left rotated by -pitch_angle about Z
+    (passage_volume's convention).
     """
 
-    def __init__(self, num_blades, r_hub, orientation, sense=1.0):
+    def __init__(self, num_blades, reference_radius, orientation, pitch_angle):
         self.num_blades = int(num_blades)
-        self.pitch_angle = float(sense) * 2.0 * np.pi / self.num_blades
-        self.reference_radius = float(r_hub)
+        self.pitch_angle = float(pitch_angle)
+        self.reference_radius = float(reference_radius)
         self.orientation = int(orientation)
 
     def rotation(self):
@@ -75,7 +75,7 @@ def span_distribution(height, first_height, growth_ratio, num_layers, transition
     remaining = height - 2.0 * sum(graded)
     while graded and remaining < 0.5 * graded[-1]:  # no sliver core: merge the last layers into it
         remaining += 2.0 * graded.pop()
-    n_core =max(1, int(np.ceil(remaining / core_size - 1e-9)))
+    n_core = max(1, int(np.ceil(remaining / core_size - 1e-9)))
     sizes = np.r_[graded, np.full(n_core, remaining / n_core), graded[::-1]]
     stations = np.r_[0.0, np.cumsum(sizes)]
     stations[-1] = height
@@ -130,44 +130,33 @@ def _patch_surfaces(xyz, faces, names):
     return surfaces
 
 
-def mesh_swept_passage(mesh_2d, r_hub, r_shroud, n_blades, span, output_dir,
-                       boundary_types=None, max_cells=DEFAULT_MAX_CELLS, name="stator_mesh_3d"):
-    """Sweep the hub 2D mesh from r_hub to r_shroud and export it.
+def _sweep_and_export(mesh_2d, xyz_sections, heights, n_blades, reference_radius, output_dir,
+                      boundary_types, name):
+    """Assemble, check and export the volume from the 2D mesh's node
+    coordinates on each station (xyz_sections: (n_stations, n_nodes, 3)).
 
-    `span` holds first_height, growth_ratio, num_layers, transition_ratio
-    (endwall layers, normally the blade's) and core_size [mm]. Writes
-    <name>.msh, <name>.cgns (metres) and <name>_surfaces.npz (compact
-    boundary patches for display) to `output_dir`. Returns a JSON-friendly
-    summary; its "files" maps msh/cgns/surfaces to those file names.
-    """
+    The periodic rotation is measured from the mapped nodes: it must be
+    2 pi / n_blades about Z (its sense follows the mapping)."""
     if gmsh.isInitialized():
         raise RuntimeError("Finish the existing Gmsh session before sweeping a passage mesh.")
     section = swept_section(mesh_2d)
-    heights = span_distribution(float(r_shroud) - float(r_hub), span["first_height"], span["growth_ratio"],
-                                int(span["num_layers"]), span["transition_ratio"], span["core_size"])
-    radii = float(r_hub) + heights
-    n_cells_2d = sum(len(cells) for cells in section["cells"].values())
-    n_cells = n_cells_2d * (len(radii) - 1)
-    if n_cells > max_cells:
+    right, left = xyz_sections[0][section["slave"]], xyz_sections[0][section["master"]]
+    turn = np.angle(np.exp(1j * (np.arctan2(right[:, 1], right[:, 0]) - np.arctan2(left[:, 1], left[:, 0]))))
+    expected = 2.0 * np.pi / n_blades
+    if not np.allclose(np.abs(turn), expected, rtol=1e-8, atol=0) or not np.allclose(turn, turn[0]):
         raise ValueError(
-            f"The swept mesh would have {n_cells:,} cells ({n_cells_2d:,} per section x "
-            f"{len(radii) - 1} span cells), above the {max_cells:,} limit: coarsen the 2D mesh, "
-            f"raise the span core size or the first-layer height.")
-
-    xyz_sections = np.asarray([section_coordinates(section["xy"], r_hub, r, "cylinder") for r in radii])
-    offset = section["xy"][section["slave"]] - section["xy"][section["master"]]
-    sense = np.sign(offset[0, 0])
-    if not np.allclose(offset, offset[0], atol=1e-8) or sense == 0:
-        raise ValueError("The 2D mesh's periodic nodes are not one constant pitchwise translation.")
-    channel = SweptAnnulus(n_blades, r_hub, _cell_orientation(section, xyz_sections), sense)
+            f"The periodic boundaries are {np.degrees(np.abs(turn).max()):.4f} deg apart, not "
+            f"360/N = {np.degrees(expected):.4f} deg: the passage pitch does not match the blade count.")
+    channel = SweptAnnulus(n_blades, reference_radius, _cell_orientation(section, xyz_sections), -turn[0])
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     files = {"msh": f"{name}.msh", "cgns": f"{name}.cgns", "surfaces": f"{name}_surfaces.npz"}
-    gmsh.initialize(["stator_mesh_3d", "-v", "0"])
+    gmsh.initialize(["passage_mesh_3d", "-v", "0"])
     try:
         gmsh.option.setNumber("General.Terminal", 0)
-        logger.info("  Assemble %d span cells x %d section cells.", len(radii) - 1, n_cells_2d)
+        logger.info("  Assemble %d span cells x %d section cells.", len(heights) - 1,
+                    sum(len(cells) for cells in section["cells"].values()))
         counts = passage_volume.assemble_volume(section, xyz_sections, channel)
         quality = passage_volume.validate_volume(section, xyz_sections, channel)
         gmsh.option.setNumber("Mesh.Binary", 1)  # ~1/3 of the ASCII size
@@ -181,21 +170,145 @@ def mesh_swept_passage(mesh_2d, r_hub, r_shroud, n_blades, span, output_dir,
 
     surfaces = _patch_surfaces(xyz, faces, DISPLAY_PATCHES)
     np.savez_compressed(output_dir / files["surfaces"], **{
-        f"{name}__{key}": value for name, surface in surfaces.items() for key, value in surface.items()})
+        f"{patch}__{key}": value for patch, surface in surfaces.items() for key, value in surface.items()})
     span_sizes = np.diff(heights)
     return {
         "output_dir": str(output_dir),
         "files": files,
         "cells": {key: int(value) for key, value in counts.items()},
         "nodes": int(xyz_sections.shape[0] * xyz_sections.shape[1]),
-        "span_cells": int(len(radii) - 1),
+        "span_cells": int(len(heights) - 1),
         "span_first_height_mm": float(span_sizes[0]),
         "span_max_size_mm": float(span_sizes.max()),
-        "radii_mm": radii.tolist(),
         "quality": {key: float(value) if isinstance(value, float) else value for key, value in quality.items()},
         "boundary_faces": int(cgns["boundary_faces"]),
         "pitch_angle_deg": float(np.degrees(abs(channel.pitch_angle))),
     }
+
+
+def _check_cell_budget(mesh_2d, n_span, max_cells):
+    n_cells_2d = len(mesh_2d["cells"])
+    if n_cells_2d * n_span > max_cells:
+        raise ValueError(
+            f"The swept mesh would have {n_cells_2d * n_span:,} cells ({n_cells_2d:,} per section x "
+            f"{n_span} span cells), above the {max_cells:,} limit: coarsen the 2D mesh, "
+            f"raise the span core size or the first-layer height.")
+
+
+def mesh_swept_passage(mesh_2d, r_hub, r_shroud, n_blades, span, output_dir,
+                       boundary_types=None, max_cells=DEFAULT_MAX_CELLS, name="stator_mesh_3d"):
+    """Axial row: sweep the hub 2D mesh from r_hub to r_shroud and export it.
+
+    `span` holds first_height, growth_ratio, num_layers, transition_ratio
+    (endwall layers, normally the blade's) and core_size [mm]. Writes
+    <name>.msh, <name>.cgns (metres) and <name>_surfaces.npz (compact
+    boundary patches for display) to `output_dir`. Returns a JSON-friendly
+    summary; its "files" maps msh/cgns/surfaces to those file names.
+    """
+    heights = span_distribution(float(r_shroud) - float(r_hub), span["first_height"], span["growth_ratio"],
+                                int(span["num_layers"]), span["transition_ratio"], span["core_size"])
+    _check_cell_budget(mesh_2d, len(heights) - 1, max_cells)
+    xy = np.asarray(mesh_2d["xy"], dtype=float)
+    xyz_sections = np.asarray([section_coordinates(xy, r_hub, float(r_hub) + h, "cylinder") for h in heights])
+    result = _sweep_and_export(mesh_2d, xyz_sections, heights, n_blades, r_hub, output_dir, boundary_types, name)
+    result["radii_mm"] = (float(r_hub) + heights).tolist()
+    return result
+
+
+def radial_map_reference(blade_data, r1, r2, source):
+    """The log-spiral map of turbo_moc.geometry.radial for this blade, in the
+    mesh frame (X pitchwise; Y = the stator's own chordwise y, or -x for the
+    rotor, see rotor_mesh_2d): the same (x1, y1, c_axial) the radial wrap
+    derives from the blade's main contour, so the mesh lands on its solid.
+    The rotor's wrap mirrors its pitch (wrap_rotor_blade_radial: -y, for
+    the same handedness as the stator), hence pitch_sign = -1 there."""
+    from turbo_moc.geometry.radial import _reference_point_and_scale
+
+    if source == "stator":
+        curve = blade_data["blade_curve"]
+        chord, pitch, chord_sign, pitch_sign = curve["y"], curve["x"], 1.0, 1.0
+    elif source == "rotor":
+        curve = blade_data["blade"]
+        chord, pitch, chord_sign, pitch_sign = curve["x"], [-v for v in curve["y"]], -1.0, -1.0
+    else:
+        raise ValueError(f"source must be 'stator' or 'rotor', got {source!r}")
+    x1, y1, c_axial = _reference_point_and_scale(chord, pitch)
+    return {"x1": x1, "y1": y1, "c_axial": c_axial, "r1": float(r1), "r2": float(r2),
+            "chord_sign": chord_sign, "pitch_sign": pitch_sign}
+
+
+def radial_section_coordinates(xy, reference, z=0.0):
+    """Mesh-frame nodes -> (X, Y, z) on the radial annulus (log-spiral map)."""
+    from turbo_moc.geometry.radial import apply_conformal_mapping
+
+    xy = np.asarray(xy, dtype=float)
+    X, Y = apply_conformal_mapping(reference["chord_sign"] * xy[:, 1], reference["pitch_sign"] * xy[:, 0],
+                                   reference["x1"],
+                                   reference["y1"], reference["r1"], reference["r2"], reference["c_axial"])
+    return np.column_stack((X, Y, np.full(len(xy), float(z))))
+
+
+def radial_length_scale(reference, radius):
+    """Physical length of one 2D-plane unit at `radius` (the map's exact
+    local magnification |a| r, a = ln(r2/r1) / c_axial)."""
+    return abs(np.log(reference["r2"] / reference["r1"]) / reference["c_axial"]) * float(radius)
+
+
+def _split_nonconvex_quads(mesh_2d, mapped):
+    """The log-spiral map bends straight 2D edges slightly, so a nearly flat
+    quad (a corner close to 180 deg) can map to a non-convex one: split
+    those into the two triangles (prisms after extrusion) whose orientation
+    matches the section's. Boundary edges are unchanged. Returns (mesh_2d
+    copy, number split)."""
+    def turns(points):
+        edge = np.roll(points, -1, axis=0) - points
+        previous = np.roll(edge, 1, axis=0)
+        return previous[:, 0] * edge[:, 1] - previous[:, 1] * edge[:, 0]
+
+    def area(points):
+        return 0.5 * np.sum(points[:, 0] * np.roll(points[:, 1], -1) - points[:, 1] * np.roll(points[:, 0], -1))
+
+    sign = np.sign(np.median([area(mapped[np.asarray(c) - 1]) for c in mesh_2d["cells"][:2000]]))
+    cells, split = [], 0
+    for cell in mesh_2d["cells"]:
+        points = mapped[np.asarray(cell) - 1]
+        if np.all(sign * turns(points) > 0):
+            cells.append(cell)
+            continue
+        if len(cell) == 4:
+            a, b, c, d = cell
+            for pair in (([a, b, c], [a, c, d]), ([a, b, d], [b, c, d])):
+                if all(sign * area(mapped[np.asarray(t) - 1]) > 0 for t in pair):
+                    cells.extend(pair)
+                    split += 1
+                    break
+            else:
+                raise ValueError("A section cell folds under the radial map; refine the 2D mesh.")
+        else:
+            raise ValueError("A section triangle folds under the radial map; refine the 2D mesh.")
+    # The sweep reads only the named edges' end nodes, not their cell numbers.
+    return ({**mesh_2d, "cells": cells}, split) if split else (mesh_2d, 0)
+
+
+def mesh_radial_passage(mesh_2d, reference, n_blades, depth, span, output_dir,
+                        boundary_types=None, max_cells=DEFAULT_MAX_CELLS, name="stator_mesh_3d"):
+    """Radial row: map the 2D mesh with the log-spiral wrap and extrude it
+    through `depth` (flat endwalls at z = 0 and z = depth, "hub"/"shroud").
+    Same `span` settings and outputs as mesh_swept_passage."""
+    heights = span_distribution(float(depth), span["first_height"], span["growth_ratio"],
+                                int(span["num_layers"]), span["transition_ratio"], span["core_size"])
+    base = radial_section_coordinates(mesh_2d["xy"], reference)
+    mesh_2d, split = _split_nonconvex_quads(mesh_2d, base[:, :2])
+    if split:
+        logger.info("  Split %d quadrilaterals the radial map made non-convex.", split)
+    _check_cell_budget(mesh_2d, len(heights) - 1, max_cells)
+    xyz_sections = np.asarray([np.column_stack((base[:, :2], np.full(len(base), h))) for h in heights])
+    reference_radius = min(reference["r1"], reference["r2"])
+    result = _sweep_and_export(mesh_2d, xyz_sections, heights, n_blades, reference_radius, output_dir,
+                               boundary_types, name)
+    result["z_mm"] = heights.tolist()
+    result["split_quads"] = int(split)
+    return result
 
 
 mesh_swept_stator = mesh_swept_passage  # the original (stator-only) name

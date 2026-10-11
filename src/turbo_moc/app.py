@@ -69,6 +69,7 @@ except ImportError:
 
 import turbo_moc
 from turbo_moc import design_nozzle, list_supported_fluids, make_progress_reporter, NozzleDesignError
+from turbo_moc.reporting import logging_context
 from turbo_moc.core.classes import build_convergent_inlet
 from turbo_moc.coupling import derive_rotor_inlet_from_stator
 from turbo_moc.geometry import (
@@ -153,6 +154,61 @@ DEFAULTS = dict(
 # --------------------------------------------------------------------------
 # Layout
 # --------------------------------------------------------------------------
+MESH_SIZE_FIELDS = (
+    ("blade_size", r"Blade cell size (mm)", {}),
+    ("domain_size", r"Far-field cell size (mm)", {}),
+    ("y_plus", r"Target $y^+$ (first cell centroid)", {}),
+    ("num_layers", r"Inflation layers", {"step": 1, "min": 1}),
+    ("growth_ratio", r"Layer growth ratio", {}),
+    ("transition_ratio", r"Core / last-layer size ratio", {}),
+)
+MESH3D_PATCHES = ("blade", "hub", "shroud", "inlet", "outlet", "periodic_left", "periodic_right")
+
+
+def _mesh3d_controls(prefix, title, span_label=r"Span core cell size (mm)"):
+    """Sidebar block of a row's 3D mesh (2D section meshed and swept in one
+    go): sizes, generate button, displayed patches/passages, downloads. Ids
+    are f"{prefix}_mesh_<size key>", f"generate-{prefix}-mesh3d-btn", ...;
+    _register_mesh3d_display wires the view and downloads."""
+    return [
+        html.H4(title, style={"marginTop": "16px"}),
+        *(_field(label, f"{prefix}_mesh_{key}", None, **kwargs) for key, label, kwargs in MESH_SIZE_FIELDS),
+        _field(span_label, f"{prefix}_mesh3d_core_size", None),
+        html.Button("Generate 3D mesh", id=f"generate-{prefix}-mesh3d-btn", n_clicks=0,
+                    style={"width": "100%", "marginTop": "8px", "padding": "8px", "fontWeight": "600"}),
+        html.Div(id=f"{prefix}-mesh3d-status", style={"marginTop": "8px", "fontSize": "13px"}),
+        html.Div("Boundaries shown in the 3D view (all are exported)",
+                 style={"fontSize": "13px", "marginTop": "12px"}),
+        dcc.Checklist(
+            id=f"{prefix}_mesh3d_patches",
+            options=[{"label": f" {name.replace('_', ' ')}", "value": name} for name in MESH3D_PATCHES],
+            value=["blade", "hub", "periodic_left"],
+            style={"fontSize": "13px", "marginTop": "8px"},
+        ),
+        _field(r"Passages shown (up to $N_{\text{blades}}$; display only)", f"{prefix}_mesh3d_copies", 1,
+               step=1, min=1),
+        html.Button("Download 3D mesh (CGNS)", id=f"download-{prefix}-mesh3d-cgns-btn", n_clicks=0,
+                    style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+        dcc.Download(id=f"download-{prefix}-mesh3d-cgns"),
+        html.Button("Download 3D mesh (Gmsh .msh)", id=f"download-{prefix}-mesh3d-msh-btn", n_clicks=0,
+                    style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
+        dcc.Download(id=f"download-{prefix}-mesh3d-msh"),
+        html.Div(id=f"{prefix}-mesh3d-download-status", style={"marginTop": "8px", "fontSize": "13px"}),
+    ]
+
+
+def _mesh3d_plots(prefix):
+    return [
+        html.Div(
+            id=f"{prefix}-mesh3d-view",
+            children=_vtk_placeholder("Generate a 3D mesh to see it here."),
+            style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
+                   "borderRadius": "4px", "marginTop": "16px", "overflow": "hidden"},
+        ),
+        html.Div(id=f"{prefix}-mesh3d-info-table", style={"marginTop": "12px"}),
+    ]
+
+
 def _field(label, id, value, **kwargs):
     """Label and input side by side (not label-on-top-of-a-full-width-box
     that's mostly empty) -- the input only needs to be wide enough for a
@@ -591,11 +647,9 @@ SIZING_DEFAULTS = dict(
 # non-uniformly (confirmed visually -- distorted, scattered-looking
 # blades, not a clean radial sweep). r1/r2 here are instead picked to be
 # the same order of magnitude as the blade's own native chord extent.
-# n_blades=6 is this (r1, r2)'s own implied_n_blades_radial (not a
-# coincidence -- a default N picked without checking that number overlaps
-# badly, confirmed visually: 15 blades crammed into a ~6-blade-wide
-# annulus at this r1/r2 looks like a pinwheel/sawblade, not a cascade).
-RADIAL_DEFAULTS = dict(r1=150.0, r2=300.0, n_blades=6, depth=5.0)
+# N_blades is not an input: it is derived (with the exact r2) from r1, the
+# target r2 and the designed pitch, see turbo_moc.geometry.consistent_radial_wrap.
+RADIAL_DEFAULTS = dict(r1=150.0, r2=300.0, depth=5.0)
 
 sizing_controls = html.Div(
     [
@@ -723,13 +777,17 @@ sizing_controls = html.Div(
             id="stator_radial_fields",
             children=[
                 _field(r"$r_1$ (mm, hub)", "radial_r1", RADIAL_DEFAULTS["r1"]),
-                _field(r"$r_2$ (mm, shroud)", "radial_r2", RADIAL_DEFAULTS["r2"]),
-                _field(r"$N_{\text{blades}}$", "radial_n_blades", RADIAL_DEFAULTS["n_blades"], step=1, min=1),
-                _field(r"Depth (mm, preview/export only)", "radial_depth", RADIAL_DEFAULTS["depth"]),
+                _field(r"$r_2$ target (mm, shroud)", "radial_r2", RADIAL_DEFAULTS["r2"]),
+                _field(r"Depth (blade height, mm)", "radial_depth", RADIAL_DEFAULTS["depth"]),
+                html.Div("N and the exact r2 follow from r1, the target r2 and the designed pitch, so the "
+                         "radial passage is the one designed in 2D.",
+                         style={"fontSize": "12px", "color": "#666", "marginTop": "4px"}),
                 html.Button("Compute radial wrap", id="compute-radial-btn", n_clicks=0,
                              style={"width": "100%", "marginTop": "8px", "padding": "8px",
                                     "fontWeight": "600"}),
                 html.Div(id="radial-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+                *_mesh3d_controls("radial_stator", "3D mesh (log-spiral map, extruded through the depth)",
+                                  r"Depth core cell size (mm)"),
             ],
             style={"display": "none"},
         ),
@@ -905,12 +963,11 @@ rotor_plots = html.Div(
 ROTOR_SIZING_DEFAULTS = dict(n_blades=34)  # EMPOWER_DTU Novec649 meanline rotor blade_count
 # No scale input: the radial map normalises the blade by its own chordwise
 # extent, so the (nondimensional, r*) rotor blade wraps to the same mm
-# geometry at any scale -- only r1/r2 set its size. n_blades=30 is this
-# (r1, r2)'s own implied_n_blades_radial (~29.7; see RADIAL_DEFAULTS'
-# comment for why that matters).
+# geometry at any scale -- only r1/r2 set its size. N_blades is derived,
+# as for the stator (see RADIAL_DEFAULTS' comment).
 # In the Phase 6 radial cascade only this r1/r2 RATIO is used: the rotor is
 # re-placed from the stator's outlet radius + gap (see _place_radial_rotor).
-ROTOR_RADIAL_DEFAULTS = dict(r1=100.0, r2=200.0, n_blades=30, depth=5.0)
+ROTOR_RADIAL_DEFAULTS = dict(r1=100.0, r2=200.0, depth=5.0)
 
 rotor_sizing_controls = html.Div(
     [
@@ -942,37 +999,7 @@ rotor_sizing_controls = html.Div(
                 dcc.Download(id="download-rotor-sizing-step"),
                 html.Div(id="rotor-sizing-step-status", style={"marginTop": "8px", "fontSize": "13px"}),
 
-                html.H4("3D mesh (hub section swept → shroud)", style={"marginTop": "16px"}),
-                _field(r"Blade cell size (mm)", "rotor_mesh_blade_size", None),
-                _field(r"Far-field cell size (mm)", "rotor_mesh_domain_size", None),
-                _field(r"Target $y^+$ (first cell centroid)", "rotor_mesh_y_plus", None),
-                _field(r"Inflation layers", "rotor_mesh_num_layers", None, step=1, min=1),
-                _field(r"Layer growth ratio", "rotor_mesh_growth_ratio", None),
-                _field(r"Core / last-layer size ratio", "rotor_mesh_transition_ratio", None),
-                _field(r"Span core cell size (mm)", "rotor_mesh3d_core_size", None),
-                html.Button("Generate 3D mesh", id="generate-rotor-mesh3d-btn", n_clicks=0,
-                             style={"width": "100%", "marginTop": "8px", "padding": "8px",
-                                    "fontWeight": "600"}),
-                html.Div(id="rotor-mesh3d-status", style={"marginTop": "8px", "fontSize": "13px"}),
-                html.Div("Boundaries shown in the 3D view (all are exported)",
-                         style={"fontSize": "13px", "marginTop": "12px"}),
-                dcc.Checklist(
-                    id="rotor_mesh3d_patches",
-                    options=[{"label": f" {name.replace('_', ' ')}", "value": name}
-                             for name in ("blade", "hub", "shroud", "inlet", "outlet",
-                                          "periodic_left", "periodic_right")],
-                    value=["blade", "hub", "periodic_left"],
-                    style={"fontSize": "13px", "marginTop": "8px"},
-                ),
-                _field(r"Passages shown (up to $N_{\text{blades}}$; display only)", "rotor_mesh3d_copies", 1,
-                       step=1, min=1),
-                html.Button("Download 3D mesh (CGNS)", id="download-rotor-mesh3d-cgns-btn", n_clicks=0,
-                             style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
-                dcc.Download(id="download-rotor-mesh3d-cgns"),
-                html.Button("Download 3D mesh (Gmsh .msh)", id="download-rotor-mesh3d-msh-btn", n_clicks=0,
-                             style={"width": "100%", "padding": "8px", "marginTop": "8px"}),
-                dcc.Download(id="download-rotor-mesh3d-msh"),
-                html.Div(id="rotor-mesh3d-download-status", style={"marginTop": "8px", "fontSize": "13px"}),
+                *_mesh3d_controls("rotor", "3D mesh (hub section swept → shroud)"),
             ],
         ),
 
@@ -980,15 +1007,17 @@ rotor_sizing_controls = html.Div(
             id="rotor_radial_fields",
             children=[
                 _field(r"$r_1$ (mm, hub)", "rotor_radial_r1", ROTOR_RADIAL_DEFAULTS["r1"]),
-                _field(r"$r_2$ (mm, shroud)", "rotor_radial_r2", ROTOR_RADIAL_DEFAULTS["r2"]),
-                _field(r"$N_{\text{blades}}$", "rotor_radial_n_blades",
-                       ROTOR_RADIAL_DEFAULTS["n_blades"], step=1, min=1),
-                _field(r"Depth (mm, preview/export only)", "rotor_radial_depth",
-                       ROTOR_RADIAL_DEFAULTS["depth"]),
+                _field(r"$r_2$ target (mm, shroud)", "rotor_radial_r2", ROTOR_RADIAL_DEFAULTS["r2"]),
+                _field(r"Depth (blade height, mm)", "rotor_radial_depth", ROTOR_RADIAL_DEFAULTS["depth"]),
+                html.Div("N and the exact r2 follow from r1, the target r2 and the designed pitch, so the "
+                         "radial passage is the one designed in 2D.",
+                         style={"fontSize": "12px", "color": "#666", "marginTop": "4px"}),
                 html.Button("Compute radial wrap", id="compute-rotor-radial-btn", n_clicks=0,
                              style={"width": "100%", "marginTop": "8px", "padding": "8px",
                                     "fontWeight": "600"}),
                 html.Div(id="rotor-radial-status-message", style={"marginTop": "8px", "fontSize": "13px"}),
+                *_mesh3d_controls("radial_rotor", "3D mesh (log-spiral map, extruded through the depth)",
+                                  r"Depth core cell size (mm)"),
             ],
             style={"display": "none"},
         ),
@@ -1012,13 +1041,7 @@ rotor_sizing_plots = html.Div(
                     ),
                 ),
                 html.Div(id="rotor-sizing-info-table", style={"marginTop": "12px"}),
-                html.Div(
-                    id="rotor-mesh3d-view",
-                    children=_vtk_placeholder("Generate a 3D mesh to see it here."),
-                    style={"height": "520px", "width": "100%", "border": "1px solid #ddd",
-                           "borderRadius": "4px", "marginTop": "16px", "overflow": "hidden"},
-                ),
-                html.Div(id="rotor-mesh3d-info-table", style={"marginTop": "12px"}),
+                *_mesh3d_plots("rotor"),
             ],
         ),
         html.Div(
@@ -1150,6 +1173,8 @@ app.layout = html.Div(
         dcc.Store(id="stator-mesh-store"),
         dcc.Store(id="stator-mesh3d-store"),
         dcc.Store(id="rotor-mesh3d-store"),
+        dcc.Store(id="radial_stator-mesh3d-store"),
+        dcc.Store(id="radial_rotor-mesh3d-store"),
         dcc.Store(id="flow-domain-store", data=FLOW_DOMAIN_DEFAULTS),
         dcc.Store(id="stator-radial-store"),
         dcc.Store(id="rotor-store"),
@@ -1213,17 +1238,20 @@ def run_design(set_progress, n_clicks, fluid_name, inlet_mode, P0, T0, Q0, p_bac
     # how far its center sits from the axis.
     rho_t = float(rho_d or 0.0)
     try:
-        data = design_nozzle(
-            fluid_name=fluid_name,
-            P0=float(P0) * 1e5,  # bar (UI/save convention) -> Pa
-            T0=T0 if inlet_mode == "T0" else None,
-            Q0=(Q0 if inlet_mode == "Q0" else float("nan")),
-            p_back=float(p_back) * 1e5,  # bar -> Pa
-            solver=solver,
-            use_true_sauer_line=(stage1_mode == "sauer"),
-            y_t=y_t, rho_t=rho_t, rho_d=rho_d, n=int(n),
-            progress_callback=reporter,
-        )
+        # This background worker is the run's entry point: MoC progress goes to
+        # its console; the UI bar is fed by the callback independently.
+        with logging_context():
+            data = design_nozzle(
+                fluid_name=fluid_name,
+                P0=float(P0) * 1e5,  # bar (UI/save convention) -> Pa
+                T0=T0 if inlet_mode == "T0" else None,
+                Q0=(Q0 if inlet_mode == "Q0" else float("nan")),
+                p_back=float(p_back) * 1e5,  # bar -> Pa
+                solver=solver,
+                use_true_sauer_line=(stage1_mode == "sauer"),
+                y_t=y_t, rho_t=rho_t, rho_d=rho_d, n=int(n),
+                progress_callback=reporter,
+            )
     except NozzleDesignError as e:
         set_progress(("0%", ""))
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"})
@@ -1235,7 +1263,8 @@ def run_design(set_progress, n_clicks, fluid_name, inlet_mode, P0, T0, Q0, p_bac
         html.Div(f"exit M = {data['exit_M']:.4f}  (design {data['design_Noz_Mach']:.4f})"),
         html.Div(f"runtime = {data['runtime_s']:.1f} s"),
     ]
-    if "q0_nudged_from" in data:
+    nudged_from = data.get("q0_nudged_from")
+    if nudged_from is not None and nudged_from == nudged_from:  # NaN for a T0 inlet: no retry happened
         status_children.append(html.Div(
             f"Note: true Sauer line stalled at Q0={data['q0_nudged_from']:.3g} "
             f"(near-M=1 marching instability) -- auto-nudged to "
@@ -1619,20 +1648,17 @@ def run_stator_sizing(n_clicks, mode, base_blade, edited_blade, nozzle_data,
     State("result-store", "data"),
     State("radial_r1", "value"),
     State("radial_r2", "value"),
-    State("radial_n_blades", "value"),
     State("radial_depth", "value"),
     prevent_initial_call=True,
 )
-def run_radial_stator(n_clicks, base_blade, edited_blade, nozzle_data, r1, r2, n_blades, depth):
-    """Diagnostic-only radial sizing (see turbo_moc.geometry.radial's
-    module docstring): N_blades is a direct input, not solved -- the
-    conformal map's pitch consistency has no free scale lever the way the
-    axial Case A's k does (uniform rescale cancels out of the mapped
-    pitch once r1/r2 are fixed), so this reports the implied mass flow
-    from the given N rather than deriving N from a target mdot."""
+def run_radial_stator(n_clicks, base_blade, edited_blade, nozzle_data, r1, r2_target, depth):
+    """Radial wrap that keeps the designed passage: N_blades and the exact
+    r2 come from r1, the target r2 and the designed pitch
+    (consistent_radial_wrap; the map's pitch consistency has no free scale
+    lever the way the axial Case A's k does). The implied mass flow is
+    then reported for that N and depth."""
     from turbo_moc.geometry import (
-        compute_throat_sonic_state, implied_n_blades_radial, mapped_pitch_width,
-        mapped_throat_width,
+        compute_throat_sonic_state, consistent_radial_wrap, mapped_pitch_width, mapped_throat_width,
     )
 
     stator = _effective_blade(base_blade, edited_blade)
@@ -1643,11 +1669,12 @@ def run_radial_stator(n_clicks, base_blade, edited_blade, nozzle_data, r1, r2, n
         return None, html.Div("Run Phase 1 first -- the mass-flow diagnostic needs the "
                                 "throat sonic state.", style={"color": "#b00020"}), None
 
-    r1, r2, n_blades, depth = float(r1), float(r2), int(n_blades), float(depth)
+    r1, r2_target, depth = float(r1), float(r2_target), float(depth)
     try:
+        wrap = consistent_radial_wrap(stator, r1, r2_target, source="stator")
+        r2, n_blades = wrap["r2"], wrap["n_blades"]
         mapped_throat = mapped_throat_width(stator, r1, r2, source="stator")
         mapped_pitch = mapped_pitch_width(stator, r1, r2, source="stator")
-        n_implied = implied_n_blades_radial(stator, r1, r2, source="stator")
         rho_star, a_star = compute_throat_sonic_state(nozzle_data)
         mdot_implied = rho_star * a_star * mapped_throat * depth * n_blades * 1e-6
     except Exception as e:
@@ -1663,26 +1690,15 @@ def run_radial_stator(n_clicks, base_blade, edited_blade, nozzle_data, r1, r2, n
         {"Quantity": "2D throat_opening", "Value": f"{stator['throat_opening']:.2f}", "Unit": "mm"},
         {"Quantity": "Mapped throat (radial)", "Value": f"{mapped_throat:.4f}", "Unit": "mm"},
         {"Quantity": "r1 (hub)", "Value": f"{r1:.2f}", "Unit": "mm"},
-        {"Quantity": "r2 (shroud)", "Value": f"{r2:.2f}", "Unit": "mm"},
-        {"Quantity": "N_blades (entered)", "Value": str(n_blades), "Unit": "-"},
-        {"Quantity": "Mapped pitch (at N entered)", "Value": f"{mapped_pitch:.2f}", "Unit": "mm"},
-        {"Quantity": "Implied N_blades (no overlap/gaps)", "Value": f"{n_implied:.1f}", "Unit": "-"},
-        {"Quantity": "Depth", "Value": f"{depth:.2f}", "Unit": "mm"},
+        {"Quantity": "r2 (target -> used)", "Value": f"{r2_target:.2f} -> {r2:.2f}", "Unit": "mm"},
+        {"Quantity": "N_blades (derived)", "Value": str(n_blades), "Unit": "-"},
+        {"Quantity": "Implied N at the target r2", "Value": f"{wrap['n_implied_at_target']:.2f}", "Unit": "-"},
+        {"Quantity": "Mapped pitch (at the throat)", "Value": f"{mapped_pitch:.2f}", "Unit": "mm"},
+        {"Quantity": "Depth (blade height)", "Value": f"{depth:.2f}", "Unit": "mm"},
         {"Quantity": "Implied mass flow", "Value": f"{mdot_implied:.4f}", "Unit": "kg/s"},
     ]
-    ratio = n_blades / n_implied
-    if ratio > 1.15:
-        msg = (f"Radial wrap computed -- N_blades ({n_blades}) is {ratio:.1f}x the implied "
-               f"count ({n_implied:.1f}): blades will visibly OVERLAP. Lower N_blades.")
-        color = "#b00020"
-    elif ratio < 0.85:
-        msg = (f"Radial wrap computed -- N_blades ({n_blades}) is only {ratio:.1f}x the "
-               f"implied count ({n_implied:.1f}): large GAPS between blades. Raise N_blades.")
-        color = "#b00020"
-    else:
-        msg = "Radial wrap computed -- N_blades is close to the implied (no-overlap) count."
-        color = "#1a7a1a"
-    status = html.Div(msg, style={"color": color, "fontWeight": "600"})
+    status = html.Div(f"Radial wrap computed: N = {n_blades}, r2 = {r2:.2f} mm (the designed passage).",
+                      style={"color": "#1a7a1a", "fontWeight": "600"})
     return result, status, make_table(table_data, ["Quantity", "Value", "Unit"])
 
 
@@ -2505,36 +2521,219 @@ def run_rotor_mesh3d(n_clicks, sizing_result, rotor_data, previous, blade_size, 
     return result, html.Div(notes), make_table(rows, ["Quantity", "Value", "Unit"])
 
 
+def _register_mesh3d_display(prefix):
+    """View, downloads and download readiness of a _mesh3d_controls block."""
+    store = f"{prefix}-mesh3d-store"
+
+    @app.callback(
+        Output(f"{prefix}-mesh3d-view", "children"),
+        Input(store, "data"),
+        Input(f"{prefix}_mesh3d_patches", "value"),
+        Input(f"{prefix}_mesh3d_copies", "value"),
+    )
+    def _render(mesh3d, patches, copies=1):
+        return _mesh3d_view(mesh3d, patches, copies)
+
+    for kind in ("cgns", "msh"):
+        @app.callback(
+            Output(f"download-{prefix}-mesh3d-{kind}", "data"),
+            Output(f"{prefix}-mesh3d-download-status", "children", allow_duplicate=True),
+            Input(f"download-{prefix}-mesh3d-{kind}-btn", "n_clicks"),
+            State(store, "data"),
+            prevent_initial_call=True,
+        )
+        def _download(n_clicks, mesh3d, kind=kind):
+            return _send_mesh3d_file(mesh3d, kind)
+
+    @app.callback(
+        Output(f"download-{prefix}-mesh3d-cgns-btn", "disabled"),
+        Output(f"download-{prefix}-mesh3d-msh-btn", "disabled"),
+        Input(store, "data"),
+    )
+    def _ready(mesh3d):
+        return not mesh3d, not mesh3d
+
+    _render.__name__ = f"_render_{prefix}_mesh3d"
+    return _render
+
+
+_render_rotor_mesh3d = _register_mesh3d_display("rotor")
+for _prefix in ("radial_stator", "radial_rotor"):
+    _register_mesh3d_display(_prefix)
+
+
+# --------------------------------------------------------------------------
+# Radial rows (Phase 2/3, radial wrap): the 2D passage is meshed in the
+# blade's own design plane, mapped with the radial wrap's log-spiral and
+# extruded through the depth (turbo_moc.meshing.stator_mesh_3d.
+# mesh_radial_passage). Sizes are entered in physical mm; the map scales
+# 2D lengths by |a| r, so the first layer uses the largest radius (y+ is
+# then at most the target everywhere) and cell sizes the mean radius.
+# --------------------------------------------------------------------------
+def _radial_mesh_prefill(radial_result):
+    from turbo_moc.meshing.stator_mesh_2d import default_mesh_sizes
+
+    r_mean = np.sqrt(radial_result["r1"] * radial_result["r2"])
+    sizes = default_mesh_sizes(2.0 * np.pi * r_mean / radial_result["n_blades"])
+    return (*(float(f"{sizes[key]:.4g}") for key in STATOR_MESH_SIZE_KEYS),
+            float(f"{radial_result['depth'] / 20:.4g}"))
+
+
+def _run_radial_mesh3d(source, radial_result, wall_states, chord_2d, values, core_size, previous):
+    """2D mesh in the design plane -> log-spiral map -> extrusion; returns
+    (store, status, table) for the radial stator ("stator") or rotor."""
+    from turbo_moc.meshing.stator_mesh_3d import (
+        mesh_radial_passage, radial_length_scale, radial_map_reference)
+    from turbo_moc.meshing.wall_spacing import estimate_first_layer_height
+
+    red = {"color": "#b00020"}
+    if any(value is None or value <= 0 for value in (*values, core_size)) or values[4] <= 1:
+        return dash.no_update, html.Div("All mesh inputs must be positive and the growth ratio > 1.",
+                                        style=red), None
+    blade = radial_result["blade"] if source == "stator" else radial_result["rotor_data"]
+    r1, r2 = float(radial_result["r1"]), float(radial_result["r2"])
+    reference = radial_map_reference(blade, r1, r2, source)
+    scale_mean = radial_length_scale(reference, np.sqrt(r1 * r2))
+    scale_max = radial_length_scale(reference, max(r1, r2))
+    physical = dict(zip(STATOR_MESH_SIZE_KEYS, map(float, values)))
+    physical["num_layers"] = int(round(physical["num_layers"]))
+    output_dir = tempfile.mkdtemp(prefix=f"turbo_moc_{source}3d_")
+    try:
+        wall = estimate_first_layer_height(wall_states, chord_2d * scale_mean, physical["y_plus"])
+        first_height = wall["first_height_mm"]
+        sizes_2d = {**physical, "blade_size": physical["blade_size"] / scale_mean,
+                    "domain_size": physical["domain_size"] / scale_mean,
+                    "first_height": first_height / scale_max}
+        if source == "stator":
+            from turbo_moc.meshing.stator_mesh_2d import mesh_sized_stator
+
+            mesh = mesh_sized_stator(blade, sizes_2d)
+        else:
+            from turbo_moc.meshing.rotor_mesh_2d import mesh_sized_rotor
+
+            mesh = mesh_sized_rotor(blade, sizes_2d)
+        span = {"first_height": first_height, "growth_ratio": physical["growth_ratio"],
+                "num_layers": physical["num_layers"], "transition_ratio": physical["transition_ratio"],
+                "core_size": float(core_size)}
+        result = mesh_radial_passage(mesh, reference, int(radial_result["n_blades"]), radial_result["depth"],
+                                     span, output_dir, boundary_types=STATOR_MESH3D_BOUNDARY_TYPES,
+                                     name=f"{source}_radial_mesh_3d")
+    except Exception as e:
+        _remove_mesh3d_dir({"output_dir": output_dir})
+        return dash.no_update, html.Div(f"Meshing failed: {e}", style=red), None
+    _remove_mesh3d_dir(previous)
+
+    stats = mesh["statistics"]
+    rows = [
+        {"Quantity": "Section cells", "Value": f"{sum(stats['cells'].values()):,}", "Unit": "-"},
+        {"Quantity": "Section quadrilateral fraction", "Value": f"{stats['quadrilateral_fraction']:.1%}", "Unit": "-"},
+        {"Quantity": "Section min scaled Jacobian", "Value": f"{stats['minimum_scaled_jacobian']:.3f}", "Unit": "-"},
+        {"Quantity": f"First layer height (y+ = {physical['y_plus']:g}, at r = {max(r1, r2):.1f} mm)",
+         "Value": f"{first_height * 1e3:.3f}", "Unit": "µm"},
+        {"Quantity": f"First layer height at r = {min(r1, r2):.1f} mm",
+         "Value": f"{first_height * min(r1, r2) / max(r1, r2) * 1e3:.3f}", "Unit": "µm"},
+        {"Quantity": "Re (chord, most sheared wall)", "Value": f"{wall['reynolds']:.3g}", "Unit": "-"},
+        *_mesh3d_rows(result),
+    ]
+    n_cells = sum(result["cells"].values())
+    notes = [html.Div(f"3D mesh generated: {n_cells:,} cells ({result['span_cells']} cells through the "
+                      f"depth, endwall layers as on the blade).", style={"color": "#1a7a1a"})]
+    if wall["viscosity_model"].startswith("Chung"):
+        notes.append(html.Div(f"Viscosity: {wall['viscosity_model']}.", style={"color": "#666", "fontSize": "12px"}))
+    return result, html.Div(notes), make_table(rows, ["Quantity", "Value", "Unit"])
+
+
 @app.callback(
-    Output("rotor-mesh3d-view", "children"),
-    Input("rotor-mesh3d-store", "data"),
-    Input("rotor_mesh3d_patches", "value"),
-    Input("rotor_mesh3d_copies", "value"),
+    *(Output(f"radial_stator_mesh_{key}", "value") for key in STATOR_MESH_SIZE_KEYS),
+    Output("radial_stator_mesh3d_core_size", "value"),
+    Output("radial_stator-mesh3d-store", "data"),
+    Input("stator-radial-store", "data"),
+    State("radial_stator-mesh3d-store", "data"),
 )
-def _render_rotor_mesh3d(mesh3d, patches, copies=1):
-    return _mesh3d_view(mesh3d, patches, copies)
+def _prefill_radial_stator_mesh(radial_result, previous):
+    """New radial wrap -> sizes from its mean-radius pitch; an old mesh is stale."""
+    _remove_mesh3d_dir(previous)
+    if not radial_result:
+        return (None,) * (len(STATOR_MESH_SIZE_KEYS) + 2)
+    return (*_radial_mesh_prefill(radial_result), None)
 
 
 @app.callback(
-    Output("download-rotor-mesh3d-cgns", "data"),
-    Output("rotor-mesh3d-download-status", "children"),
-    Input("download-rotor-mesh3d-cgns-btn", "n_clicks"),
-    State("rotor-mesh3d-store", "data"),
+    *(Output(f"radial_rotor_mesh_{key}", "value") for key in STATOR_MESH_SIZE_KEYS),
+    Output("radial_rotor_mesh3d_core_size", "value"),
+    Output("radial_rotor-mesh3d-store", "data"),
+    Input("rotor-radial-store", "data"),
+    State("radial_rotor-mesh3d-store", "data"),
+)
+def _prefill_radial_rotor_mesh(radial_result, previous):
+    _remove_mesh3d_dir(previous)
+    if not radial_result:
+        return (None,) * (len(STATOR_MESH_SIZE_KEYS) + 2)
+    return (*_radial_mesh_prefill(radial_result), None)
+
+
+@app.callback(
+    Output("radial_stator-mesh3d-store", "data", allow_duplicate=True),
+    Output("radial_stator-mesh3d-status", "children"),
+    Output("radial_stator-mesh3d-info-table", "children"),
+    Input("generate-radial_stator-mesh3d-btn", "n_clicks"),
+    State("stator-radial-store", "data"),
+    State("result-store", "data"),
+    State("radial_stator-mesh3d-store", "data"),
+    *(State(f"radial_stator_mesh_{key}", "value") for key in STATOR_MESH_SIZE_KEYS),
+    State("radial_stator_mesh3d_core_size", "value"),
+    background=True,
+    manager=background_callback_manager,
+    running=[
+        (Output("generate-radial_stator-mesh3d-btn", "disabled"), True, False),
+        (Output("generate-radial_stator-mesh3d-btn", "children"), "Meshing... (Gmsh)", "Generate 3D mesh"),
+    ],
     prevent_initial_call=True,
 )
-def download_rotor_mesh3d_cgns(n_clicks, mesh3d):
-    return _send_mesh3d_file(mesh3d, "cgns")
+def run_radial_stator_mesh3d(n_clicks, radial_result, nozzle_data, previous, *values_and_core):
+    red = {"color": "#b00020"}
+    if not radial_result:
+        return dash.no_update, html.Div("Compute the radial wrap first.", style=red), None
+    if not nozzle_data:
+        return dash.no_update, html.Div("Run Phase 1 first: the y+ estimate needs the nozzle expansion.",
+                                        style=red), None
+    from turbo_moc.meshing.wall_spacing import blade_chord_mm
+
+    *values, core_size = values_and_core
+    return _run_radial_mesh3d("stator", radial_result, nozzle_data, blade_chord_mm(radial_result["blade"]),
+                              values, core_size, previous)
 
 
 @app.callback(
-    Output("download-rotor-mesh3d-msh", "data"),
-    Output("rotor-mesh3d-download-status", "children", allow_duplicate=True),
-    Input("download-rotor-mesh3d-msh-btn", "n_clicks"),
-    State("rotor-mesh3d-store", "data"),
+    Output("radial_rotor-mesh3d-store", "data", allow_duplicate=True),
+    Output("radial_rotor-mesh3d-status", "children"),
+    Output("radial_rotor-mesh3d-info-table", "children"),
+    Input("generate-radial_rotor-mesh3d-btn", "n_clicks"),
+    State("rotor-radial-store", "data"),
+    State("radial_rotor-mesh3d-store", "data"),
+    *(State(f"radial_rotor_mesh_{key}", "value") for key in STATOR_MESH_SIZE_KEYS),
+    State("radial_rotor_mesh3d_core_size", "value"),
+    background=True,
+    manager=background_callback_manager,
+    running=[
+        (Output("generate-radial_rotor-mesh3d-btn", "disabled"), True, False),
+        (Output("generate-radial_rotor-mesh3d-btn", "children"), "Meshing... (Gmsh)", "Generate 3D mesh"),
+    ],
     prevent_initial_call=True,
 )
-def download_rotor_mesh3d_msh(n_clicks, mesh3d):
-    return _send_mesh3d_file(mesh3d, "msh")
+def run_radial_rotor_mesh3d(n_clicks, radial_result, previous, *values_and_core):
+    red = {"color": "#b00020"}
+    if not radial_result:
+        return dash.no_update, html.Div("Compute the radial wrap first.", style=red), None
+    rotor_data = radial_result["rotor_data"]
+    if "P0_rel" not in rotor_data:
+        return dash.no_update, html.Div("Compute the rotor blade (Phase 3, 2D) and its radial wrap again: "
+                                        "the y+ estimate needs its inlet state.", style=red), None
+    from turbo_moc.meshing.wall_spacing import rotor_wall_states
+
+    *values, core_size = values_and_core
+    return _run_radial_mesh3d("rotor", radial_result, rotor_wall_states(rotor_data), float(rotor_data["chord"]),
+                              values, core_size, previous)
 
 
 @app.callback(
@@ -3096,27 +3295,26 @@ def _update_rotor_sizing_vtk_preview(sizing_result):
     State("rotor-store", "data"),
     State("rotor_radial_r1", "value"),
     State("rotor_radial_r2", "value"),
-    State("rotor_radial_n_blades", "value"),
     State("rotor_radial_depth", "value"),
     prevent_initial_call=True,
 )
-def run_radial_rotor(n_clicks, rotor_data, r1, r2, n_blades, depth):
-    """Geometric-only radial wrap (see run_radial_stator's docstring for
-    why N_blades is a direct input, not solved, for the rotor too). The
-    raw (r*) rotor blade is used as-is: the map normalises it by its own
-    chordwise extent, so the mapped geometry/pitch only depend on r1/r2."""
-    from turbo_moc.geometry import implied_n_blades_radial, mapped_pitch_width
+def run_radial_rotor(n_clicks, rotor_data, r1, r2_target, depth):
+    """Geometric radial wrap; N_blades and the exact r2 are derived as for
+    the stator (run_radial_stator). The raw (r*) rotor blade is used as-is:
+    the map normalises it by its own chordwise extent, so the mapped
+    geometry/pitch only depend on r1/r2."""
+    from turbo_moc.geometry import consistent_radial_wrap, mapped_pitch_width
 
     if not rotor_data:
         return None, html.Div("Run Phase 3 (rotor design, 2D) first -- no rotor blade to wrap.",
                                 style={"color": "#b00020"}), None
 
-    r1, r2 = float(r1), float(r2)
-    n_blades, depth = int(n_blades), float(depth)
+    r1, r2_target, depth = float(r1), float(r2_target), float(depth)
 
     try:
+        wrap = consistent_radial_wrap(rotor_data, r1, r2_target, source="rotor")
+        r2, n_blades = wrap["r2"], wrap["n_blades"]
         mapped_pitch = mapped_pitch_width(rotor_data, r1, r2, source="rotor")
-        n_implied = implied_n_blades_radial(rotor_data, r1, r2, source="rotor")
     except Exception as e:
         return None, html.Div(f"Error: {e}", style={"color": "#b00020"}), None
 
@@ -3126,25 +3324,14 @@ def run_radial_rotor(n_clicks, rotor_data, r1, r2, n_blades, depth):
     }
     table_data = [
         {"Quantity": "r1 (hub)", "Value": f"{r1:.2f}", "Unit": "mm"},
-        {"Quantity": "r2 (shroud)", "Value": f"{r2:.2f}", "Unit": "mm"},
-        {"Quantity": "N_blades (entered)", "Value": str(n_blades), "Unit": "-"},
-        {"Quantity": "Mapped pitch (at N entered)", "Value": f"{mapped_pitch:.2f}", "Unit": "mm"},
-        {"Quantity": "Implied N_blades (no overlap/gaps)", "Value": f"{n_implied:.1f}", "Unit": "-"},
-        {"Quantity": "Depth", "Value": f"{depth:.2f}", "Unit": "mm"},
+        {"Quantity": "r2 (target -> used)", "Value": f"{r2_target:.2f} -> {r2:.2f}", "Unit": "mm"},
+        {"Quantity": "N_blades (derived)", "Value": str(n_blades), "Unit": "-"},
+        {"Quantity": "Implied N at the target r2", "Value": f"{wrap['n_implied_at_target']:.2f}", "Unit": "-"},
+        {"Quantity": "Mapped pitch (at r1)", "Value": f"{mapped_pitch:.2f}", "Unit": "mm"},
+        {"Quantity": "Depth (blade height)", "Value": f"{depth:.2f}", "Unit": "mm"},
     ]
-    ratio = n_blades / n_implied
-    if ratio > 1.15:
-        msg = (f"Radial wrap computed -- N_blades ({n_blades}) is {ratio:.1f}x the implied "
-               f"count ({n_implied:.1f}): blades will visibly OVERLAP. Lower N_blades.")
-        color = "#b00020"
-    elif ratio < 0.85:
-        msg = (f"Radial wrap computed -- N_blades ({n_blades}) is only {ratio:.1f}x the "
-               f"implied count ({n_implied:.1f}): large GAPS between blades. Raise N_blades.")
-        color = "#b00020"
-    else:
-        msg = "Radial wrap computed -- N_blades is close to the implied (no-overlap) count."
-        color = "#1a7a1a"
-    status = html.Div(msg, style={"color": color, "fontWeight": "600"})
+    status = html.Div(f"Radial wrap computed: N = {n_blades}, r2 = {r2:.2f} mm (the designed passage).",
+                      style={"color": "#1a7a1a", "fontWeight": "600"})
     return result, status, make_table(table_data, ["Quantity", "Value", "Unit"])
 
 
@@ -3752,12 +3939,6 @@ def _stator_sizing_downloads_ready(sizing_result):
 @_disable_until_ready(["download-stator-mesh3d-cgns-btn", "download-stator-mesh3d-msh-btn"],
                       ("stator-mesh3d-store", "data"))
 def _stator_mesh3d_downloads_ready(mesh3d):
-    return bool(mesh3d)
-
-
-@_disable_until_ready(["download-rotor-mesh3d-cgns-btn", "download-rotor-mesh3d-msh-btn"],
-                      ("rotor-mesh3d-store", "data"))
-def _rotor_mesh3d_downloads_ready(mesh3d):
     return bool(mesh3d)
 
 

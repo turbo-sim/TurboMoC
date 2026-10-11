@@ -27,24 +27,9 @@ if not hasattr(gmsh, "initialize"):
     )
 
 from turbo_moc.io.cgns_adf import AdfNode, new_root, write_adf
+from turbo_moc.reporting import display_path, summary  # noqa: F401 (used throughout; re-exported)
 
 logger = logging.getLogger(__name__)
-
-
-def summary(logger, title, values):
-    """Log an aligned label/value block (same layout as the examples' reports)."""
-    width = max((len(str(label)) for label in values), default=0) + 3
-    rows = "\n".join(f"  {label:<{width}}{value}" for label, value in values.items())
-    logger.info("\n%s\n%s", title, rows)
-
-
-def display_path(path):
-    """Short working-directory-relative path for log messages, else absolute."""
-    resolved = Path(path).resolve()
-    try:
-        return resolved.relative_to(Path.cwd().resolve()).as_posix()
-    except ValueError:
-        return str(resolved)
 
 # =============================================================================
 # 1. Meshing defaults and input validation

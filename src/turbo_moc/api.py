@@ -14,14 +14,21 @@ repeated calls at the same operating point (the common case while a UI
 sweeps geometry) stay cheap.
 """
 
+import logging
+import time
+
 import numpy as np
 import jaxprop as jxp
 
+from turbo_moc.core import classes as _classes
 from turbo_moc.core.classes import get_fluid_manager
+from turbo_moc.reporting import format_pressure, summary
 from turbo_moc.solvers.conventional import MOCSolver as ConventionalSolver
 from turbo_moc.solvers.mln import MOCSolverMLN
 
 __all__ = ["design_nozzle", "list_supported_fluids", "NozzleDesignError"]
+
+logger = logging.getLogger(__name__)
 
 
 class NozzleDesignError(Exception):
@@ -35,6 +42,26 @@ def list_supported_fluids() -> list:
     """CoolProp's fluid list, for populating a fluid-selection UI control."""
     import CoolProp.CoolProp as CP
     return sorted(CP.FluidsList())
+
+
+def _is_set(value):
+    return value is not None and not (isinstance(value, float) and np.isnan(value))
+
+
+def _attempt_callback(progress_callback, attempt, attempts):
+    """The caller's callback, its stage labels tagged with the retry number
+    ("1 of 4 (retry 2 of 6)") -- the leading stage digit is unchanged, so
+    turbo_moc.progress.make_progress_reporter routes it as before."""
+    if progress_callback is None or attempt == 0:
+        return progress_callback
+
+    def tagged(fraction, stage_label):
+        retry = f"retry {attempt + 1} of {attempts}"
+        if stage_label.endswith(")"):  # merge into an existing qualifier: "(finished; retry 2 of 6)"
+            progress_callback(fraction, f"{stage_label[:-1]}; {retry})")
+        else:
+            progress_callback(fraction, f"{stage_label} ({retry})")
+    return tagged
 
 
 def _inlet_state(fluid, P0, T0, Q0):
@@ -127,8 +154,6 @@ def design_nozzle(
         axis data together with the resolved inputs, convergence state, and
         runtime.
     """
-    import time
-
     if solver not in ("conventional", "mln"):
         raise NozzleDesignError(f"solver must be 'conventional' or 'mln', got {solver!r}")
     if p_back is None and Noz_Mach is None:
@@ -136,9 +161,13 @@ def design_nozzle(
     if solver == "mln" and p_back is None:
         raise NozzleDesignError("solver='mln' requires p_back (used to compute the corner fan's target turning angle).")
 
-    t0 = time.time()
+    t0 = time.perf_counter()
 
     fluid = jxp.Fluid(fluid_name)
+    inlet = f"Q0 {float(Q0):.4g}" if _is_set(Q0) else (f"T0 {T0:.2f} K" if T0 is not None else "T0 not set")
+    target = f"target pressure {format_pressure(p_back)}" if p_back is not None else f"target Mach {Noz_Mach:.4f}"
+    logger.info("  MoC: %s; %s; P0 %s, %s; %d seed points; %s", solver, fluid_name, format_pressure(P0),
+                inlet, n, target)
 
     q0_is_zero = Q0 is not None and not (isinstance(Q0, float) and np.isnan(Q0)) and float(Q0) == 0.0
     q0_candidates = [Q0]
@@ -147,6 +176,7 @@ def design_nozzle(
 
     last_exc = None
     for attempt_i, q0_try in enumerate(q0_candidates):
+        callback = _attempt_callback(progress_callback, attempt_i, len(q0_candidates))
         state_0 = _inlet_state(fluid, P0, T0, q0_try)
         T0_resolved = float(state_0.T)
 
@@ -156,7 +186,14 @@ def design_nozzle(
             v_out = float(np.sqrt(abs(2 * (state_0.h - state_out.h))))
             design_Noz_Mach = float(v_out / state_out.a)
 
+        cached = len(_classes._fluid_manager_cache)
+        start = time.perf_counter()
         fm = get_fluid_manager(fluid_name, backend, P0=P0, T0=T0_resolved, Q0=q0_try)
+        if len(_classes._fluid_manager_cache) > cached:
+            logger.info("  MoC: fluid properties initialized in %.2f s (first-call setup and JIT "
+                        "compilation included)", time.perf_counter() - start)
+        else:
+            logger.info("  MoC: reusing cached fluid properties")
 
         tau = np.linspace(0, tau_max, int(tau_max / tau_step) + 1)
         base_config = dict(
@@ -168,10 +205,10 @@ def design_nozzle(
         try:
             if solver == "conventional":
                 s = ConventionalSolver(base_config, show_plot=show_plot, fluid_manager=fm)
-                s.run_stage_1_sauer(use_true_sauer_line=use_true_sauer_line, progress_callback=progress_callback)
-                s.run_stage_2_ivp(progress_callback=progress_callback)
-                s.run_stage_3_kernel(progress_callback=progress_callback)
-                s.run_stage_4_reflex(progress_callback=progress_callback)
+                s.run_stage_1_sauer(use_true_sauer_line=use_true_sauer_line, progress_callback=callback)
+                s.run_stage_2_ivp(progress_callback=callback)
+                s.run_stage_3_kernel(progress_callback=callback)
+                s.run_stage_4_reflex(progress_callback=callback)
             else:
                 state_out = fluid.get_state(jxp.PSmass_INPUTS, p_back, state_0.s)
                 v_out = float(np.sqrt(abs(2 * (state_0.h - state_out.h))))
@@ -182,7 +219,7 @@ def design_nozzle(
                 mln_config["tau_mln"] = np.linspace(0, theta_star_deg, n_tau_mln)
                 mln_config["flashing"] = not use_true_sauer_line
                 s = MOCSolverMLN(mln_config, show_plot=show_plot, fluid_manager=fm)
-                s.run_stage_1_sauer(progress_callback=progress_callback)
+                s.run_stage_1_sauer(progress_callback=callback)
                 # sauer_direct, not ivp_march, for BOTH branches: for flashing,
                 # it collapses the flat front to just the corner point, matching
                 # the reference algorithm exactly (Zebbiche & Youbi 2007 Fig.
@@ -192,19 +229,25 @@ def design_nozzle(
                 # that property without changing the converged exit condition --
                 # this is what turbo_moc/moc_min_length's own
                 # validated generate_laes_cases.py does.
-                s.run_stage_2_sauer_direct(progress_callback=progress_callback)
-                s.run_stage_3_kernel_mln(progress_callback=progress_callback)
-                s.run_stage_4_reflex(progress_callback=progress_callback)
+                s.run_stage_2_sauer_direct(progress_callback=callback)
+                s.run_stage_3_kernel_mln(progress_callback=callback)
+                s.run_stage_4_reflex(progress_callback=callback)
         except Exception as e:
             last_exc = e
             if attempt_i == len(q0_candidates) - 1:
+                # Propagated, not logged here: the caller's boundary reports it once.
                 raise NozzleDesignError(f"MOC solve failed for solver={solver!r}: {e}") from e
+            logger.warning("  MoC attempt %d of %d failed with Q0 = %g (%s). Retrying with Q0 = %g.",
+                           attempt_i + 1, len(q0_candidates), float(q0_try), e, q0_candidates[attempt_i + 1])
             continue
 
         exit_M = float(s.axis_points_vec[-1].M) if s.axis_points_vec else float("nan")
         converged = bool(np.isfinite(exit_M) and abs(exit_M - design_Noz_Mach) / max(design_Noz_Mach, 1e-9) < 0.05)
         if converged or attempt_i == len(q0_candidates) - 1:
             break
+        logger.warning("  MoC attempt %d of %d with Q0 = %g did not converge (exit Mach %.4f, design %.4f). "
+                       "Retrying with Q0 = %g.", attempt_i + 1, len(q0_candidates), float(q0_try), exit_M,
+                       design_Noz_Mach, q0_candidates[attempt_i + 1])
 
     data = s.build_result_data(extra_meta=dict(
         solver=solver, P0=float(P0), T0=T0_resolved, Q0=float(q0_try),
@@ -216,7 +259,7 @@ def design_nozzle(
     data["p_back"] = p_back
     data["converged"] = converged
     data["exit_M"] = exit_M
-    data["runtime_s"] = time.time() - t0
+    data["runtime_s"] = time.perf_counter() - t0
     if q0_try != Q0:
         data["q0_nudged_from"] = float(Q0)
     # Stagnation/total state (s0, T0) -- the isentrope's actual starting
@@ -227,4 +270,27 @@ def design_nozzle(
     # points at all.
     data["s0"] = float(state_0.s)
     data["T0_stagnation"] = float(state_0.T)
+    _report_result(data, s, converged, exit_M, design_Noz_Mach, p_back, callback)
     return data
+
+
+def _report_result(data, solver, converged, exit_M, design_Noz_Mach, p_back, callback):
+    """Final summary, a warning for a non-converged result, and the closing
+    progress update -- which names the outcome rather than implying
+    convergence: all stages ran, the design target may still be missed."""
+    exit_p = float(solver.axis_points_vec[-1].p) if solver.axis_points_vec else float("nan")
+    deviation = abs(exit_M - design_Noz_Mach) / max(design_Noz_Mach, 1e-9) if np.isfinite(exit_M) else float("nan")
+    rows = {"Status": "Converged" if converged else f"Not converged (exit Mach {100 * deviation:.1f}% off design)"}
+    rows["Exit pressure"] = format_pressure(exit_p)
+    if p_back is not None:
+        rows["Target pressure"] = format_pressure(p_back)
+    rows["Exit Mach"] = f"{exit_M:.4f} (design {design_Noz_Mach:.4f})"
+    if _is_set(data.get("q0_nudged_from")):  # NaN when Q0 was NaN (not a retry)
+        rows["Inlet quality"] = f"{data['meta']['Q0']:g} (retried from {data['q0_nudged_from']:g})"
+    rows["Total runtime"] = f"{data['runtime_s']:.2f} s"
+    summary(logger, "MoC results", rows, indent="  ")
+    if not converged:
+        logger.warning("  MoC result not converged: exit Mach %.4f vs design %.4f (tolerance 5%%). "
+                       "The geometry is returned as computed.", exit_M, design_Noz_Mach)
+    if callback is not None:
+        callback(1.0, "4 of 4 (finished)" if converged else "4 of 4 (finished, not converged)")

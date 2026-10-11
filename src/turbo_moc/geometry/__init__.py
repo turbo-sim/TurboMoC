@@ -14,6 +14,7 @@ from .meridional import build_meridional_view
 from .passage import extract_axial_passage_2d, extract_radial_passage_2d
 from .radial import (
     apply_conformal_mapping,
+    consistent_radial_wrap,
     conformal_length_scale,
     implied_n_blades_radial,
     mapped_pitch_width,
@@ -43,7 +44,7 @@ __all__ = [
     "apply_conformal_mapping", "rotate_radial_points",
     "wrap_curve_radial", "wrap_blade_radial", "wrap_rotor_blade_radial",
     "conformal_length_scale", "mapped_throat_width", "mapped_pitch_width",
-    "implied_n_blades_radial",
+    "implied_n_blades_radial", "consistent_radial_wrap",
     "build_meridional_view",
     "extract_axial_passage_2d",
     "extract_radial_passage_2d",

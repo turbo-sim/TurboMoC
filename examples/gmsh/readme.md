@@ -80,15 +80,18 @@ on each run; it does not accumulate timestamped copies.
 
 Set `LOG_LEVEL = "INFO"` and `LOG_FILENAME` near the start of
 `run_mesh_generation.py`. `DEBUG` includes detailed export and cleanup diagnostics;
-`WARNING` shows only warnings and errors. Imported functions use the shared logger
-configured by the entry point. The shared implementation is
-[`../workflow_logging.py`](../workflow_logging.py), using Python's standard
-`logging` module without extra dependencies.
+`WARNING` shows only warnings and errors. The entry point configures the single
+`turbo_moc` logger through [`../workflow_logging.py`](../workflow_logging.py), a thin
+wrapper around `turbo_moc.reporting`; the workflow (`turbo_moc.workflows.gmsh.*`),
+the MoC solver (`turbo_moc.api`, `turbo_moc.solvers.*`) and the meshing library
+(`turbo_moc.meshing.*`) then reach the console and the log file exactly once.
 
-The execution log records messages from these example scripts. MoC's native
-console output is unchanged. Gmsh's native warnings and errors remain controlled
-by `mesh.numerics.terminal_output` and `mesh.numerics.verbosity`; they are not redirected into this
-log. There are no timing decorators, elapsed-time measurements or viewer timings.
+When a new MoC solution is calculated, its compact report appears inside step 2:
+one line per solver stage start and completion (with elapsed seconds), progress
+of long stages at most once per second, and a short result summary. Gmsh's native
+warnings and errors remain controlled by `mesh.numerics.terminal_output` and
+`mesh.numerics.verbosity`; they are not redirected into this log. See the
+documentation's "Logging and progress" page for levels and timing.
 
 ## Nozzle and blade geometry
 
@@ -423,7 +426,7 @@ creates the conformal translational pair after checking the imported vertices.
 | `stator_mesh.yaml` | Nozzle, blade, passage, and mesh settings, with parameter comments |
 | `geometry_source.py` | Blade and passage construction, spline geometry, manual/automatic placement, clearance checks, and Matplotlib views |
 | `meshing_source.py` | Gmsh CAD, sizing, inflation, recombination, periodic checks, Fluent CGNS export, mesh images, quality analysis, and reports |
-| `../workflow_logging.py` | Shared console/file handlers, section headings, aligned summaries and failure reporting |
+| `../workflow_logging.py` | Wrapper around `turbo_moc.reporting`: shared console/file handlers, headings, aligned summaries, failure reporting |
 
 The two source modules have numbered section comments for navigation.
 `geometry_source.py` proceeds from validation and spline construction to
