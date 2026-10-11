@@ -195,27 +195,6 @@ Launch the app:
 turbo_moc-app
 ```
 
-Launch the preserved app separately with `turbo_moc-app-legacy` (port 8050).
-After updating a Poetry checkout, run `poetry install --only-root` to refresh
-the installed launcher commands without updating dependencies.
-
 For a Poetry installation, prefix the commands with `poetry run`. Open the local
-URL printed in the terminal (port 8052 by default). **Geometry generation**
-shows the fitted section, meridional channel and capped 3D blade preview.
-**Mesh generation** combines section/span grids with the 3D boundary viewer
-and quality report. Compute MoC, generate 2D, generate 3D and export remain
-separate actions, with progress and live activity from background workers.
-
-Stator, Rotor and Stator + Rotor project modes retain independent row settings.
-The implemented stator supports linear/axial/radial mapping; combined linear
-mode is excluded. Rotor generation is disabled pending provider integration.
-The interface may show its planned meridional channel and axial/radial gap
-without fabricating a blade or a coupled CFD domain.
-
-Browser assets are installed resources; initialization defaults are Python
-values. Example app YAML files live under `examples/apps/cases/`. Installed
-app outputs go under `./output/` unless `--output-dir` or `TURBO_MOC_OUTPUT_DIR` chooses
-another writable root; no output is written into the installed package.
-Loading `--config` initializes settings rather than restoring previous jobs.
-See the [app implementation guide](src/turbo_moc/apps/app/readme.md).
+URL printed in the terminal (port 8052 by default). Example app YAML files are available in `examples/apps/cases/`.
 
