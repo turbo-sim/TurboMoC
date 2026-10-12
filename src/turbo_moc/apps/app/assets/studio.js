@@ -129,12 +129,11 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       const previous = studio.scenes[pane];
       settings = settings || {};
       const rows = data && (data.rows || [data]).filter(row =>
-        (plottedRows == null || plottedRows.includes(row.id || 'stator_1')) &&
-        (!settings[row.id] || settings[row.id].visible !== false));
+        plottedRows == null || plottedRows.includes(row.id || 'stator_1'));
       if (!rows || !rows.length) {
         if (previous && previous.observer) previous.observer.disconnect();
-        const note = plottedRows && !plottedRows.length ? "Check a row under Plot rows to display it."
-                   : data && data.rows && data.rows.length ? "Show a cascade using its display toolbar."
+        const note = plottedRows && !plottedRows.length ? "Select a row under Show to display it."
+                   : data && data.rows && data.rows.length ? "No generated mesh or geometry for the shown rows."
                    : pane === "mesh" ? "Generate a current 3D mesh to show its boundary cells."
                                     : "Compute current MoC to show geometry.";
         if (!previous) return [window.dash_clientside.no_update, note];

@@ -52,32 +52,46 @@ clearance-maximizing tangential shift remain in use; no additional YAML fields
 are needed. The [construction example](../../../../examples/moc_design/rotor_flow_domain_construction.py)
 plots the package geometry, its control points and extension joins.
 
-**Apply calculations to** provides an independent checkbox for each active row.
-Check both Stator and Rotor to calculate both; uncheck all rows to disable the
-calculation buttons. Selection order does not change machine execution order.
+The **Calculate** dropdown selects All rows, Stator or Rotor independently of
+plot visibility and report selection. Calculate and Show are below Load/Save
+configuration in the left sidebar and apply to both workspaces.
+Selection does not change machine execution order.
 The single **Compute blade design** button runs the stator MoC before the rotor
 vortex method when both are selected. Each successful result is published before
 the next row starts, so a coupled rotor consumes the newly computed stator exit.
 **Generate 2D mesh** and **Generate 3D mesh** run the selected rows sequentially,
 skipping already-current meshes. All selected rows need current blade designs;
 3D generation also requires current 2D meshes for every selected row. These
-dependencies are checked before a mesh queue begins. **Inspect row** selects the
-quality report independently of calculation scope and the shared diagrams.
+dependencies are checked before a mesh queue begins.
 
-**Plot rows** independently controls geometry and mesh visibility, preserving
-hidden rows' results. All diagrams, including blade-to-blade geometry and mesh,
-show checked rows together. Multirow blade-to-blade plots use a common midspan
+The **Show** dropdown selects Both, Stator or Rotor for all 2D and 3D geometry
+and mesh views, preserving hidden rows' results. Each 3D viewer has one
+**Configure display** button; its panel's **Blade row** selector chooses which
+row's displayed blades, surfaces and colors to edit, including hidden rows.
+Switching the configured row preserves its preferences and does not change
+Show. Geometry and mesh preferences remain separate. Multirow blade-to-blade plots use a common midspan
 conformal chart: the first active row's leading edge defines $m'=0$, and row
 offsets accumulate $\int ds/r$ through blade rows and the physical interspace.
 Angular phase is included with the clockwise chart convention. These display
 translations preserve row-local numerical meshes and CGNS export. Hiding a row
-keeps the chart origin fixed. If the inspected row is hidden, inspection switches to the first
-visible row. Meridional mesh projections include only current, generated 2D
+keeps the chart origin fixed. Meridional mesh projections include only current, generated 2D
 meshes. Solid outlines mark the LE-to-TE blade extent; dashed outlines mark
 actual inlet/outlet flow-domain extensions, including shared interfaces.
 Pending designs show a pale prescribed blade extent without inventing a flow
-domain. Calculation, visibility and inspection controls share one compact
-strip, with instructions and physical interspace details available on hover.
+domain. Calculation and visibility controls share one compact sidebar block, with
+instructions and physical interspace details available on hover.
+
+The **Total / Stator / Rotor** dropdown in the separate expandable mesh quality report is
+independent of all visualization and calculation selections. Total compares
+rows and combines one generated 3D passage per row: summed cell counts,
+per-row summed nodes (no interface merging), worst quality values, and exact
+pooled cell means, P95 values and histograms. Displayed blade copies do not
+multiply the statistics. Missing and outdated meshes are identified explicitly;
+available outdated meshes remain inspectable and are labelled when included in
+totals. Changing report selection never changes the active calculation row.
+The three metric histograms share one row, with boxed axes and the app's font
+and colors. Metric definitions, passage-count scope and the signed inverse
+condition number (SICN) explanation are available on hover.
 
 Every queue retains its submitted project snapshot. Progress identifies the
 active row and position in the queue, while the terminal retains live output

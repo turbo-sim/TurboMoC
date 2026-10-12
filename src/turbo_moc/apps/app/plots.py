@@ -6,13 +6,21 @@ from ...geometry.geometry_3d import section_data, meridional_grid
 BLADE_FILL = "#b8bec2"
 EDGE = "#171c1f"
 MESH_EDGE = "orange"
+APP_FONT = dict(family="Segoe UI, Arial, sans-serif", color="#233c46", size=12)
 
 
 def figure(title, x, y):
+    # Expandable groups provide visible titles; retain this identity for zoom.
     result = go.Figure()
-    result.update_layout(title=title, xaxis_title=x, yaxis_title=y,
-        template="plotly_white", margin=dict(l=55, r=20, t=55, b=45),
-        uirevision=title, showlegend=False)
+    result.update_layout(xaxis_title=x, yaxis_title=y,
+        template="plotly_white", margin=dict(l=55, r=20, t=48, b=45),
+        font=APP_FONT, uirevision=title, showlegend=False)
+    axes = dict(showline=True, mirror="allticks", linecolor="#526d79", linewidth=1,
+        ticks="inside", ticklen=5, tickwidth=1, tickcolor="#526d79",
+        tickformat=".2f", exponentformat="none", showexponent="none",
+        gridcolor="#e4ebee", zeroline=False, title_font={**APP_FONT, "size": 13})
+    result.update_xaxes(**axes)
+    result.update_yaxes(**axes)
     result.update_yaxes(scaleanchor="x", scaleratio=1)
     return result
 
@@ -109,7 +117,6 @@ def assembly_section_figure(project, views, *, mesh=False):
     Entries contain (id, label, Design, section-or-None, edge width). A single
     row keeps its original axes; multirow plots share the assembly chart.
     """
-    from ... import configuration_project as projects
     views = list(views)
     if not views:
         result = section_mesh_placeholder("Blade-to-blade mesh") if mesh else figure(
@@ -123,9 +130,6 @@ def assembly_section_figure(project, views, *, mesh=False):
             section_figure(design, offset=offsets[row_id], label=label))
         if result is None:
             result = figure(*_section_axes(design, mesh=mesh))
-            if len(projects.active_rows(project)) > 1:
-                result.update_layout(title=("Machine blade-to-blade mesh" if mesh else
-                    "Machine blade-to-blade geometry") + " · η = 0.5")
         if mesh:
             indices[row_id] = len(result.data)
         result.add_traces(local.data)
@@ -341,8 +345,14 @@ def histogram(name, metric):
     result = go.Figure(go.Bar(x=(bins[:-1] + bins[1:]) / 2,
         y=metric["counts"], width=0.94 * np.diff(bins),
         marker=dict(color="#376a7d", line=dict(width=0))))
-    result.update_layout(title=name.replace("_", " ").title(), height=225,
-        template="plotly_white", margin=dict(l=45, r=15, t=40, b=35), yaxis_title="Cells")
+    result.update_layout(height=245,
+        template="plotly_white", font=APP_FONT,
+        margin=dict(l=48, r=15, t=15, b=42), yaxis_title="Cells", bargap=0)
+    axes = dict(showline=True, mirror="allticks", linecolor="#526d79", linewidth=1,
+        ticks="inside", ticklen=5, tickcolor="#526d79", gridcolor="#e4ebee", zeroline=False,
+        title_font=APP_FONT)
+    result.update_xaxes(**axes, tickformat=".2f")
+    result.update_yaxes(**axes, tickformat=",.0f", rangemode="tozero")
     if name == "aspect_ratio":
         result.update_xaxes(type="log")
     return result

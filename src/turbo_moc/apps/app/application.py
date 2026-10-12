@@ -16,7 +16,7 @@ from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, 
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
-from . import workflow as flow, plots, project_export, calculations, rotor_inlet, blade_counts, display_panel
+from . import workflow as flow, plots, project_export, calculations, rotor_inlet, blade_counts, display_panel, mesh_reporting
 from ...meshing import meshing_3d as mesh
 from ... import configuration_project as project_model
 from ...configuration_rotor import default_axial_interspace_mm, SPEED_TYPES
@@ -50,7 +50,8 @@ def fluid_dropdown(identifier, value):
 def fluid_inlet_controls(parameters, prefix, row_id, *, rotor=False):
     values = inlet_values(parameters, rotor=rotor)
     pair = values["inlet_property_pair"]
-    result = [html.Label([html.Span("Inlet property pair"), dcc.Dropdown(
+    result = [html.Label([html.Span("Relative inlet stagnation property pair" if rotor else
+            "Inlet stagnation property pair"), dcc.Dropdown(
             id={"type": "parameter", "row": row_id, "path": f"{prefix}.inlet_property_pair"},
             options=[{"label": f"{name.removesuffix('_INPUTS')} — " + " / ".join(
                 PROPERTIES[prop][0] for prop in pair_properties(name)), "value": name}
@@ -63,8 +64,6 @@ def fluid_inlet_controls(parameters, prefix, row_id, *, rotor=False):
                 "path": f"{prefix}.inlet_property_{index}"},
                 value=values[f"inlet_property_{index}"], type="number", debounce=True,
                 step="any")], className="control fluid-property"))
-    result.append(html.Small("Specify the stagnation state" +
-        (" in the rotor-relative frame." if rotor else ".")))
     return result
 
 
@@ -293,7 +292,7 @@ def sidebar(project):
             title = "Assembly placement" if len(project_model.active_rows(project)) > 1 else "Assembly placement · display only"
             fields.append(group(title, controls(visible, "placement", identifier)))
         result.append(html.Details([html.Summary(row_label(row)), *fields],
-            open=True, className="settings design row-settings", **{"data-row": identifier}))
+            open=False, className="settings design row-settings", **{"data-row": identifier}))
         config = project_model.row_configuration(project, identifier)
         numerics = config["mesh"]["numerics"]
         section = {k: v for k, v in numerics.items() if k not in ("span_layers", "span_stretch")}
@@ -309,7 +308,7 @@ def sidebar(project):
                     if k != "enabled"}, "mesh.cgns", identifier)),
             ]
         result.append(html.Details([html.Summary(row_label(row)), *mesh_fields],
-            open=True, className="settings mesh row-settings", **{"data-row": identifier}))
+            open=False, className="settings mesh row-settings", **{"data-row": identifier}))
     return result
 
 
@@ -319,7 +318,28 @@ def empty(title):
 
 def viewport(name):
     return html.Div([html.Div(id=f"{name}-scene", className="vtk-host"),
-        html.Small(id=f"{name}-note")], className="vtk-frame")
+        html.Small(id=f"{name}-note", style={"display": "none"})], className="vtk-frame")
+
+
+def row_controls(project, row):
+    options = calculations.scope_options(project)
+    return html.Div([
+        html.H3("Calculation and display", className="sidebar-box-title"),
+        html.Label([html.Span("Calculate"),
+            dcc.Dropdown(id="calculation-scope", clearable=False, searchable=False,
+                value="all", options=[{"label": "All rows", "value": "all"}, *options])],
+            id="calculation-controls", className="control",
+            title="Selected rows calculate sequentially in machine order. Show is independent."),
+        html.Label([html.Span("Show"),
+            dcc.Dropdown(id="plot-scope", clearable=False, searchable=False, value="all",
+                options=[{"label": "All rows", "value": "all"}, *options])],
+            className="control", title="Show these rows in every 2D and 3D geometry and mesh plot."),
+        # Internal workflow state; report and display configuration have their
+        # own independent selectors.
+        html.Div([dcc.Checklist(id="plotted-rows", value=[item["value"] for item in options], options=options),
+            dcc.Dropdown(id="selected-row", clearable=False, value=row["id"], options=options)],
+            style={"display": "none"}),
+    ], id="interspace-note", className="scope-settings")
 
 
 @lru_cache(maxsize=8)
@@ -365,17 +385,13 @@ def report_panel(summary, report):
     cells = sum(summary["cells"].values())
     rows = [("Volume cells", f"{cells:,}"), ("Volume nodes", f"{summary['volume_nodes']:,}"),
             ("Span layers", len(summary["span_stations"]) - 1),
-            ("Minimum SICN", f"{summary['quality']['min_sicn']:.4g}"),
+            (mesh_reporting.SICN_LABEL, f"{summary['quality']['min_sicn']:.4g}"),
             ("3D time [s]", f"{summary['elapsed_s']:.2f}")]
-    table = html.Table([html.Tbody([html.Tr([html.Td(k), html.Td(str(v))]) for k, v in rows])])
-    quality = html.Table([html.Thead(html.Tr([html.Th(v) for v in ("Metric", "Min", "Mean", "Max")])),
-        html.Tbody([html.Tr([html.Td(n.replace("_", " ")), *[html.Td(f"{m[v]:.3g}")
-            for v in ("min", "mean", "max")]]) for n, m in report["metrics"].items()])])
-    result = [html.H3("Actual volume mesh"), table, quality]
-    for name in ("skewness", "orthogonality", "aspect_ratio"):
-        result += [dcc.Graph(figure=plots.histogram(name, report["metrics"][name]),
-                             config={"displayModeBar": False}),
-                   html.Small(report["definitions"][name])]
+    table = html.Table([html.Tbody([html.Tr([html.Td(k,
+        title=mesh_reporting.SICN_TIP if k == mesh_reporting.SICN_LABEL else None), html.Td(str(v))])
+        for k, v in rows])], className="report-table")
+    result = [table, mesh_reporting.metric_table(report["metrics"], report["definitions"]),
+        mesh_reporting.histogram_row(report["metrics"], report["definitions"])]
     result += [html.Details([html.Summary("Worst cells · original Gmsh IDs"),
         *[html.P(n + ": " + ", ".join(f"{c['cell_id']} ({c['value']:.3g})" for c in cells))
           for n, cells in report["worst_cells"].items()]])]
@@ -421,6 +437,7 @@ def create_app(config_file=None, output_dir=None):
                 className="authorship", id="authorship")]),
             html.Div([html.Aside([
                 html.Div([
+                    html.H3("Configuration files", className="sidebar-box-title"),
                     html.Div([
                         dcc.Upload(id="configuration-upload", accept=".yaml,.yml", multiple=False,
                             children=html.Button("Load configuration", id="load-configuration")),
@@ -429,45 +446,30 @@ def create_app(config_file=None, output_dir=None):
                     html.Small(id="configuration-message"),
                 ], className="configuration-settings"),
                 html.Div([
+                    html.H3("Machine setup", className="sidebar-box-title"),
                     html.Label([html.Span("Design mode"), dcc.Dropdown(id="design-mode", clearable=False,
                         value=project["machine"]["design_mode"], options=[
                             {"label": "Stator only", "value": "stator"},
                             {"label": "Rotor only", "value": "rotor"},
                             {"label": "Stator + Rotor", "value": "stator_rotor"}])], className="control"),
-                    html.Label([html.Span("Machine geometry"), dcc.Dropdown(id="machine-family", clearable=False,
+                    html.Label([html.Span("Machine type"), dcc.Dropdown(id="machine-family", clearable=False,
                         value=project["machine"]["geometry_type"], options=[
                             {"label": "Linear cascade", "value": "linear"},
-                            {"label": "Axial", "value": "axial"},
-                            {"label": "Radial", "value": "radial"}])], className="control"),
+                            {"label": "Axial flow", "value": "axial"},
+                            {"label": "Radial flow", "value": "radial"}])], className="control"),
                     html.Label([html.Span("Working fluid"), fluid_dropdown(
                         MACHINE_FLUID_ID, project["machine"]["fluid_name"])],
-                        className="control fluid-selector"),
+                        className="control"),
                     html.Small(id="machine-note"),
                 ], className="project-settings"),
+                row_controls(project, row),
                 html.Div(id="settings", children=sidebar(project)),
-                html.Small("Flow inputs: SI. Geometry: mm. Each field belongs to its named blade row."),
-            ], id="sidebar"), html.Main([
+            ], id="sidebar"), html.Div(id="sidebar-divider", className="sidebar-divider", role="separator",
+                tabIndex=0, title="Drag to resize sidebar", **{"aria-label": "Resize sidebar",
+                    "aria-orientation": "vertical", "aria-controls": "sidebar"}), html.Main([
                 dcc.Tabs(id="workspace", value="design", children=[
                     dcc.Tab(label="Geometry generation", value="design"),
                     dcc.Tab(label="Mesh generation", value="mesh")]),
-                html.Div([
-                    html.Div([html.Label("Apply calculations to"),
-                        dcc.Checklist(id="calculation-scope", inline=True,
-                            value=[r["id"] for r in project_model.active_rows(project)],
-                            options=calculations.scope_options(project), className="row-checklist")],
-                        id="calculation-controls", className="row-control-group",
-                        title="Checked rows calculate sequentially in machine order. Plot visibility is independent."),
-                    html.Div([html.Label("Plot rows"),
-                        dcc.Checklist(id="plotted-rows", inline=True,
-                            value=[r["id"] for r in project_model.active_rows(project)],
-                            options=calculations.scope_options(project), className="row-checklist")],
-                        className="row-control-group",
-                        title="Show these rows in the geometry and mesh diagrams. Hiding a row preserves its results."),
-                    html.Div([html.Label("Inspect row"),
-                        dcc.Dropdown(id="selected-row", clearable=False, value=row["id"],
-                            options=calculations.scope_options(project))], className="row-control-group row-inspector",
-                        title="Choose the row for the mesh quality report. Plot rows controls every geometry and mesh diagram."),
-                ], id="interspace-note", className="row-controls"),
                 html.Div(id="validation", className="message"),
                 html.Div([html.Div([html.Button(label, id=name, n_clicks=0,
                     disabled=name=="cancel") for name, label in zip(ACTIONS,
@@ -481,29 +483,32 @@ def create_app(config_file=None, output_dir=None):
                 html.Div(id="project-download-message", className="message"),
                 html.Div([dcc.Loading(html.Div([
                     html.Section([
-                        html.Details([html.Summary("Blade-to-blade and machine geometry"), html.Div([
+                        html.Details([html.Summary("Blade-to-blade and meridional channel geometry"), html.Div([
                             html.Div([dcc.Graph(id="design-section", figure=empty("Selected blade row"),
-                                className="engineering-plot"), html.Small(id="design-basis")], className="pane"),
+                                config={"displaylogo": False}, className="engineering-plot"), html.Small(id="design-basis", style={"display": "none"})], className="pane"),
                             html.Div([dcc.Graph(id="meridional_channel", figure=empty("Machine geometry"),
-                                className="engineering-plot"), html.Small(id="assembly-basis")], className="pane"),
+                                config={"displaylogo": False}, className="engineering-plot"), html.Small(id="assembly-basis", style={"display": "none"})], className="pane"),
                         ], className="split")], open=True, className="plot-group"),
-                        html.Details([html.Summary("Three-dimensional machine geometry"),
+                        html.Details([html.Summary("Three dimensional geometry"),
                             *display_panel.view(project, "geometry", viewport("geometry"))],
                             open=True, className="plot-group", id="geometry-details"),
                     ], id="design-panel"),
                     html.Section([
-                        html.Details([html.Summary("Reference section and span discretization"), html.Div([
+                        html.Details([html.Summary("Blade-to-blade and meridional channel mesh"), html.Div([
                             html.Div([dcc.Graph(id="reference-plot", figure=plots.section_mesh_placeholder("2D reference mesh"),
-                                className="engineering-plot"), html.Small(id="reference-basis")], className="pane"),
+                                config={"displaylogo": False}, className="engineering-plot"), html.Small(id="reference-basis", style={"display": "none"})], className="pane"),
                             html.Div([dcc.Graph(id="meridional-plot", figure=empty("Span grid projection"),
-                                className="engineering-plot"), html.Small(id="meridional-basis")], className="pane"),
+                                config={"displaylogo": False}, className="engineering-plot"), html.Small(id="meridional-basis", style={"display": "none"})], className="pane"),
                         ], className="split")], open=True, className="plot-group"),
-                        html.Details([html.Summary("Three-dimensional mesh · selected-row quality"),
+                        html.Details([html.Summary("Three dimensional mesh"),
                             *display_panel.view(project, "mesh", viewport("mesh")),
-                            html.Div(id="volume-status", className="message"),
-                            html.Details([html.Summary("Selected-row mesh quality"),
+                            html.Div(id="volume-status", className="message")], open=True, className="plot-group", id="mesh-details"),
+                        html.Details([html.Summary("Mesh quality report"),
+                                html.Div([html.Label("Report", htmlFor="report-scope"), dcc.Dropdown(id="report-scope", value="all",
+                                    options=[{"label": "Total", "value": "all"}, *calculations.scope_options(project)],
+                                    clearable=False, searchable=False)], className="report-controls"),
                                 html.Aside(id="report", children="Generate a 3D mesh to see its report.", className="report")],
-                                open=True, className="mesh-quality")], open=True, className="plot-group", id="mesh-details"),
+                                open=True, className="plot-group mesh-quality", id="mesh-quality-details"),
                     ], id="mesh-panel"),
                 ], id="views"), type="circle", delay_show=300)],
                     className="content-scroll"),
@@ -592,25 +597,18 @@ def create_app(config_file=None, output_dir=None):
 
     @app.callback(Output("calculation-scope", "options"), Output("calculation-scope", "value"),
         Output("plotted-rows", "options"), Output("plotted-rows", "value"),
-        Input("base-project", "data"), State("calculation-scope", "value"),
-        State("plotted-rows", "value"), State("plotted-rows", "options"))
-    def calculation_scope(project, scope, plotted, previous_options):
+        Output("plot-scope", "options"), Output("plot-scope", "value"),
+        Output("report-scope", "options"), Output("report-scope", "value"),
+        Input("base-project", "data"), Input("plot-scope", "value"),
+        State("calculation-scope", "value"), State("report-scope", "value"))
+    def calculation_scope(project, plotted, scope, report):
         options = calculations.scope_options(project)
-        available = {item["value"] for item in options}
-        old = {item["value"] for item in (previous_options or [])}
-        # Preserve deliberate empty selections during settings edits, but make
-        # newly activated rows visible and selected by default.
-        def reconcile(values):
-            chosen = set(values or []) | (available - old)
-            return [item["value"] for item in options if item["value"] in chosen]
-        return options, reconcile(scope), options, reconcile(plotted)
-
-    @app.callback(Output("selected-row", "value", allow_duplicate=True),
-        Input("plotted-rows", "value"), State("selected-row", "value"),
-        State("base-project", "data"), prevent_initial_call=True)
-    def visible_inspector(plotted, selected, project):
-        visible = [r["id"] for r in project_model.active_rows(project) if r["id"] in (plotted or [])]
-        return visible[0] if visible and selected not in visible else no_update
+        available = {"all", *[item["value"] for item in options]}
+        scope, plotted, report = [value if value in available else "all" for value in (scope, plotted, report)]
+        ids = [item["value"] for item in options if plotted == "all" or item["value"] == plotted]
+        return ([{"label": "All rows", "value": "all"}, *options], scope, options, ids,
+            [{"label": "All rows", "value": "all"}, *options], plotted,
+            [{"label": "Total", "value": "all"}, *options], report)
 
     @app.callback(Output("loaded-project", "data"), Output("configuration-download", "data"),
         Output("configuration-message", "children"),
@@ -660,7 +658,7 @@ def create_app(config_file=None, output_dir=None):
                 if state and not state.get("valid") else "")
         if mode == "stator_rotor" and family == "linear":
             family = "axial"
-            note += " Stator + Rotor uses an annular machine; Axial selected."
+            note += " Stator + Rotor uses an annular machine; Axial flow selected."
         # Change the family first: a combined project cannot validate as linear.
         if mode != "stator_rotor":
             project = project_model.set_design_mode(project, mode)
@@ -670,7 +668,7 @@ def create_app(config_file=None, output_dir=None):
         identifiers = [r["id"] for r in rows]
         selected = selected if selected in identifiers else identifiers[0]
         options = [{"label": label, "value": value, "disabled": mode=="stator_rotor" and value=="linear"}
-            for label, value in (("Linear cascade", "linear"), ("Axial", "axial"), ("Radial", "radial"))]
+            for label, value in (("Linear cascade", "linear"), ("Axial flow", "axial"), ("Radial flow", "radial"))]
         return project, sidebar(project), [{"label": row_label(r), "value": r["id"]} for r in rows], selected, options, family, mode, note
 
     @app.callback(Output("config", "data"), Output("validation", "children"),
@@ -850,7 +848,7 @@ def create_app(config_file=None, output_dir=None):
             basis = ("Shared midspan conformal chart: m′ starts at the first active row's leading edge; "
                 "physical interspace and angular phase are included. " if len(active) > 1 else "") + " ".join(basis_notes)
         elif not visible:
-            basis = "Check a row under Plot rows to display its geometry."
+            basis = "Select a row under Show to display its geometry."
         note = ("Shared machine view. Adjacent row domains meet at the marked physical interface; "
                 "3D CGNS meshes use this assembly placement. Each row remains a separate mesh; "
                 "solver interface coupling is configured in the CFD solver." if interfaces else
@@ -909,7 +907,7 @@ def create_app(config_file=None, output_dir=None):
                     span_patch["data"][index]["line"]["width"] = widths[row_id]
             section_patch["layout"]["meta"]["widths"] = widths
             return section_patch, span_patch, no_update, no_update
-        basis = "Generate an up-to-date 2D mesh for a plotted row." if visible else "Check a row under Plot rows to display its mesh."
+        basis = "Generate an up-to-date 2D mesh for a plotted row." if visible else "Select a row under Show to display its mesh."
         entries, section_entries, basis_notes = [], [], []
         for row, config, reference, _ in available:
             section, design = reference_artifact(reference["session"], reference["job"])
@@ -940,16 +938,17 @@ def create_app(config_file=None, output_dir=None):
         return section_plot, span_plot, basis, span_basis
 
     @app.callback(Output("volume-data", "data"), Output("report", "children"),
-        Input("config", "data"), Input("row-references", "data"), Input("plotted-rows", "value"))
-    def mesh_view(state, registry, visible=None):
+        Input("config", "data"), Input("row-references", "data"), Input("report-scope", "value"))
+    def mesh_view(state, registry, scope="all"):
         if not state or not state.get("valid"):
             return None, "Correct the configuration before inspecting the mesh."
-        datasets, selected_report = [], "Generate a 3D mesh for the selected row to see its report."
-        if visible is not None and state["row_id"] not in visible:
-            selected_report = "Check the inspected row under Plot rows to show its quality report."
-        for row in project_model.active_rows(state["project"]):
+        datasets, entries, issues = [], [], []
+        selected_report = "Generate a 3D mesh for this row to see its report."
+        rows = project_model.active_rows(state["project"])
+        for row in rows:
             reference = (registry or {}).get(row["id"], {}).get("volume")
             if not reference:
+                issues.append((row_label(row), "not generated"))
                 continue
             try:
                 surfaces, summary, report = volume_artifact(reference["session"], reference["job"])
@@ -970,11 +969,22 @@ def create_app(config_file=None, output_dir=None):
                     cfg = project_model.row_configuration(state["project"], row["id"])
                     dataset["num_blades"] = definition.get("num_blades", cfg["meridional_channel"]["num_blades"])
                 datasets.append(dataset)
-                if row["id"] == state["row_id"] and (visible is None or row["id"] in visible):
-                    selected_report = report_panel(summary, report)
+                status = mesh_reporting.mesh_status(state["project"], row, registry)
+                if scope == "all":
+                    arrays = mesh_reporting.metric_arrays(str(flow.directory(reference) / "volume_data.npz"))
+                    entries.append({"id": row["id"], "label": row_label(row), "status": status,
+                        "summary": summary, "report": report, "arrays": arrays})
+                elif row["id"] == scope:
+                    selected_report = [html.H3(row_label(row)), *([html.Div(
+                        "Outdated mesh: regenerate for the current settings.", className="message")]
+                        if status != "Current" else []), *report_panel(summary, report)]
             except (OSError, ValueError, KeyError) as exc:
-                if row["id"] == state["row_id"]:
+                issues.append((row_label(row), f"unavailable: {exc}"))
+                if row["id"] == scope:
                     selected_report = str(exc)
+        if scope == "all":
+            selected_report = mesh_reporting.total_panel(
+                [{"id": row["id"], "label": row_label(row)} for row in rows], entries, issues)
         key = flow.digest([(d["id"], d["job"], d["placement"]) for d in datasets])
         return {"key": key, "rows": datasets}, selected_report
 
@@ -1064,10 +1074,6 @@ def create_app(config_file=None, output_dir=None):
         Input("calculation-scope", "value"))
     def readiness(state, registry, handle, completed, launching, scope=None):
         busy = bool(launching or (handle and completed != handle["job"]))
-        supported = bool(state and state.get("valid") and state.get("supported"))
-        refs = selected_references(state, registry)
-        current = {stage: supported and flow.current(refs.get(stage), state[stage])
-                   for stage in ("nozzle", "reference", "volume")}
         available, reasons = [], []
         for action in ("nozzle", "reference", "volume"):
             try:
@@ -1081,15 +1087,19 @@ def create_app(config_file=None, output_dir=None):
                 reasons.append(str(exc))
         disabled = (*(busy or not value for value in available), not busy)
         message = ""
-        if refs.get("volume") and not current["volume"]:
-            message = "Displayed mesh belongs to an earlier configuration; regenerate it to obtain an updated CGNS mesh."
+        if state and state.get("valid"):
+            outdated = [row_label(row) for row in project_model.active_rows(state["project"])
+                if (registry or {}).get(row["id"], {}).get("volume")
+                and mesh_reporting.mesh_status(state["project"], row, registry) != "Current"]
+            if outdated:
+                message = f"Outdated volume meshes: {', '.join(outdated)}. Regenerate for the current settings."
         scope_note = "Select a valid calculation scope."
         if state and state.get("valid"):
             try:
                 selected_rows = calculations.scoped_rows(state["project"], scope if scope is not None else state["row_id"])
                 scope_note = f"Calculations: {' + '.join(row_label(row) for row in selected_rows)}."
             except ValueError:
-                scope_note = "Check at least one row to calculate."
+                scope_note = "Select an active row to calculate."
             scope_note += " Rows run in machine order; plot visibility is independent."
             reason = next((item for item in reasons if item), "")
             if reason:

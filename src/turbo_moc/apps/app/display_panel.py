@@ -32,24 +32,18 @@ def limit(row, pane, data=None):
 
 def defaults(row):
     colors = {**COLORS, "blade": "#ef8c26" if row["role"] == "rotor" else COLORS["blade"]}
-    return {"visible": True, "copies": min(limit(row, "geometry"), row["mesh"]["matplotlib"]["num_blades"]),
+    return {"copies": min(limit(row, "geometry"), row["mesh"]["matplotlib"]["num_blades"]),
             "surfaces": [name for name, chosen in row["mesh"]["pyvista"]["surfaces"].items() if chosen],
             "colors": colors, "edges": row["mesh"]["pyvista"]["show_mesh_edges"]}
 
 
 def content(project, pane, preferences=None):
-    toolbar, editors = [], []
+    editors = []
     for row in projects.active_rows(project):
         row_id = row["id"]
         settings = (preferences or {}).get(row_id, defaults(row))
         maximum = limit(row, pane)
         count = min(maximum, max(1, settings["copies"]))
-        toolbar.append(html.Div([
-            dcc.Checklist(id=identifier("visible", pane, row_id), options=[{"label": label(row), "value": "visible"}],
-                value=["visible"] if settings["visible"] else [], inline=True),
-            html.Button("⚙ Display", id=identifier("open", pane, row_id), n_clicks=0,
-                title=f"{label(row)} display settings"),
-        ], className="cascade-display-button"))
         surfaces = []
         linear = project["machine"]["geometry_type"] == "linear"
         for name in BOUNDARIES:
@@ -65,9 +59,6 @@ def content(project, pane, preferences=None):
                        "data-color": color, "data-color-label": f"{label(row)} {text} color"}),
             ], className="display-surface-row"))
         editors.append(html.Section([
-            html.Div([html.Strong(f"{label(row)} display"), html.Button("×", n_clicks=0,
-                id=identifier("close", pane, row_id), title="Close display panel", **{"aria-label": "Close display panel"})],
-                className="display-panel-header"),
             html.Label([html.Span("Displayed blades"), dcc.Input(id=identifier("copies", pane, row_id),
                 type="number", min=1, max=maximum, step=1, value=count, debounce=True)], className="control",
                 title="Display copies only; the physical blade count and exported mesh are unchanged."),
@@ -79,65 +70,77 @@ def content(project, pane, preferences=None):
                 className="display-presets"),
             html.Div(surfaces, className="display-surfaces"),
             *([dcc.Checklist(id=identifier("edges", pane, row_id), options=[{"label": "Mesh edges", "value": "edges"}],
-                value=["edges"] if settings["edges"] else []),
-                html.Button("Copy from geometry", id=identifier("preset", pane, row_id, action="copy"), n_clicks=0)]
+                value=["edges"] if settings["edges"] else [])]
               if pane == "mesh" else []),
         ], id=identifier("editor", pane, row_id), style={"display": "none"}))
-    return toolbar, editors
+    return editors
 
 
 def view(project, pane, viewport):
     preferences = {row["id"]: defaults(row) for row in projects.active_rows(project)}
-    toolbar, editors = content(project, pane, preferences)
-    return [dcc.Store(id=f"{pane}-display", data=preferences), dcc.Store(id=f"{pane}-display-row"),
-        html.Div(toolbar, id=f"{pane}-display-toolbar", className="cascade-display-toolbar"),
-        html.Div([viewport, html.Aside(editors, id=f"{pane}-display-panel", className="display-panel",
+    rows = projects.active_rows(project)
+    return [dcc.Store(id=f"{pane}-display", data=preferences), dcc.Store(id=f"{pane}-display-open", data=False),
+        html.Div(html.Button("Configure display", id=f"{pane}-configure-display", n_clicks=0,
+            title="Choose a blade row and configure its displayed blades, surfaces and colors."),
+            className="cascade-display-toolbar"),
+        html.Div([viewport, html.Aside([
+            html.Div([html.Strong("Configure display"), html.Button("×", id=f"{pane}-close-display", n_clicks=0,
+                title="Close display panel", **{"aria-label": "Close display panel"})], className="display-panel-header"),
+            html.Label([html.Span("Blade row"), dcc.Dropdown(id=f"{pane}-display-row", clearable=False, searchable=False,
+                value=rows[0]["id"], options=[{"label": label(row), "value": row["id"]} for row in rows])],
+                className="control display-row-selector", title="Configure this row without changing which rows are shown."),
+            html.Div(content(project, pane, preferences), id=f"{pane}-display-editors"),
+        ], id=f"{pane}-display-panel", className="display-panel",
             style={"display": "none"})], className="display-viewport")]
 
 
 def register(app, pane):
-    @app.callback(Output(f"{pane}-display-toolbar", "children"), Output(f"{pane}-display-panel", "children"),
-        Input("base-project", "data"), State(f"{pane}-display", "data"))
-    def structure(project, preferences):
-        return content(project, pane, preferences)
+    @app.callback(Output(f"{pane}-display-editors", "children"), Output(f"{pane}-display-row", "options"),
+        Output(f"{pane}-display-row", "value"), Input("base-project", "data"),
+        State(f"{pane}-display", "data"), State(f"{pane}-display-row", "value"))
+    def structure(project, preferences, selected):
+        rows = projects.active_rows(project)
+        selected = selected if selected in {row["id"] for row in rows} else rows[0]["id"]
+        return content(project, pane, preferences), [{"label": label(row), "value": row["id"]} for row in rows], selected
 
     @app.callback(Output(identifier("editor", pane, ALL), "style"), Output(f"{pane}-display-panel", "style"),
-        Output(f"{pane}-display-row", "data"), Input(identifier("open", pane, ALL), "n_clicks"),
-        Input(identifier("close", pane, ALL), "n_clicks"), State(identifier("editor", pane, ALL), "id"),
-        State(f"{pane}-display-row", "data"))
-    def open_panel(opens, closes, identifiers, selected):
+        Output(f"{pane}-display-open", "data"), Input(f"{pane}-configure-display", "n_clicks"),
+        Input(f"{pane}-close-display", "n_clicks"), Input(f"{pane}-display-row", "value"),
+        Input(identifier("editor", pane, ALL), "id"), State(f"{pane}-display-open", "data"))
+    def open_panel(opens, closes, selected, identifiers, opened):
         triggered = ctx.triggered_id
-        if isinstance(triggered, dict) and any(opens if triggered["type"] == "display-open" else closes):
-            selected = triggered["row"] if triggered["type"] == "display-open" else None
-        if selected not in {item["row"] for item in identifiers}:
-            selected = None
+        if triggered == f"{pane}-configure-display" and opens:
+            opened = True
+        elif triggered == f"{pane}-close-display" and closes:
+            opened = False
+        opened = bool(opened and selected in {item["row"] for item in identifiers})
         return ([{} if item["row"] == selected else {"display": "none"} for item in identifiers],
-                {} if selected else {"display": "none"}, selected)
+                {} if opened else {"display": "none"}, opened)
 
     @app.callback(Output(f"{pane}-display", "data"),
-        Input(identifier("copies", pane, ALL), "value"), Input(identifier("visible", pane, ALL), "value"),
+        Input(identifier("copies", pane, ALL), "value"),
         Input(identifier("surface", pane, ALL, surface=ALL), "value"),
         Input(identifier("color", pane, ALL, surface=ALL), "data"),
         *([Input(identifier("edges", pane, ALL), "value")] if pane == "mesh" else []),
-        State(identifier("copies", pane, ALL), "id"), State(identifier("visible", pane, ALL), "id"),
+        State(identifier("copies", pane, ALL), "id"),
         State(identifier("surface", pane, ALL, surface=ALL), "id"), State(identifier("color", pane, ALL, surface=ALL), "id"),
         *([State(identifier("edges", pane, ALL), "id")] if pane == "mesh" else []),
         State(f"{pane}-display", "data"), State("base-project", "data"))
     def preferences(*args):
-        size = 5 if pane == "mesh" else 4
+        size = 4 if pane == "mesh" else 3
         values, identifiers = args[:size], args[size:2 * size]
         saved, project = args[-2:]
         result = deepcopy(saved or {})
         for row in projects.active_rows(project):
             result.setdefault(row["id"], defaults(row))
-        for group, ids, field in zip(values, identifiers, ("copies", "visible", "surfaces", "colors", "edges")):
+        for group, ids, field in zip(values, identifiers, ("copies", "surfaces", "colors", "edges")):
             for value, item in zip(group or [], ids or []):
                 settings = result.get(item["row"])
                 if settings is None:
                     continue
                 if field == "copies" and value is not None:
                     settings[field] = max(1, int(value))
-                elif field in ("visible", "edges"):
+                elif field == "edges":
                     settings[field] = bool(value)
                 elif field == "surfaces":
                     selected = set(settings[field])
@@ -179,8 +182,8 @@ def register(app, pane):
         Input(identifier("preset", pane, MATCH, action=ALL), "n_clicks"),
         State(identifier("surface", pane, MATCH, surface=ALL), "id"),
         State(identifier("color", pane, MATCH, surface=ALL), "id"), State("config", "data"),
-        State("volume-data", "data"), State("geometry-display", "data"), prevent_initial_call=True)
-    def preset(clicks, surfaces, colors, state, data, geometry):
+        State("volume-data", "data"), prevent_initial_call=True)
+    def preset(clicks, surfaces, colors, state, data):
         item = ctx.triggered_id
         if not isinstance(item, dict) or not state or not state.get("project"):
             return (no_update,) * (4 if pane == "mesh" else 3)
@@ -188,10 +191,7 @@ def register(app, pane):
         settings = defaults(row)
         action = item["action"]
         selected = ["blade"] if action == "blade" else list(BOUNDARIES) if action == "surfaces" else settings["surfaces"]
-        if action == "copy":
-            settings = (geometry or {}).get(item["row"], settings)
-            selected = settings["surfaces"]
-        reset = action in ("reset", "copy")
+        reset = action == "reset"
         return ([no_update if action == "copies" else [i["surface"]] if i["surface"] in selected else [] for i in surfaces],
                 [settings["colors"][i["surface"]] if reset else no_update for i in colors],
                 limit(row, pane, data) if action == "copies" else settings["copies"] if reset else no_update,

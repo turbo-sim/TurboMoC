@@ -14,8 +14,13 @@ header h2 {font-size:22px;font-weight:600;letter-spacing:.3px;margin:0}
 .authorship strong {font-size:12px;font-weight:600}
 .authorship:hover {color:white;text-decoration:underline}
 .shell {display:flex;flex:1;min-height:0;overflow:hidden}
-aside#sidebar {width:380px;min-width:320px;max-width:600px;flex-shrink:0;resize:horizontal;
+aside#sidebar {width:380px;min-width:320px;max-width:600px;flex-shrink:0;
   overflow:auto;background:#e8eef1;padding:14px;border-right:1px solid #d6e0e5}
+.sidebar-divider {flex:0 0 7px;cursor:col-resize;touch-action:none;background:#e8eef1;
+  border-right:1px solid #d6e0e5;transition:background .12s}
+.sidebar-divider:hover,.sidebar-divider:focus-visible,body.sidebar-resizing .sidebar-divider {background:#9ab2bd}
+.sidebar-divider:focus-visible {outline:2px solid #376a7d;outline-offset:-2px}
+body.sidebar-resizing,body.sidebar-resizing * {cursor:col-resize!important;user-select:none!important}
 main {min-width:0;flex:1;padding:12px 16px;display:flex;flex-direction:column;min-height:0}
 .content-scroll {flex:1;min-height:0;overflow:auto;padding-right:3px;scrollbar-gutter:stable}
 .settings {display:none;background:white;border:1px solid #dfe7eb;border-radius:7px;
@@ -23,6 +28,10 @@ main {min-width:0;flex:1;padding:12px 16px;display:flex;flex-direction:column;mi
 .active-design .design,.active-mesh .mesh {display:block}
 .project-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:0 12px 10px;margin-bottom:12px}
 .configuration-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:12px;margin-bottom:12px}
+.scope-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:0 12px;margin-bottom:12px}
+.sidebar-box-title {font-size:13px;font-weight:600;color:#233c46;margin:12px 0;
+  padding-bottom:8px;border-bottom:1px solid #e4ebee}
+.configuration-settings .sidebar-box-title {margin-top:0}
 .configuration-actions {display:flex;gap:8px}
 .configuration-actions > div,.configuration-actions > button {flex:1}
 .configuration-actions button {width:100%}
@@ -30,15 +39,9 @@ main {min-width:0;flex:1;padding:12px 16px;display:flex;flex-direction:column;mi
 .field-group {margin:10px 0;border-top:1px solid #e4ebee;padding-top:8px}
 .field-group > summary {font-size:12px}
 .placeholder {font-size:12px;color:#71838b;line-height:1.5}
-.row-controls {display:flex;align-items:center;gap:12px 24px;flex-wrap:wrap;
-  padding:8px 0 0;flex-shrink:0;font-size:12px}
-.row-control-group {display:flex;align-items:center;gap:9px;min-width:0}
-.row-control-group > label {white-space:nowrap;color:#526d79}
-.row-checklist {display:flex;align-items:center;flex-wrap:wrap;gap:5px 12px}
-.row-checklist label {display:inline-flex!important;align-items:center;gap:5px;white-space:nowrap}
-.row-checklist input {margin:0;accent-color:#376a7d;cursor:pointer}
-.row-inspector {margin-left:auto}
-.row-inspector > div {width:160px}
+.report-controls {display:flex;align-items:center;gap:12px;padding:8px 14px;border-bottom:1px solid #e4ebee;font-size:12px}
+.report-controls > label {color:#526d79}
+.report-controls > .dash-dropdown {width:180px}
 #workspace .tab {padding:10px 14px!important;font-size:13px}
 summary {cursor:pointer;font-weight:600;line-height:1.5}
 summary small {float:right;color:#71858e;font-weight:400;font-size:10px}
@@ -88,23 +91,29 @@ button:disabled {opacity:.4;cursor:default}
 .display-viewport {display:flex;align-items:stretch;min-width:0}
 .display-viewport > .vtk-frame {flex:1;min-width:0}
 .cascade-display-toolbar {display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid #e4ebee}
-.cascade-display-button {display:flex;align-items:center;gap:12px;font-size:12px}
-.cascade-display-button input {margin-right:6px;accent-color:#376a7d}
 .display-panel {flex:0 0 285px;width:285px;background:#fafcfc;border-left:1px solid #dfe7eb;
   padding:14px;overflow:auto;max-height:58vh;min-height:370px}
 .display-panel-header {display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .display-panel-header button {font-size:20px;padding:0 8px;border:none;background:transparent}
 .display-panel .control {grid-template-columns:minmax(0,1fr) 70px;gap:8px}
+.display-panel .display-row-selector {grid-template-columns:minmax(0,1fr) 150px}
 .display-presets {display:flex;gap:5px;flex-wrap:wrap;margin:12px 0}
 .display-presets button,.display-panel > section > button {font-size:11px;padding:6px 8px}
 .display-surface-row {display:flex;align-items:center;justify-content:space-between;padding:7px 0;
   border-bottom:1px solid #e4ebee;font-size:12px}
 .display-surface-row input[type=checkbox] {margin-right:7px;accent-color:#376a7d}
 .surface-color-picker input {width:32px;height:26px;padding:1px;border:1px solid #bacbd3;border-radius:4px;cursor:pointer}
-.display-panel > section > div:last-child,.display-panel > section > button:last-child {margin-top:12px}
-.mesh-quality {border-top:1px solid #e4ebee}
-.mesh-quality > summary {padding:10px 14px;font-size:12px}
+.display-panel section > div:last-child,.display-panel section > button:last-child {margin-top:12px}
 .mesh-quality .report {width:100%;max-width:none;min-width:0;height:auto;min-height:0;resize:none;border:none}
+.report-availability {margin:0 0 12px;font-size:12px;color:#233c46}
+.report-table {margin:0 0 18px;border:1px solid #dfe7eb}
+.report-table th {background:#e8eef1;font-weight:600}
+.report-table td,.report-table th {padding:9px 12px;vertical-align:middle}
+.report-table td:not(:first-child),.report-table th:not(:first-child) {text-align:right;font-variant-numeric:tabular-nums}
+.report-table tbody tr:nth-child(even) {background:#fafcfc}
+.metric-plots {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}
+.metric-plot {min-width:0;border:1px solid #dfe7eb;border-radius:5px;overflow:hidden;background:white}
+.metric-title {margin:0;padding:10px 12px;font-size:13px;font-weight:600;color:#233c46;border-bottom:1px solid #e4ebee}
 .vtk-frame small {padding:8px;line-height:1.5}
 .mesh-pane {flex:1;min-width:0;background:white;border:1px solid #dfe7eb;border-radius:7px}
 .report {width:355px;min-width:285px;max-width:50%;resize:horizontal;overflow:auto;height:58vh;
