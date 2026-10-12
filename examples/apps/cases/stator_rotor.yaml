@@ -9,6 +9,7 @@
 machine:
   design_mode: stator_rotor
   geometry_type: axial
+  fluid_name: Cyclopentane
 workflow:
   save_figures: true
   show_gmsh: true
@@ -19,9 +20,9 @@ rows:
   role: stator
   geometry:
     method_of_characteristics:
-      fluid_name: Cyclopentane
-      P0: 251300.0
-      Q0: 0.025
+      inlet_property_pair: PQ_INPUTS
+      inlet_property_1: 251300.0  # Stagnation pressure [Pa]
+      inlet_property_2: 0.025  # Vapor quality [kg/kg]
       p_back: 95000.0
       solver: conventional
       use_true_sauer_line: true
@@ -125,9 +126,9 @@ rows:
       num_blades: 31
     axial_interspace_mm: 3.0
     rotor_design:
-      fluid_name: Novec649
-      P0_rel: 500000.0
-      T0_rel: 400.0
+      inlet_property_pair: PT_INPUTS
+      inlet_property_1: 500000.0  # Manual relative stagnation pressure [Pa]
+      inlet_property_2: 400.0  # Manual relative stagnation temperature [K]
       M_inlet: 1.5
       M_outlet: 1.5
       M_lower: 1.05

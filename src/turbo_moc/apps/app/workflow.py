@@ -293,6 +293,11 @@ def edited_project(base, values, identifiers):
 
     project = deepcopy(base)
     for value, identifier in zip(values, identifiers):
+        if identifier["row"] == "" and identifier["path"] == "fluid_name":
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("machine.fluid_name requires a value.")
+            project["machine"]["fluid_name"] = value
+            continue
         row = get_row(project, identifier["row"])
         path = identifier["path"].split(".")
         if path[0] == "axial_interspace_mm" and row["geometry"]["meridional_channel"]["type"] != "axial":

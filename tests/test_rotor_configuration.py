@@ -69,7 +69,7 @@ def test_coupling_follows_active_order_and_retains_inputs_when_stator_is_hidden(
     assert projects.get_row(isolated, "moving")["geometry"]["inlet_coupling"]["mode"] == "stator_exit"
 
 
-@pytest.mark.parametrize("name,value", [("M_inlet", 1.0), ("P0_rel", -1), ("num_points", 2)])
+@pytest.mark.parametrize("name,value", [("M_inlet", 1.0), ("inlet_property_1", -1), ("num_points", 2)])
 def test_invalid_rotor_inputs_fail_before_numerical_jobs(name, value):
     project = projects.set_design_mode(projects.default_project(), "rotor")
     projects.get_row(project, "rotor_1")["geometry"]["rotor_design"][name] = value

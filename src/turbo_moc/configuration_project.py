@@ -15,6 +15,7 @@ from .configuration import normalize, validate_configuration, VIEW_DEFAULTS
 from .configuration_rotor import (
     default_axial_interspace_mm, normalize_rotor_geometry, validate_rotor_configuration,
 )
+from .fluid_inputs import INLET_FIELDS, inlet_values
 
 
 GEOMETRY_SECTIONS = (
@@ -52,6 +53,57 @@ def upstream_stator(project, row_id):
     return None
 
 
+def _normalize_fluid_inputs(project):
+    """Migrate row fluids and historical stagnation inputs to machine settings."""
+    machine = project.get("machine")
+    if not isinstance(machine, dict):
+        raise ValueError("machine must be a mapping.")
+    if "fluid_name" not in machine:
+        roles = MODE_ROLES.get(machine.get("design_mode"), ("stator", "rotor"))
+        names = []
+        upstream_fluid = None
+        for row in project["rows"]:
+            if row.get("role") not in roles:
+                continue
+            geometry = row.get("geometry", {})
+            if not isinstance(geometry, dict):
+                continue
+            section = "rotor_design" if row["role"] == "rotor" else "method_of_characteristics"
+            inputs = geometry.get(section, {})
+            if not isinstance(inputs, dict):
+                continue
+            fluid = inputs.get("fluid_name")
+            if row["role"] == "stator":
+                upstream_fluid = fluid
+            elif upstream_fluid and geometry.get("inlet_coupling", {}).get("mode") == "stator_exit":
+                # A coupled rotor's historical manual fluid was not used.
+                continue
+            if isinstance(fluid, str) and fluid.strip():
+                names.append(fluid)
+        if not names:
+            raise ValueError("Specify the shared working fluid at machine.fluid_name.")
+        if len(set(names)) > 1:
+            import CoolProp.CoolProp as CP
+            identities = {tuple(CP.AbstractState("HEOS", name).fluid_names()) for name in names}
+            if len(identities) > 1:
+                raise ValueError("Legacy rows specify different working fluids; set machine.fluid_name explicitly.")
+        machine["fluid_name"] = names[0]
+    for row in project["rows"]:
+        rotor = row.get("role") == "rotor"
+        section = "rotor_design" if rotor else "method_of_characteristics"
+        geometry = row.get("geometry", {})
+        inputs = geometry.get(section) if isinstance(geometry, dict) else None
+        if not isinstance(inputs, dict):
+            continue
+        try:
+            inputs.update(inlet_values(inputs, rotor=rotor))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Row {row.get('id', '?')}: cannot read inlet properties: {exc}") from exc
+        for name in ("fluid_name", "P0", "T0", "Q0", "P0_rel", "T0_rel", "Q0_rel"):
+            inputs.pop(name, None)
+    return project
+
+
 def normalize_project(config):
     """Copy a project, or wrap a historical flat case as a single stator row."""
     if not isinstance(config, dict):
@@ -83,26 +135,28 @@ def normalize_project(config):
                 row["geometry"] = {name: value for name, value in flat.items()
                                    if name not in ("mesh", "workflow")}
                 row["mesh"] = flat["mesh"]
-        return project
+        return _normalize_fluid_inputs(project)
     flat = normalize(config)
     if set(flat) != {*GEOMETRY_SECTIONS, "mesh", "workflow"}:
         raise ValueError("A historical row requires geometry sections, mesh and workflow only.")
-    return {"machine": {"design_mode": "stator",
+    return normalize_project({"machine": {"design_mode": "stator",
                         "geometry_type": flat["meridional_channel"]["type"]},
             "rows": [{"id": "stator_1", "role": "stator",
                       "geometry": {name: flat[name] for name in GEOMETRY_SECTIONS},
                       "mesh": flat["mesh"], "placement": deepcopy(PLACEMENT_DEFAULTS)}],
-            "workflow": flat["workflow"]}
+            "workflow": flat["workflow"]})
 
 
 def row_configuration(project, row_id):
-    """Return editable row inputs, before resolving coupling and assembly caps."""
+    """Return numerical row inputs with the shared fluid, before coupling."""
     row = get_row(project, row_id)
     # Assembly metadata is derived separately, never persisted over user inputs.
     geometry = {key: value for key, value in row["geometry"].items()
                 if key != "axial_interspace_mm"}
-    return deepcopy({**geometry, "mesh": row["mesh"],
-                     "workflow": project["workflow"]})
+    config = deepcopy({**geometry, "mesh": row["mesh"], "workflow": project["workflow"]})
+    section = "rotor_design" if row["role"] == "rotor" else "method_of_characteristics"
+    config[section]["fluid_name"] = project["machine"]["fluid_name"]
+    return config
 
 
 def validate_project(project):
@@ -110,8 +164,10 @@ def validate_project(project):
     if not isinstance(project, dict) or set(project) != {"machine", "rows", "workflow"}:
         raise ValueError("A machine project requires machine, rows and workflow mappings.")
     machine = project["machine"]
-    if not isinstance(machine, dict) or set(machine) != {"design_mode", "geometry_type"}:
-        raise ValueError("machine requires design_mode and geometry_type.")
+    if not isinstance(machine, dict) or set(machine) != {"design_mode", "geometry_type", "fluid_name"}:
+        raise ValueError("machine requires design_mode, geometry_type and fluid_name.")
+    if not isinstance(machine["fluid_name"], str) or not machine["fluid_name"].strip():
+        raise ValueError("machine.fluid_name must be a non-empty fluid name.")
     mode, family = machine["design_mode"], machine["geometry_type"]
     if mode not in DESIGN_MODES:
         raise ValueError(f"machine.design_mode must be one of {DESIGN_MODES}.")
@@ -146,6 +202,14 @@ def validate_project(project):
             raise ValueError(f"Unknown blade row role {row['role']!r}.")
         if not isinstance(row["geometry"], dict) or not isinstance(row["mesh"], dict):
             raise ValueError(f"Row {row_id}: geometry and mesh must be mappings.")
+        section = "rotor_design" if row["role"] == "rotor" else "method_of_characteristics"
+        inputs = row["geometry"].get(section, {})
+        if isinstance(inputs, dict):
+            if "fluid_name" in inputs:
+                raise ValueError(f"Row {row_id}: define the working fluid only at machine.fluid_name.")
+            if not set(INLET_FIELDS) <= inputs.keys() or {
+                    "P0", "T0", "Q0", "P0_rel", "T0_rel", "Q0_rel"} & inputs.keys():
+                raise ValueError(f"Row {row_id}: specify inlet_property_pair, inlet_property_1 and inlet_property_2.")
         meridional_channel = row["geometry"].get("meridional_channel")
         if not isinstance(meridional_channel, dict) or meridional_channel.get("type") != family:
             raise ValueError(f"Row {row_id}: meridional_channel.type must match machine.geometry_type.")
@@ -286,8 +350,8 @@ def default_project(family="axial"):
     row, workflow = _stator_template(family)
     row["id"], row["role"] = "stator_1", "stator"
     row["placement"] = deepcopy(PLACEMENT_DEFAULTS)
-    return {"machine": {"design_mode": "stator", "geometry_type": family},
-            "rows": [row], "workflow": workflow}
+    return normalize_project({"machine": {"design_mode": "stator", "geometry_type": family},
+            "rows": [row], "workflow": workflow})
 
 
 def _adjacent_channel_defaults(channel, neighbour, *, downstream):
@@ -347,7 +411,7 @@ def set_design_mode(project, mode):
         else:
             result["rows"].append(template)
     result["machine"]["design_mode"] = mode
-    return result
+    return normalize_project(result)
 
 
 def set_machine_type(project, family):

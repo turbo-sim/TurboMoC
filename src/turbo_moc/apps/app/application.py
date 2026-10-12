@@ -25,6 +25,7 @@ from ...fluid_inputs import INLET_FIELDS, PROPERTIES, inlet_values, pair_propert
 from .preview import preview_geometry
 
 ACTIONS = ("nozzle", "reference", "volume", "cancel")
+MACHINE_FLUID_ID = {"type": "parameter", "row": "", "path": "fluid_name"}
 ROTOR_INLET_FIELDS = {
     "fluid_name": "Fluid",
     "P0_rel": "Relative stagnation pressure [Pa]",
@@ -49,10 +50,7 @@ def fluid_dropdown(identifier, value):
 def fluid_inlet_controls(parameters, prefix, row_id, *, rotor=False):
     values = inlet_values(parameters, rotor=rotor)
     pair = values["inlet_property_pair"]
-    result = [html.Label([html.Span("Working fluid"), fluid_dropdown(
-        {"type": "parameter", "row": row_id, "path": f"{prefix}.fluid_name"},
-        parameters["fluid_name"])], className="control fluid-selector"),
-        html.Label([html.Span("Inlet property pair"), dcc.Dropdown(
+    result = [html.Label([html.Span("Inlet property pair"), dcc.Dropdown(
             id={"type": "parameter", "row": row_id, "path": f"{prefix}.inlet_property_pair"},
             options=[{"label": f"{name.removesuffix('_INPUTS')} — " + " / ".join(
                 PROPERTIES[prop][0] for prop in pair_properties(name)), "value": name}
@@ -428,6 +426,9 @@ def create_app(config_file=None, output_dir=None):
                             {"label": "Linear cascade", "value": "linear"},
                             {"label": "Axial", "value": "axial"},
                             {"label": "Radial", "value": "radial"}])], className="control"),
+                    html.Label([html.Span("Working fluid"), fluid_dropdown(
+                        MACHINE_FLUID_ID, project["machine"]["fluid_name"])],
+                        className="control fluid-selector"),
                     html.Small(id="machine-note"),
                 ], className="project-settings"),
                 html.Div(id="settings", children=sidebar(project)),
@@ -496,6 +497,12 @@ def create_app(config_file=None, output_dir=None):
                     children="No background job yet.")], open=False, className="terminal", id="terminal"),
             ])], className="shell")], id="app")
     app.layout = layout
+
+    @app.callback(Output(MACHINE_FLUID_ID, "options"), Output(MACHINE_FLUID_ID, "value"),
+        Input("base-project", "data"))
+    def machine_fluid(project):
+        value = project["machine"]["fluid_name"]
+        return sorted(set(fluid_options()) | {value}), value
 
     for section in ("method_of_characteristics", "rotor_design"):
         @app.callback(

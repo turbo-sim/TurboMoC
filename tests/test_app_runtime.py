@@ -35,7 +35,8 @@ def test_sample_projects_build_the_requested_workspaces(filename, mode, family, 
     assert response.status_code == 200
     layout = components(response.get_json())
     project = layout["base-project"]["data"]
-    assert project["machine"] == {"design_mode": mode, "geometry_type": family}
+    assert project["machine"] == {"design_mode": mode, "geometry_type": family,
+                                  "fluid_name": "Novec649" if mode == "rotor" else "Cyclopentane"}
     assert [row["role"] for row in active_rows(project)] == roles
     assert layout["design-mode"]["value"] == mode
     assert layout["machine-family"]["value"] == family

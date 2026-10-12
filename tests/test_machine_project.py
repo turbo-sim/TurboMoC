@@ -15,7 +15,7 @@ def test_legacy_cases_and_project_cases_share_the_same_row_contract():
     current = read_configuration(CASES["axial_stator"])
     wrapped = projects.normalize_project(to_shared(current))
     projects.validate_project(wrapped)
-    assert wrapped["machine"] == {"design_mode": "stator", "geometry_type": "axial"}
+    assert wrapped["machine"] == {"design_mode": "stator", "geometry_type": "axial", "fluid_name": "Cyclopentane"}
     assert projects.row_configuration(wrapped, "stator_1") == current
     loaded = projects.load_project(CASES["axial_stator"])
     assert projects.row_configuration(loaded, "stator_1") == current

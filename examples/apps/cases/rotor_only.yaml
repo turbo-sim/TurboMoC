@@ -5,6 +5,7 @@
 machine:
   design_mode: rotor
   geometry_type: axial
+  fluid_name: Novec649
 workflow:
   save_figures: true
   show_gmsh: true
@@ -24,9 +25,9 @@ rows:
       num_blades: 31
     axial_interspace_mm: 0.0
     rotor_design:
-      fluid_name: Novec649
-      P0_rel: 500000.0
-      T0_rel: 400.0
+      inlet_property_pair: PT_INPUTS
+      inlet_property_1: 500000.0  # Relative stagnation pressure [Pa]
+      inlet_property_2: 400.0  # Relative stagnation temperature [K]
       M_inlet: 1.5
       M_outlet: 1.5
       M_lower: 1.05

@@ -49,7 +49,7 @@ def resolve_configuration(project, row_id, registry):
     angle = upstream_config["blade_geometry"]["metal_angle_out"]
     # Only the exit state is consumed by the existing velocity-triangle model.
     # Avoid serializing the entire characteristic net on every sidebar edit.
-    exit_state = {"fluid_name": nozzle["fluid_name"], "wall_final": {
+    exit_state = {"fluid_name": project["machine"]["fluid_name"], "wall_final": {
         key: [nozzle["wall_final"][key][-1]] for key in ("p", "T", "rho", "M")}}
     try:
         triangle = deepcopy(_triangle(json.dumps(exit_state, sort_keys=True), angle, speed))
@@ -61,7 +61,7 @@ def resolve_configuration(project, row_id, registry):
     inputs = config["rotor_design"]
     for name in INLET_FIELDS:
         inputs.pop(name, None)
-    inputs.update(fluid_name=nozzle["fluid_name"], P0_rel=triangle["P0_rel"],
+    inputs.update(P0_rel=triangle["P0_rel"],
                   T0_rel=triangle["T0_rel"], M_inlet=triangle["M_rel"],
                   beta_inlet=triangle["beta_rel_deg"])
     config["rotor_source"] = {"row_id": upstream["id"], "reference": {

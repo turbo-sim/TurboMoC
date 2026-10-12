@@ -1,21 +1,42 @@
-# Editable workflow configurations
+# App case configurations
 
-The workflow directories contain only runners and READMEs. Their editable
-YAML inputs are grouped here:
+These files initialize the current TurboMoC design app:
 
-- `gmsh_2D/stator_mesh.yaml`: planar stator geometry and meshing.
-- `gmsh_3D/axial_stator.yaml`, `radial_stator.yaml`, `linear_stator.yaml`:
-  single-row project examples.
-- `gmsh_3D/stator_rotor.yaml`, `rotor_only.yaml`: ordered-row planning examples;
-  the new app's rotor numerical integration remains a placeholder.
-- `fluent_2D/stator_fluent.yaml`: automated planar Fluent workflow.
+- `axial_stator.yaml`, `radial_stator.yaml`, `linear_stator.yaml`: a single stator.
+- `rotor_only.yaml`: a standalone vortex rotor using Novec649.
+- `stator_rotor.yaml`: a Cyclopentane stage with the rotor coupled to the stator exit.
 
-Gmsh/Fluent runners default to these local files. Pass `--config` to select a
-copy or another case. The current app defaults to its packaged axial resource;
-pass `--config examples/apps/cases/<case>.yaml` to load an editable
-case. Package defaults remain under `src/turbo_moc/data/` for installations
-without the examples directory.
+Choose the working fluid once in `machine.fluid_name`, alongside `design_mode`
+and `geometry_type`. Every row uses this fluid, including inactive rows when
+reactivated. Each stator's `method_of_characteristics` and each rotor's
+`rotor_design` specify their own inlet property pair and two values:
 
-Fluent `design_file` and `output_dir` resolve relative to its YAML file. The
-shipped Fluent case refers to `../gmsh_2D/stator_mesh.yaml` and writes to
-`../../../turbo_moc_output/fluent_2D`, avoiding outputs among the inputs.
+```yaml
+machine:
+  design_mode: stator_rotor
+  geometry_type: axial
+  fluid_name: Cyclopentane
+
+rows:
+- id: stator_1
+  role: stator
+  geometry:
+    method_of_characteristics:
+      inlet_property_pair: PQ_INPUTS
+      inlet_property_1: 251300.0  # Stagnation pressure [Pa]
+      inlet_property_2: 0.025     # Vapor quality [kg/kg]
+      # Other row inputs follow in the full case files.
+```
+
+The two values follow the order of the selected CoolProp/JaxProp input pair,
+using SI units. Stator values describe the stagnation state; manual rotor values
+describe the relative stagnation state. A coupled rotor retains its manual pair
+and values for later use, while its effective inlet comes from the stator exit.
+
+Historical case files with row-level fluids and pressure/quality or
+pressure/temperature inputs are migrated when loaded. If active manual rows
+specify different fluids, set `machine.fluid_name` explicitly to resolve the
+conflict. A coupled rotor inherits the upstream stator's fluid.
+
+Run `python examples/apps/run_app.py` for the axial stator example. To select
+another case, use `turbo_moc-app --config examples/apps/cases/<case>.yaml`.

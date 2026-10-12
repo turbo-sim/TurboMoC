@@ -126,7 +126,8 @@ def test_rotor_selection_enables_manual_design_and_requires_current_stator_when_
     rotor["geometry"]["inlet_coupling"]["mode"] = "manual"
     state, error = edit([], project, {}, "rotor_1", [])
     assert not error and state["valid"] and state["supported"]
-    assert state["config"]["rotor_design"] == rotor["geometry"]["rotor_design"]
+    assert state["config"]["rotor_design"] == {
+        **rotor["geometry"]["rotor_design"], "fluid_name": project["machine"]["fluid_name"]}
     ready_key = next(key for key in application.callback_map if key.startswith("..nozzle.disabled"))
     readiness = application.callback_map[ready_key]["callback"].__wrapped__
     result = readiness(state, {}, None, None, False)
@@ -211,7 +212,7 @@ def test_structure_can_leave_a_paired_project_for_a_linear_stator_without_losing
     structure = application.callback_map[key]["callback"].__wrapped__
     state = {"project": project, "valid": True}
     result = structure("stator", "linear", state, project, "stator_1")
-    assert result[0]["machine"] == {"design_mode": "stator", "geometry_type": "linear"}
+    assert result[0]["machine"] == {"design_mode": "stator", "geometry_type": "linear", "fluid_name": "Cyclopentane"}
     assert projects.get_row(result[0], "rotor_1")["geometry"]["parametrization_type"] == "vortex"
     assert result[3] == "stator_1" and result[5] == "linear"
     assert not any(option.get("disabled") for option in result[4])

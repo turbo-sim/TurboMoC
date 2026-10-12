@@ -2,6 +2,7 @@
 from copy import deepcopy
 import json
 import math
+from pathlib import Path
 
 import CoolProp.CoolProp as CP
 import jaxprop as jxp
@@ -11,6 +12,7 @@ import yaml
 from app_helpers import call
 from turbo_moc import configuration_project as projects
 from turbo_moc.apps.app import create_app, workflow as flow
+from turbo_moc.apps.app.application import MACHINE_FLUID_ID
 from turbo_moc.fluid_inputs import INLET_FIELDS, inlet_values, solver_parameters
 
 
@@ -29,25 +31,30 @@ def nodes(value):
             yield from nodes(item)
 
 
-def test_fluid_dropdowns_and_pair_controls_cover_both_rows(tmp_path):
+def test_shared_fluid_dropdown_and_pair_controls_cover_both_rows(tmp_path):
     path = tmp_path / "paired.yaml"
     project = projects.set_design_mode(projects.default_project(), "stator_rotor")
     # Keep a supported alias from historical files visible in the dropdown.
-    project["rows"][0]["geometry"]["method_of_characteristics"]["fluid_name"] = "CO2"
+    project["machine"]["fluid_name"] = "CO2"
     path.write_text(yaml.safe_dump(project), encoding="utf-8")
     app = create_app(path)
     layout = app.server.test_client().get("/_dash-layout").get_json()
     controls = [node for node in nodes(layout) if isinstance(node["props"].get("id"), dict)]
+    fluid_controls = [node for node in controls if node["props"]["id"].get("path", "").endswith("fluid_name")]
+    assert len(fluid_controls) == 1
+    fluid = fluid_controls[0]
+    assert fluid["props"]["id"] == MACHINE_FLUID_ID
+    assert fluid["type"] == "Dropdown"
+    assert set(CP.FluidsList()) <= set(fluid["props"]["options"])
+    assert fluid["props"]["value"] == "CO2"
+    assert "CO2" in fluid["props"]["options"]
     for row, section, pair, first, second in (
             ("stator_1", "method_of_characteristics", "PQ_INPUTS", 251300., .025),
             ("rotor_1", "rotor_design", "PT_INPUTS", 5e5, 400.)):
         fields = {node["props"]["id"]["path"]: node for node in controls
                   if node["props"]["id"].get("type") == "parameter"
                   and node["props"]["id"]["row"] == row}
-        fluid = fields[f"{section}.fluid_name"]
-        assert fluid["type"] == "Dropdown"
-        assert set(CP.FluidsList()) <= set(fluid["props"]["options"])
-        assert fluid["props"]["value"] in fluid["props"]["options"]
+        assert f"{section}.fluid_name" not in fields
         selection = fields[f"{section}.inlet_property_pair"]["props"]
         assert {option["value"] for option in selection["options"]} == set(jxp.INPUT_PAIRS)
         assert selection["value"] == pair
@@ -83,7 +90,8 @@ def test_pair_selection_updates_labels_and_units(section, row):
 def test_edited_pairs_save_and_reload_without_old_inlet_fields(tmp_path):
     app = create_app()
     original = projects.set_design_mode(projects.default_project(), "stator_rotor")
-    values, identifiers = [], []
+    before = deepcopy(original)
+    values, identifiers = ["Air"], [MACHINE_FLUID_ID]
     for row, section, pair, first, second in (
             ("stator_1", "method_of_characteristics", "PT_INPUTS", 5e5, 400.),
             ("rotor_1", "rotor_design", "HmassP_INPUTS", 5e5, 3e5)):
@@ -97,11 +105,16 @@ def test_edited_pairs_save_and_reload_without_old_inlet_fields(tmp_path):
     })["config"]["data"]
     assert edited["valid"]
     assert edited["project"] != original
-    assert "P0" in original["rows"][0]["geometry"]["method_of_characteristics"]
+    assert original == before
+    assert edited["project"]["machine"]["fluid_name"] == "Air"
     for row, section in (("stator_1", "method_of_characteristics"), ("rotor_1", "rotor_design")):
         inputs = projects.get_row(edited["project"], row)["geometry"][section]
         assert set(INLET_FIELDS) <= inputs.keys()
         assert not {"P0", "T0", "Q0", "P0_rel", "T0_rel", "Q0_rel"} & inputs.keys()
+        assert "fluid_name" not in inputs
+        assert projects.row_configuration(edited["project"], row)[section]["fluid_name"] == "Air"
+        assert flow.keys(projects.row_configuration(edited["project"], row))["nozzle"] != (
+            flow.keys(projects.row_configuration(original, row))["nozzle"])
     saved = call(app, "..loaded-project.data", "save-configuration.n_clicks", {
         ("save-configuration", "n_clicks"): 1, ("config", "data"): edited,
         ("base-project", "data"): original,
@@ -111,6 +124,81 @@ def test_edited_pairs_save_and_reload_without_old_inlet_fields(tmp_path):
     reloaded = create_app(path).server.test_client().get("/_dash-layout").get_json()
     base = next(node["props"]["data"] for node in nodes(reloaded) if node["props"].get("id") == "base-project")
     assert base == edited["project"]
+
+
+def test_loading_another_fluid_updates_the_machine_dropdown():
+    app = create_app()
+    project = projects.default_project()
+    project["machine"]["fluid_name"] = "CO2"
+    result = call(app, '..{"path":"fluid_name","row":"","type":"parameter"}.options',
+                  "base-project.data", {("base-project", "data"): project})
+    fluid = result[json.dumps(MACHINE_FLUID_ID, sort_keys=True, separators=(",", ":"))]
+    assert fluid["value"] == "CO2" and "CO2" in fluid["options"]
+
+
+def legacy_project(*, coupled=False):
+    project = projects.set_design_mode(projects.default_project(), "stator_rotor")
+    project["machine"].pop("fluid_name")
+    for row in project["rows"]:
+        rotor = row["role"] == "rotor"
+        section = "rotor_design" if rotor else "method_of_characteristics"
+        inputs = row["geometry"][section]
+        _, first, second = (inputs.pop(name) for name in INLET_FIELDS)
+        inputs.update(fluid_name="Cyclopentane")
+        inputs.update({"P0_rel" if rotor else "P0": first, "T0_rel" if rotor else "Q0": second})
+        if rotor and coupled:
+            inputs["fluid_name"] = "Novec649"
+            row["geometry"]["inlet_coupling"]["mode"] = "stator_exit"
+    return project
+
+
+@pytest.mark.parametrize("coupled", [False, True])
+def test_legacy_projects_migrate_shared_fluid_and_both_inlet_pairs(coupled):
+    legacy = legacy_project(coupled=coupled)
+    before = deepcopy(legacy)
+    project = projects.validate_project(projects.normalize_project(legacy))
+    assert legacy == before
+    assert project["machine"]["fluid_name"] == "Cyclopentane"
+    for row, section, pair, first, second in (
+            ("stator_1", "method_of_characteristics", "PQ_INPUTS", 251300., .025),
+            ("rotor_1", "rotor_design", "PT_INPUTS", 5e5, 400.)):
+        inputs = projects.get_row(project, row)["geometry"][section]
+        assert [inputs[name] for name in INLET_FIELDS] == [pair, first, second]
+        assert "fluid_name" not in inputs
+        assert projects.row_configuration(project, row)[section]["fluid_name"] == "Cyclopentane"
+
+
+def test_conflicting_legacy_manual_fluids_require_a_machine_choice():
+    legacy = legacy_project()
+    legacy["rows"][1]["geometry"]["rotor_design"]["fluid_name"] = "Novec649"
+    with pytest.raises(ValueError, match="different working fluids.*machine.fluid_name"):
+        projects.normalize_project(legacy)
+    legacy["machine"]["fluid_name"] = "Cyclopentane"
+    project = projects.validate_project(projects.normalize_project(legacy))
+    assert projects.row_configuration(project, "rotor_1")["rotor_design"]["fluid_name"] == "Cyclopentane"
+
+
+def test_legacy_aliases_refer_to_the_same_shared_fluid():
+    legacy = legacy_project()
+    legacy["rows"][0]["geometry"]["method_of_characteristics"]["fluid_name"] = "CO2"
+    legacy["rows"][1]["geometry"]["rotor_design"]["fluid_name"] = "CarbonDioxide"
+    assert projects.normalize_project(legacy)["machine"]["fluid_name"] == "CO2"
+
+
+@pytest.mark.parametrize("filename", ["axial_stator", "radial_stator", "linear_stator", "rotor_only", "stator_rotor"])
+def test_app_yaml_cases_use_shared_fluid_and_explicit_pairs(filename):
+    path = Path(__file__).resolve().parents[1] / "examples/apps/cases" / f"{filename}.yaml"
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    project = projects.load_project(path)
+    assert raw["machine"]["fluid_name"] == project["machine"]["fluid_name"]
+    for row in raw["rows"]:
+        section = "rotor_design" if row["role"] == "rotor" else "method_of_characteristics"
+        inputs = row["geometry"][section]
+        assert set(INLET_FIELDS) <= inputs.keys()
+        assert not {"fluid_name", "P0", "T0", "Q0", "P0_rel", "T0_rel", "Q0_rel"} & inputs.keys()
+        resolved = solver_parameters(projects.row_configuration(project, row["id"])[section],
+                                     rotor=row["role"] == "rotor")
+        assert resolved["fluid_name"] == raw["machine"]["fluid_name"]
 
 
 @pytest.mark.parametrize("fluid,base_pair,first,second,pair", [
@@ -180,10 +268,9 @@ def test_manual_pair_reaches_the_rotor_worker(tmp_path, monkeypatch):
     from turbo_moc.apps.app import worker
     from turbo_moc import rotor as rotor_api
     project = projects.set_design_mode(projects.default_project(), "rotor")
+    project["machine"]["fluid_name"] = "Air"
     design = projects.get_row(project, "rotor_1")["geometry"]["rotor_design"]
-    design.pop("P0_rel")
-    design.pop("T0_rel")
-    design.update(fluid_name="Air", inlet_property_pair="PT_INPUTS",
+    design.update(inlet_property_pair="PT_INPUTS",
                   inlet_property_1=5e5, inlet_property_2=400.)
     config = projects.row_configuration(project, "rotor_1")
     received = []

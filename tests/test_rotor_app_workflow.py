@@ -12,6 +12,7 @@ from turbo_moc.apps.app import workflow as flow, rotor_inlet
 @pytest.fixture
 def coupled_project(tmp_path, monkeypatch):
     project = projects.set_design_mode(projects.default_project(), "stator_rotor")
+    project["machine"]["fluid_name"] = "Air"
     projects.get_row(project, "rotor_1")["geometry"]["inlet_coupling"].update(mode="stator_exit", rpm=4000)
     config = projects.row_configuration(project, "stator_1")
     reference = {"session": "a" * 32, "job": "b" * 32, "row_id": "stator_1",
@@ -64,7 +65,18 @@ def test_upstream_edits_and_recomputation_invalidate_coupled_rotor(coupled_proje
     new_folder.mkdir(parents=True)
     (new_folder / "moc_result.json").write_bytes((old_folder / "moc_result.json").read_bytes())
     assert flow.keys(flow.resolved_configuration(project, "rotor_1", registry))["nozzle"] != changed["nozzle"]
-    project["rows"][0]["geometry"]["method_of_characteristics"]["P0"] += 100
+    project["rows"][0]["geometry"]["method_of_characteristics"]["inlet_property_1"] += 100
+    with pytest.raises(ValueError, match="upstream stator MoC"):
+        flow.resolved_configuration(project, "rotor_1", registry)
+
+
+def test_machine_fluid_change_invalidates_upstream_and_coupled_rotor(coupled_project):
+    project, registry, _ = coupled_project
+    stator_before = flow.keys(projects.row_configuration(project, "stator_1"))
+    rotor_before = flow.keys(projects.row_configuration(project, "rotor_1"))
+    project["machine"]["fluid_name"] = "Nitrogen"
+    assert flow.keys(projects.row_configuration(project, "stator_1"))["nozzle"] != stator_before["nozzle"]
+    assert flow.keys(projects.row_configuration(project, "rotor_1"))["nozzle"] != rotor_before["nozzle"]
     with pytest.raises(ValueError, match="upstream stator MoC"):
         flow.resolved_configuration(project, "rotor_1", registry)
 
@@ -113,8 +125,6 @@ def test_coupling_preserves_manual_pair_and_uses_upstream_state(coupled_project)
     from turbo_moc.fluid_inputs import INLET_FIELDS
     project, registry, _ = coupled_project
     design = project["rows"][1]["geometry"]["rotor_design"]
-    design.pop("P0_rel")
-    design.pop("T0_rel")
     design.update(inlet_property_pair="PT_INPUTS", inlet_property_1=5e5, inlet_property_2=400.)
     original = deepcopy(design)
     projects.validate_project(project)
@@ -123,7 +133,8 @@ def test_coupling_preserves_manual_pair_and_uses_upstream_state(coupled_project)
     assert coupled["T0_rel"] == 330.
     assert design == original
     project["rows"][1]["geometry"]["inlet_coupling"]["mode"] = "manual"
-    assert flow.resolved_configuration(project, "rotor_1", registry)["rotor_design"] == original
+    assert flow.resolved_configuration(project, "rotor_1", registry)["rotor_design"] == {
+        **original, "fluid_name": project["machine"]["fluid_name"]}
 
 
 def test_rotor_job_rechecks_derived_inputs_before_launch(coupled_project, monkeypatch):
