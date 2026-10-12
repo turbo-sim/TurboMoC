@@ -64,7 +64,6 @@ def content(project, pane, preferences=None):
                 title="Display copies only; the physical blade count and exported mesh are unchanged."),
             dcc.Slider(id=identifier("slider", pane, row_id), min=1, max=maximum, step=1,
                 value=count, marks={1: "1", maximum: str(maximum)}, updatemode="mouseup"),
-            html.Button("All blades", id=identifier("preset", pane, row_id, action="copies"), n_clicks=0),
             html.Div([html.Button(text, id=identifier("preset", pane, row_id, action=action), n_clicks=0)
                 for text, action in (("Blade only", "blade"), ("All surfaces", "surfaces"), ("Reset display", "reset"))],
                 className="display-presets"),
@@ -192,7 +191,7 @@ def register(app, pane):
         action = item["action"]
         selected = ["blade"] if action == "blade" else list(BOUNDARIES) if action == "surfaces" else settings["surfaces"]
         reset = action == "reset"
-        return ([no_update if action == "copies" else [i["surface"]] if i["surface"] in selected else [] for i in surfaces],
+        return ([[i["surface"]] if i["surface"] in selected else [] for i in surfaces],
                 [settings["colors"][i["surface"]] if reset else no_update for i in colors],
-                limit(row, pane, data) if action == "copies" else settings["copies"] if reset else no_update,
+                settings["copies"] if reset else no_update,
                 *([["edges"] if settings["edges"] else []] if pane == "mesh" and reset else [no_update] if pane == "mesh" else []))
