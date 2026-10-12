@@ -75,10 +75,15 @@ def _run_job(request_path, request):
                 rotor.update(P0_rel=inputs["P0_rel"], T0_rel=inputs["T0_rel"],
                              Q0_rel=inputs.get("Q0_rel", float("nan")))
                 flow.write_json(folder / "rotor_result.json", rotor)
-                progress("Rotor: conformal passage and span mapping", 0.9)
-                flow.get_design(config, handle)
+                from .blade_counts import native_passage, sizing
+                natural = sizing(config, native_passage(config, rotor))
+                # Publish a successful 2D solve before mapping its passage.
+                # Geometry/clearance errors remain editable in the preview;
+                # they must not discard the solver's natural pitch.
+                progress("Rotor: natural passage sizing", 0.9)
                 result = {"reference": handle, "rotor_summary": {
                     name: rotor[name] for name in ("beta_inlet", "beta_outlet", "pitch")}}
+                result["blade_sizing"] = natural
             else:
                 reporter = make_progress_reporter(lambda event:
                     progress(f"MoC: {event[1]}", float(event[0].rstrip("%")) / 100))
@@ -87,6 +92,10 @@ def _run_job(request_path, request):
                 # reused by a new MoC job.
                 flow.write_json(folder / "moc_result.json", nozzle)
                 result = {"reference": handle}
+                if nozzle.get("converged"):
+                    from .blade_counts import native_passage, sizing
+                    template = flow.get_stator_template(config, handle, nozzle)
+                    result["blade_sizing"] = sizing(config, native_passage(config, nozzle, template=template))
         elif action == "reference":
             progress("Fit/reference geometry (one placement search)", 0.02)
             design = flow.get_design(config, refs["nozzle"])

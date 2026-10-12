@@ -126,6 +126,11 @@ def advance(handle, registry, log):
         if publication.exists():
             return flow.read_json(publication)["handle"]
         queue = deepcopy(handle["queue"])
+        if handle["action"] == "nozzle":
+            result = flow.read_json(flow.directory(handle) / "result.json")
+            count = result.get("blade_sizing", {}).get("suggested_num_blades")
+            if count is not None:
+                projects.get_row(queue["project"], handle["row_id"])["geometry"]["meridional_channel"]["num_blades"] = count
         queue["index"] += 1
         queue["log"] = (queue["log"] + log + "\n")[-60000:]
         successor = _launch_next(handle["session"], queue, registry)

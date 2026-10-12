@@ -276,7 +276,8 @@ def test_manual_pair_reaches_the_rotor_worker(tmp_path, monkeypatch):
     received = []
     def solve(**parameters):
         received.append(parameters)
-        return {"beta_inlet": 65., "beta_outlet": 65., "pitch": 1.}
+        return {"beta_inlet": 65., "beta_outlet": 65., "pitch": 1.,
+                "blade": {"x": [0., .5, 1., 0.], "y": [0., .1, 0., 0.]}}
     monkeypatch.setattr(rotor_api, "design_rotor_vortex_blade", solve)
     monkeypatch.setattr(flow, "get_design", lambda *args: None)
     handle = {"session": "a" * 32, "job": "b" * 32, "action": "nozzle",
@@ -292,3 +293,6 @@ def test_manual_pair_reaches_the_rotor_worker(tmp_path, monkeypatch):
     assert received[0]["T0_rel"] == pytest.approx(400.)
     assert math.isnan(received[0]["Q0_rel"])
     assert not set(INLET_FIELDS) & received[0].keys()
+    result = flow.read_json(folder / "result.json")
+    assert result["blade_sizing"]["native"] == {"pitch": 1., "chord": 1.}
+    assert result["blade_sizing"]["suggested_num_blades"] >= 2

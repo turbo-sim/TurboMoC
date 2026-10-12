@@ -150,6 +150,24 @@ def load_nozzle(reference, config):
         raise ValueError(f"The selected design result is missing or unreadable. {action} again.") from exc
 
 
+def get_stator_template(config, nozzle_reference, nozzle=None):
+    """Cache the native MoC passage before any annular pitch replacement."""
+    cache = diskcache.Cache(str(output_directory() / "geometry_cache"))
+    try:
+        template_key = digest([nozzle_reference["session"], nozzle_reference["job"], config["blade_geometry"]])
+        template = cache.get(("template", template_key))
+        if template is not None:
+            return geo.decode(template)
+        from turbo_moc.geometry import parametrize_stator_blade
+        nozzle = load_nozzle(nozzle_reference, config) if nozzle is None else nozzle
+        wall = nozzle["wall_final"]
+        template = parametrize_stator_blade(wall["x"], wall["y"], **config["blade_geometry"])
+        cache.set(("template", template_key), geo.encode(template))
+        return template
+    finally:
+        cache.close()
+
+
 def get_design(config, nozzle_reference):
     """Cache template separately: passage/machine edits do not refit the blade."""
     cache = diskcache.Cache(str(output_directory() / "geometry_cache"))
@@ -164,15 +182,7 @@ def get_design(config, nozzle_reference):
             design = build_rotor_design(nozzle, config)
             cache.set(("design", geometry_key), geo.design_data(design))
             return design
-        template_key = digest([nozzle_reference["session"], nozzle_reference["job"], config["blade_geometry"]])
-        template = cache.get(("template", template_key))
-        if template is None:
-            from turbo_moc.geometry import parametrize_stator_blade
-            wall = nozzle["wall_final"]
-            template = parametrize_stator_blade(wall["x"], wall["y"], **config["blade_geometry"])
-            cache.set(("template", template_key), geo.encode(template))
-        else:
-            template = geo.decode(template)
+        template = get_stator_template(config, nozzle_reference, nozzle)
         design = geo.build_design(nozzle, config, template=template)
         cache.set(("design", geometry_key), geo.design_data(design))
         return design

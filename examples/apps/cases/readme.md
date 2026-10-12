@@ -55,6 +55,18 @@ Historical `rpm` settings migrate to `rotational_speed: {type: actual, value: ..
 Speed affects coupled inlet conditions; manually specified relative inlets remain
 independent of it.
 
+Annular rows retain an editable `meridional_channel.num_blades`. After each
+successful MoC or vortex solve, the app sets it to the ceiling of the natural
+midspan blade count (at least two), then permits a manual override. The sidebar
+shows the noninteger natural count, scaled native pitch and actual pitch deviation.
+Changing radii/chords updates this reference without overwriting a manual count;
+a new successful solve resets the count again.
+
+Natural sizing uses the native solver pitch/chord ratio `k` and conformal chord
+`C' = integral(dm/r)` at midspan: `N* = 2*pi/(k*C')`. Rounding or overriding the
+count can change passage spacing; exact agreement with the solver pitch is not
+guaranteed. Linear cascades show their scaled native pitch and no annular count.
+
 Historical case files with row-level fluids and pressure/quality or
 pressure/temperature inputs are migrated when loaded. If active manual rows
 specify different fluids, set `machine.fluid_name` explicitly to resolve the

@@ -16,7 +16,7 @@ from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, 
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
-from . import workflow as flow, plots, project_export, calculations, rotor_inlet
+from . import workflow as flow, plots, project_export, calculations, rotor_inlet, blade_counts
 from ...meshing import meshing_3d as mesh
 from ... import configuration_project as project_model
 from ...configuration_rotor import default_axial_interspace_mm, SPEED_TYPES
@@ -92,6 +92,26 @@ def read_uploaded_project(contents):
         raise ValueError(f"Cannot load configuration: {exc}") from exc
 
 
+def actual_blade_count(value, row_id):
+    return html.Label([html.Span("Actual number of blades"), dcc.Input(
+        id={"type": "parameter", "row": row_id, "path": "meridional_channel.num_blades"},
+        value=value, type="number", min=2, step=1, debounce=True)], className="control",
+        title="Each successful blade solve sets the actual count to ceil(natural count). "
+              "You can then override it; changing the count changes passage spacing.")
+
+
+def natural_blade_box(row_id):
+    return html.Div("Compute blade design to obtain the natural pitch.",
+        id={"type": "natural-blade-sizing", "row": row_id}, className="computed-inlet")
+
+
+def meridional_controls(dimensions, row_id):
+    fields = controls(dimensions, "meridional_channel", row_id)
+    if dimensions["type"] == "linear":
+        fields.append(natural_blade_box(row_id))
+    return fields
+
+
 def controls(value, prefix, row_id):
     """Stable row IDs separate field ownership from display order."""
     result = []
@@ -102,6 +122,10 @@ def controls(value, prefix, row_id):
                 *controls(item, path, row_id)], open=True))
             continue
         if path == "meridional_channel.type":
+            continue
+        if path == "meridional_channel.num_blades":
+            result.extend([html.Div(actual_blade_count(item, row_id),
+                id={"type": "actual-blade-count", "row": row_id}), natural_blade_box(row_id)])
             continue
         identifier = {"type": "parameter", "row": row_id, "path": path}
         if name == "fluid_name":
@@ -238,7 +262,8 @@ def sidebar(project):
         identifier, geometry = row["id"], row["geometry"]
         if row["role"] == "stator":
             fields = [group(title, moc_controls(geometry[name], identifier)
-                if name == "method_of_characteristics" else controls(geometry[name], name, identifier)) for name, title in (
+                if name == "method_of_characteristics" else meridional_controls(geometry[name], identifier)
+                if name == "meridional_channel" else controls(geometry[name], name, identifier)) for name, title in (
                 ("method_of_characteristics", "Method of characteristics"),
                 ("meridional_channel", "Linear cascade definition" if family == "linear"
                      else "Meridional channel definition"),
@@ -250,7 +275,7 @@ def sidebar(project):
                 group("Vortex blade design", controls({k: v for k, v in geometry["rotor_design"].items()
                     if k not in {*ROTOR_INLET_FIELDS, *INLET_FIELDS}}, "rotor_design", identifier)),
                 group("Linear cascade definition" if family == "linear" else "Meridional channel definition",
-                    controls(geometry["meridional_channel"], "meridional_channel", identifier)),
+                    meridional_controls(geometry["meridional_channel"], identifier)),
                 flow_domain_controls(project, row)]
             if family == "axial" and project["machine"]["design_mode"] == "stator_rotor":
                 fields.insert(0, group("Axial interspace", [*controls({"axial_interspace_mm":
@@ -410,6 +435,7 @@ def create_app(config_file=None, output_dir=None):
             dcc.Store(id="loaded-project"), dcc.Download(id="configuration-download"),
             dcc.Download(id="project-download"),
             dcc.Store(id="base-project", data=project), dcc.Store(id="row-references", data={}),
+            dcc.Store(id="applied-blade-count-jobs", data={}),
             dcc.Interval(id="poll", interval=750),
             html.Header([html.H2("TurboMoC"), html.A([
                 html.Strong("Sustainable Thermal Power"),
@@ -507,6 +533,63 @@ def create_app(config_file=None, output_dir=None):
                     children="No background job yet.")], open=False, className="terminal", id="terminal"),
             ])], className="shell")], id="app")
     app.layout = layout
+
+    @app.callback(Output({"type": "natural-blade-sizing", "row": ALL}, "children"),
+        Input("config", "data"), Input("row-references", "data"),
+        State({"type": "natural-blade-sizing", "row": ALL}, "id"))
+    def natural_blade_sizing(state, registry, identifiers):
+        readouts = []
+        for identifier in identifiers:
+            try:
+                if not state or not state.get("valid"):
+                    raise ValueError("Correct the settings to update natural blade sizing.")
+                row_id = identifier["row"]
+                config = flow.resolved_configuration(state["project"], row_id, registry)
+                reference = (registry or {}).get(row_id, {}).get("nozzle")
+                natural = blade_counts.from_reference(config, reference)
+                count = natural["natural_num_blades"]
+                fields = [html.Label([html.Span("Natural number of blades (midspan)"),
+                    dcc.Input(value=round(count, 5) if count is not None else "N/A — linear cascade",
+                        type="text", disabled=True)], className="control computed-control"),
+                    html.Label([html.Span("Natural pitch [mm]"),
+                        dcc.Input(value=round(natural["natural_pitch_mm"], 5), type="number", disabled=True)],
+                        className="control computed-control")]
+                if count is not None:
+                    actual = config["meridional_channel"]["num_blades"]
+                    deviation = 100 * (count / actual - 1)
+                    tooltip = (f"Suggested integer count: {natural['suggested_num_blades']}. "
+                        f"Actual pitch differs from natural pitch by {deviation:+.2f}% at midspan.")
+                    fields[0].title = tooltip
+                    fields[1].title = tooltip
+                readouts.append(fields)
+            except (ValueError, KeyError, TypeError, OSError, RuntimeError) as exc:
+                readouts.append(html.Small(str(exc)))
+        return readouts
+
+    @app.callback(Output({"type": "actual-blade-count", "row": ALL}, "children"),
+        Output("applied-blade-count-jobs", "data"), Input("row-references", "data"),
+        State("config", "data"), State({"type": "actual-blade-count", "row": ALL}, "id"),
+        State("applied-blade-count-jobs", "data"), prevent_initial_call=True)
+    def apply_natural_blade_counts(registry, state, identifiers, applied):
+        applied = deepcopy(applied or {})
+        controls = []
+        for identifier in identifiers:
+            row_id = identifier["row"]
+            reference = (registry or {}).get(row_id, {}).get("nozzle")
+            job = [reference.get("session"), reference.get("job")] if reference else None
+            if not job or applied.get(row_id) == job or not state or not state.get("valid"):
+                controls.append(no_update)
+                continue
+            try:
+                config = flow.resolved_configuration(state["project"], row_id, registry)
+                natural = blade_counts.from_reference(config, reference)
+                count = natural["suggested_num_blades"]
+                controls.append(actual_blade_count(count, row_id) if count is not None else no_update)
+                applied[row_id] = job
+            except (ValueError, KeyError, TypeError, OSError, RuntimeError):
+                # Obsolete or failed solves must not replace an editable count.
+                controls.append(no_update)
+        return controls, applied
 
     @app.callback(Output({"type": "rotor-speed-label", "row": MATCH}, "children"),
         Input({"type": "parameter", "row": MATCH, "path": "inlet_coupling.rotational_speed.type"}, "value"))
