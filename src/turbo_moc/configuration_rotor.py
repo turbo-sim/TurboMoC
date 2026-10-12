@@ -8,6 +8,7 @@ from copy import deepcopy
 import numpy as np
 
 from .configuration import SMOOTH_FIELDS, validate_mesh_configuration
+from .fluid_inputs import INLET_FIELDS, validate_inlet_inputs
 
 
 ROTOR_DEFAULTS = {
@@ -57,6 +58,9 @@ def normalize_rotor_geometry(geometry):
                 for key, value in smooth.items():
                     values.setdefault(key, value)
             for key, value in defaults.items():
+                if name == "rotor_design" and key in ("P0_rel", "T0_rel") and any(
+                        field in values for field in INLET_FIELDS):
+                    continue
                 values.setdefault(key, value)
     meridional_channel = result.get("meridional_channel", {})
     if isinstance(meridional_channel, dict) and meridional_channel.get("type") == "axial":
@@ -105,11 +109,15 @@ def validate_rotor_configuration(config):
         raise ValueError("Rotor parametrization_type must be vortex.")
     validate_machine(config["meridional_channel"])
     design = config["rotor_design"]
-    if not isinstance(design, dict) or set(design) != set(ROTOR_DEFAULTS):
+    paired_fields = (set(ROTOR_DEFAULTS) - {"P0_rel", "T0_rel"}) | set(INLET_FIELDS)
+    if not isinstance(design, dict) or set(design) not in (set(ROTOR_DEFAULTS), paired_fields):
         raise ValueError(f"rotor_design requires {tuple(ROTOR_DEFAULTS)}.")
     if not isinstance(design["fluid_name"], str) or not design["fluid_name"].strip():
         raise ValueError("rotor_design.fluid_name must be a non-empty fluid name.")
+    validate_inlet_inputs(design)
     for name in ("P0_rel", "T0_rel", "le_te_ratio"):
+        if name not in design:
+            continue
         _finite(design[name], f"rotor_design.{name}", minimum=0, strict=True)
     for name in ("M_inlet", "M_outlet", "M_lower", "M_upper"):
         _finite(design[name], f"rotor_design.{name}", minimum=1, strict=True)

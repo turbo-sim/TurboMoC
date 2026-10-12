@@ -39,7 +39,7 @@ def resolve_inlet_state(barotropy, nozzle_parameters, nozzle):
         backend=nozzle_parameters.get("backend", "HEOS"),
     )
     actual = nozzle.get("meta", {})
-    p0 = float(actual.get("P0", nozzle_parameters["P0"]))
+    p0 = float(actual.get("P0", nozzle_parameters.get("P0", np.nan)))
     q0 = actual.get("Q0", nozzle_parameters.get("Q0"))
     if q0 is not None and np.isfinite(q0):
         if not 0 <= q0 <= 1:
@@ -49,7 +49,7 @@ def resolve_inlet_state(barotropy, nozzle_parameters, nozzle):
         state = fluid.get_state(
             barotropy.PT_INPUTS,
             p0,
-            positive(nozzle_parameters.get("T0", np.nan), "nozzle.T0"),
+            positive(actual.get("T0", nozzle_parameters.get("T0", np.nan)), "nozzle.T0"),
         )
         q0 = None
     return fluid, state, q0

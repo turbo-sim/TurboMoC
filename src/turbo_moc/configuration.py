@@ -73,6 +73,8 @@ def _validate_shared(config):
         if not np.isfinite(config["passage"][name]) or config["passage"][name] <= 0:
             raise ValueError(f"passage.{name} must be positive.")
     validate_mesh_configuration(config["mesh"])
+    from .fluid_inputs import validate_inlet_inputs
+    validate_inlet_inputs(config["nozzle"])
     return config
 
 

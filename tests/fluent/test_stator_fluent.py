@@ -47,6 +47,21 @@ def test_barotropic_fit_preserves_moc_inlet_and_has_positive_properties(
         )
 
 
+@pytest.mark.parametrize("quality", [None, 0.025])
+def test_barotropic_inlet_uses_resolved_moc_state_for_pair_configuration(quality):
+    from turbo_moc.fluent.barotropic_model import resolve_inlet_state
+    inputs = {"fluid_name": "Water", "inlet_property_pair": "HmassP_INPUTS",
+              "inlet_property_1": 5e5, "inlet_property_2": 1e5}
+    actual = {"P0": 1e5, "T0": 400., "Q0": float("nan") if quality is None else quality}
+    _, state, resolved_quality = resolve_inlet_state(jxp, inputs, {"meta": actual})
+    assert float(state.p) == pytest.approx(1e5)
+    assert resolved_quality == quality
+    if quality is None:
+        assert float(state.T) == pytest.approx(400.)
+    else:
+        assert float(state.Q) == pytest.approx(quality)
+
+
 @pytest.mark.parametrize(
     "setup_fails", [False, True], ids=["create-only", "setup-error"]
 )

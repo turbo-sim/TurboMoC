@@ -314,5 +314,15 @@ def edited_project(base, values, identifiers):
                 raise ValueError(f"{row['id']}.{identifier['path']} requires an integer.")
             value = int(value)
         target[path[-1]] = value
+    # The visible pair controls replace the historical PT/PQ fields together.
+    # Keep untouched historical rows unchanged, including inactive rows.
+    from ...fluid_inputs import INLET_FIELDS
+    for row in project["rows"]:
+        for section, legacy in (("method_of_characteristics", ("P0", "T0", "Q0")),
+                                ("rotor_design", ("P0_rel", "T0_rel", "Q0_rel"))):
+            inputs = row["geometry"].get(section, {})
+            if any(name in inputs for name in INLET_FIELDS):
+                for name in legacy:
+                    inputs.pop(name, None)
     return project
 

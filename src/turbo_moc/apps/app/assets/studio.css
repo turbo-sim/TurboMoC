@@ -49,6 +49,8 @@ summary small {float:right;color:#71858e;font-weight:400;font-size:10px}
   opacity:1;cursor:not-allowed}
 .computed-inlet > small {display:block;line-height:1.5;margin-bottom:10px}
 .control .Select {min-width:0}
+.control.fluid-selector,.control.fluid-property {grid-template-columns:minmax(0,1fr);gap:6px}
+.fluid-selector > div,.fluid-selector > button {min-width:0}
 .control span {overflow-wrap:anywhere}
 button {cursor:pointer;padding:8px 12px;border:1px solid #9ab2bd;background:white;color:#173e50;border-radius:5px;font-size:12px}
 button:hover:enabled {background:#e5f0f4;border-color:#648d9f}

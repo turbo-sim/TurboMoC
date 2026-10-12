@@ -109,6 +109,23 @@ def test_manual_inlet_is_independent_and_coupling_requires_active_stator(coupled
         flow.resolved_configuration(project, "rotor_1", registry)
 
 
+def test_coupling_preserves_manual_pair_and_uses_upstream_state(coupled_project):
+    from turbo_moc.fluid_inputs import INLET_FIELDS
+    project, registry, _ = coupled_project
+    design = project["rows"][1]["geometry"]["rotor_design"]
+    design.pop("P0_rel")
+    design.pop("T0_rel")
+    design.update(inlet_property_pair="PT_INPUTS", inlet_property_1=5e5, inlet_property_2=400.)
+    original = deepcopy(design)
+    projects.validate_project(project)
+    coupled = flow.resolved_configuration(project, "rotor_1", registry)["rotor_design"]
+    assert not set(INLET_FIELDS) & coupled.keys()
+    assert coupled["T0_rel"] == 330.
+    assert design == original
+    project["rows"][1]["geometry"]["inlet_coupling"]["mode"] = "manual"
+    assert flow.resolved_configuration(project, "rotor_1", registry)["rotor_design"] == original
+
+
 def test_rotor_job_rechecks_derived_inputs_before_launch(coupled_project, monkeypatch):
     project, registry, _ = coupled_project
     config = flow.resolved_configuration(project, "rotor_1", registry)

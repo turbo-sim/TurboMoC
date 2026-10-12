@@ -13,6 +13,7 @@ from . import workflow as flow
 from ...meshing import meshing_3d as mesh
 from ...meshing.inspection import inspect_mesh
 from ...geometry.moc import solve_nozzle
+from ...fluid_inputs import solver_parameters
 from turbo_moc.progress import make_progress_reporter
 from turbo_moc.reporting import logging_context
 
@@ -69,9 +70,10 @@ def _run_job(request_path, request):
                 # an indeterminate indicator while it builds its fluid table
                 # and marches the transition arcs, rather than inventing %s.
                 progress("Rotor: thermodynamic table and vortex transition arcs")
-                rotor = design_rotor_vortex_blade(**config["rotor_design"])
-                rotor.update(P0_rel=config["rotor_design"]["P0_rel"],
-                             T0_rel=config["rotor_design"]["T0_rel"])
+                inputs = solver_parameters(config["rotor_design"], rotor=True)
+                rotor = design_rotor_vortex_blade(**inputs)
+                rotor.update(P0_rel=inputs["P0_rel"], T0_rel=inputs["T0_rel"],
+                             Q0_rel=inputs.get("Q0_rel", float("nan")))
                 flow.write_json(folder / "rotor_result.json", rotor)
                 progress("Rotor: conformal passage and span mapping", 0.9)
                 flow.get_design(config, handle)

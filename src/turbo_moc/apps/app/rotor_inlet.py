@@ -11,6 +11,7 @@ import json
 
 from ... import configuration_project as projects
 from ...configuration_rotor import inlet_radius_mm
+from ...fluid_inputs import INLET_FIELDS
 from ...coupling import derive_rotor_inlet_from_stator
 
 
@@ -58,6 +59,8 @@ def resolve_configuration(project, row_id, registry):
             or min(triangle[name] for name in ("P0_rel", "T0_rel", "M_rel")) <= 0):
         raise ValueError("The coupled rotor inlet requires finite, positive pressure, temperature and Mach number.")
     inputs = config["rotor_design"]
+    for name in INLET_FIELDS:
+        inputs.pop(name, None)
     inputs.update(fluid_name=nozzle["fluid_name"], P0_rel=triangle["P0_rel"],
                   T0_rel=triangle["T0_rel"], M_inlet=triangle["M_rel"],
                   beta_inlet=triangle["beta_rel_deg"])

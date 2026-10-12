@@ -11,7 +11,8 @@ import yaml
 from uuid import uuid4
 
 import dash_vtk  # Register the browser bundle before constructing scenes.
-from dash import ALL, Dash, Input, Output, Patch, State, ctx, dcc, html, no_update
+import jaxprop as jxp
+from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, no_update
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
@@ -19,6 +20,8 @@ from . import workflow as flow, plots, project_export, calculations
 from ...meshing import meshing_3d as mesh
 from ... import configuration_project as project_model
 from ...configuration_rotor import default_axial_interspace_mm
+from ...api import list_supported_fluids
+from ...fluid_inputs import INLET_FIELDS, PROPERTIES, inlet_values, pair_properties, property_label
 from .preview import preview_geometry
 
 ACTIONS = ("nozzle", "reference", "volume", "cancel")
@@ -29,6 +32,49 @@ ROTOR_INLET_FIELDS = {
     "M_inlet": "Relative inlet Mach number",
     "beta_inlet": "Relative inlet flow angle [deg]",
 }
+
+
+@lru_cache(maxsize=1)
+def fluid_options():
+    return list_supported_fluids()
+
+
+def fluid_dropdown(identifier, value):
+    # CoolProp aliases in existing files remain selectable alongside its full list.
+    options = sorted(set(fluid_options()) | {value})
+    return dcc.Dropdown(id=identifier, options=options, value=value,
+        clearable=False, searchable=True)
+
+
+def fluid_inlet_controls(parameters, prefix, row_id, *, rotor=False):
+    values = inlet_values(parameters, rotor=rotor)
+    pair = values["inlet_property_pair"]
+    result = [html.Label([html.Span("Working fluid"), fluid_dropdown(
+        {"type": "parameter", "row": row_id, "path": f"{prefix}.fluid_name"},
+        parameters["fluid_name"])], className="control fluid-selector"),
+        html.Label([html.Span("Inlet property pair"), dcc.Dropdown(
+            id={"type": "parameter", "row": row_id, "path": f"{prefix}.inlet_property_pair"},
+            options=[{"label": f"{name.removesuffix('_INPUTS')} — " + " / ".join(
+                PROPERTIES[prop][0] for prop in pair_properties(name)), "value": name}
+                for name in jxp.INPUT_PAIRS], value=pair, clearable=False)],
+            className="control fluid-selector")]
+    for index in (1, 2):
+        result.append(html.Label([html.Span(property_label(pair, index),
+            id={"type": "fluid-property-label", "row": row_id, "section": prefix, "index": index}),
+            dcc.Input(id={"type": "parameter", "row": row_id,
+                "path": f"{prefix}.inlet_property_{index}"},
+                value=values[f"inlet_property_{index}"], type="number", debounce=True,
+                step="any")], className="control fluid-property"))
+    result.append(html.Small("Specify the stagnation state" +
+        (" in the rotor-relative frame." if rotor else ".")))
+    return result
+
+
+def moc_controls(parameters, row_id):
+    return [*fluid_inlet_controls(parameters, "method_of_characteristics", row_id),
+        *controls({name: value for name, value in parameters.items()
+            if name not in {"fluid_name", "P0", "T0", "Q0", *INLET_FIELDS}},
+            "method_of_characteristics", row_id)]
 
 
 def row_label(row):
@@ -60,7 +106,9 @@ def controls(value, prefix, row_id):
         if path == "meridional_channel.type":
             continue
         identifier = {"type": "parameter", "row": row_id, "path": path}
-        if isinstance(item, bool):
+        if name == "fluid_name":
+            widget = fluid_dropdown(identifier, item)
+        elif isinstance(item, bool):
             widget = dcc.Dropdown(id=identifier, options=[
                 {"label": "Yes", "value": True}, {"label": "No", "value": False}],
                 value=item, clearable=False)
@@ -90,8 +138,10 @@ def rotor_inlet_controls(geometry, row_id, combined):
     """
     coupling = geometry["inlet_coupling"]
     coupled = coupling["mode"] == "stator_exit"
-    manual = []
+    manual = fluid_inlet_controls(geometry["rotor_design"], "rotor_design", row_id, rotor=True)
     for name, label in ROTOR_INLET_FIELDS.items():
+        if name in ("fluid_name", "P0_rel", "T0_rel"):
+            continue
         manual.append(html.Label([html.Span(label), dcc.Input(
             id={"type": "parameter", "row": row_id, "path": f"rotor_design.{name}"},
             value=geometry["rotor_design"][name],
@@ -179,7 +229,8 @@ def sidebar(project):
     for row in project_model.active_rows(project):
         identifier, geometry = row["id"], row["geometry"]
         if row["role"] == "stator":
-            fields = [group(title, controls(geometry[name], name, identifier)) for name, title in (
+            fields = [group(title, moc_controls(geometry[name], identifier)
+                if name == "method_of_characteristics" else controls(geometry[name], name, identifier)) for name, title in (
                 ("method_of_characteristics", "Method of characteristics"),
                 ("meridional_channel", "Linear cascade definition" if family == "linear"
                      else "Meridional channel definition"),
@@ -189,7 +240,7 @@ def sidebar(project):
             fields = [rotor_inlet_controls(geometry, identifier,
                     project["machine"]["design_mode"] == "stator_rotor"),
                 group("Vortex blade design", controls({k: v for k, v in geometry["rotor_design"].items()
-                    if k not in ROTOR_INLET_FIELDS}, "rotor_design", identifier)),
+                    if k not in {*ROTOR_INLET_FIELDS, *INLET_FIELDS}}, "rotor_design", identifier)),
                 group("Linear cascade definition" if family == "linear" else "Meridional channel definition",
                     controls(geometry["meridional_channel"], "meridional_channel", identifier)),
                 flow_domain_controls(project, row)]
@@ -445,6 +496,14 @@ def create_app(config_file=None, output_dir=None):
                     children="No background job yet.")], open=False, className="terminal", id="terminal"),
             ])], className="shell")], id="app")
     app.layout = layout
+
+    for section in ("method_of_characteristics", "rotor_design"):
+        @app.callback(
+            Output({"type": "fluid-property-label", "row": MATCH, "section": section, "index": 1}, "children"),
+            Output({"type": "fluid-property-label", "row": MATCH, "section": section, "index": 2}, "children"),
+            Input({"type": "parameter", "row": MATCH, "path": f"{section}.inlet_property_pair"}, "value"))
+        def inlet_property_labels(pair):
+            return property_label(pair, 1), property_label(pair, 2)
 
     @app.callback(Output("calculation-scope", "options"), Output("calculation-scope", "value"),
         Output("plotted-rows", "options"), Output("plotted-rows", "value"),

@@ -70,6 +70,10 @@ remain explicit planning placeholders.
 - The current Dash app has **Geometry generation** and **Mesh generation**
   workspaces, ordered row settings, shared machine views, selected-row
   section/report views and a live terminal for local background jobs.
+- Select a working fluid from the searchable CoolProp list, then choose an inlet
+  property pair and enter its two values in the displayed SI units. Stator inputs
+  describe the stagnation state; manual rotor inputs use the relative stagnation
+  state. Historical pressure/quality and pressure/temperature case files still load.
 - The preceding Nozzle/Stator/Rotor/Cascade app remains runnable through its
   established entry point. Its diagnostics, reference tools, control-point
   editing, sizing, CAD and rotor capabilities are preserved.
