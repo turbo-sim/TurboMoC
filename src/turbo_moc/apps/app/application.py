@@ -16,7 +16,7 @@ from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, 
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
-from . import workflow as flow, plots, project_export, calculations
+from . import workflow as flow, plots, project_export, calculations, rotor_inlet
 from ...meshing import meshing_3d as mesh
 from ... import configuration_project as project_model
 from ...configuration_rotor import default_axial_interspace_mm
@@ -156,6 +156,7 @@ def rotor_inlet_controls(geometry, row_id, combined):
             value=coupling["rpm"], type="number", debounce=True, step="any")], className="control"),
             id={"type": "rotor-coupling-speed", "row": row_id},
             style={} if coupled else {"display": "none"}),
+        html.Div(id={"type": "rotor-inlet-warning", "row": row_id}),
         html.Div(manual, id={"type": "rotor-manual-inlet", "row": row_id},
             style={"display": "none"} if coupled else {}),
         html.Div(id={"type": "rotor-coupled-inlet", "row": row_id}, className="computed-inlet",
@@ -647,10 +648,12 @@ def create_app(config_file=None, output_dir=None):
         Output({"type": "rotor-coupled-inlet", "row": ALL}, "children"),
         Output({"type": "rotor-coupled-inlet", "row": ALL}, "style"),
         Output({"type": "rotor-coupling-speed", "row": ALL}, "style"),
+        Output({"type": "rotor-inlet-warning", "row": ALL}, "children"),
         Input("config", "data"), Input("row-references", "data"),
         State({"type": "rotor-manual-inlet", "row": ALL}, "id"))
     def rotor_inlet_display(state, registry, identifiers):
         manual_styles, computed_values, computed_styles, speed_styles = [], [], [], []
+        inlet_alerts = []
         for identifier in identifiers:
             row_id = identifier["row"]
             try:
@@ -660,6 +663,7 @@ def create_app(config_file=None, output_dir=None):
                 computed_values.append([])
                 computed_styles.append({"display": "none"})
                 speed_styles.append({"display": "none"})
+                inlet_alerts.append([])
                 continue
             coupled = row["geometry"]["inlet_coupling"]["mode"] == "stator_exit"
             manual_styles.append({"display": "none"} if coupled else {})
@@ -668,6 +672,7 @@ def create_app(config_file=None, output_dir=None):
             values, message = {}, (
                 "Computed from the current stator exit and rotor speed. "
                 "Ideal transfer of the stator exit state; no interspace-flow/loss model.")
+            warnings = rotor_inlet.inlet_warnings(row["geometry"]) if not coupled else []
             if coupled:
                 try:
                     if not state.get("valid"):
@@ -677,17 +682,18 @@ def create_app(config_file=None, output_dir=None):
                     source = resolved["rotor_source"]
                     message += (f" Inlet midspan radius: {source['inlet_radius_mm']:.4g} mm; "
                                 f"blade speed: {source['triangle']['U']:.4g} m/s.")
-                    if values["M_inlet"] <= 1:
-                        message += " The relative inlet is subsonic; the vortex method requires Mach > 1."
+                    warnings = rotor_inlet.inlet_warnings(resolved)
                 except (ValueError, OSError, RuntimeError) as exc:
                     message = str(exc)
+            inlet_alerts.append([html.Div(warning, className="inlet-warning", role="alert")
+                                 for warning in warnings])
             computed_values.append([
                 html.Label([html.Span(label), dcc.Input(value=values.get(name), disabled=True,
                     type="text" if name == "fluid_name" else "number", placeholder="Pending")],
                     className="control computed-control",
                     title="Calculated from stator exit; switch to manual inlet conditions to edit.")
                 for name, label in ROTOR_INLET_FIELDS.items()] + [html.Small(message)])
-        return manual_styles, computed_values, computed_styles, speed_styles
+        return manual_styles, computed_values, computed_styles, speed_styles, inlet_alerts
 
     @app.callback(Output("sidebar", "className"), Output("design-panel", "style"), Output("mesh-panel", "style"),
         Input("workspace", "value"))

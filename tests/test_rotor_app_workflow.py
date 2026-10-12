@@ -173,3 +173,20 @@ def test_property_failure_is_a_readable_inlet_error(coupled_project, monkeypatch
     monkeypatch.setattr(rotor_inlet, "_triangle", fail)
     with pytest.raises(ValueError, match="Cannot compute the coupled rotor inlet.*property range"):
         flow.resolved_configuration(project, "rotor_1", registry)
+
+
+@pytest.mark.parametrize("mach,beta,expected", [
+    (1.0, 54., "supersonic relative inlet"),
+    (1.39, -65., "Negative relative inlet angle"),
+    (.73, -35., "Negative relative inlet angle"),
+])
+def test_unsupported_coupled_inlet_cannot_start_solver(coupled_project, monkeypatch, mach, beta, expected):
+    project, registry, _ = coupled_project
+    monkeypatch.setattr(rotor_inlet, "_triangle", lambda *args: {
+        "P0_rel": 100000., "T0_rel": 300., "M_rel": mach, "beta_rel_deg": beta})
+    config = flow.resolved_configuration(project, "rotor_1", registry)
+    assert config["rotor_design"]["beta_inlet"] == beta
+    monkeypatch.setattr(flow.subprocess, "Popen", lambda *args, **kwargs: pytest.fail("Solver must not start"))
+    with pytest.raises(ValueError, match=expected):
+        flow.start_job("d" * 32, "nozzle", config, {}, project=project,
+            row_id="rotor_1", row_role="rotor", registry=registry)

@@ -163,23 +163,28 @@ def test_coupled_rotor_inputs_are_read_only_and_manual_values_survive_toggle(mon
     state, error = edit([], project, registry, "rotor_1", [])
     assert not error and state["supported"]
     identifiers = [{"type": "rotor-manual-inlet", "row": "rotor_1"}]
-    manual_styles, cells, computed_styles, speed_styles = display(state, registry, identifiers)
+    manual_styles, cells, computed_styles, speed_styles, warnings = display(state, registry, identifiers)
     assert manual_styles == [{"display": "none"}] and computed_styles == [{}] and speed_styles == [{}]
     for name, cell in zip(ROTOR_INLET_FIELDS, cells[0]):
         widget = cell.children[1]
         assert widget.disabled and not getattr(widget, "id", None)
         assert widget.value == resolved["rotor_design"][name]
         assert cell.className == "control computed-control"
-    assert "subsonic" in cells[0][-1].children
+    assert len(warnings[0]) == 2
+    assert "supersonic relative inlet" in warnings[0][0].children
+    assert "Negative relative inlet angle" in warnings[0][1].children
+    assert all(alert.className == "inlet-warning" and alert.role == "alert" for alert in warnings[0])
+    assert "supersonic" not in cells[0][-1].children
     assert readiness(state, registry, None, None, False)[0]
     assert "supersonic relative inlet" in readiness(state, registry, None, None, False)[-1]
     assert rotor["geometry"]["rotor_design"] == manual_inputs
     assert registry == original_registry
     rotor["geometry"]["inlet_coupling"]["mode"] = "manual"
     state["project"] = project
-    manual_styles, _, computed_styles, speed_styles = display(state, registry, identifiers)
+    manual_styles, _, computed_styles, speed_styles, warnings = display(state, registry, identifiers)
     assert manual_styles == [{}] and computed_styles == [{"display": "none"}]
     assert speed_styles == [{"display": "none"}]
+    assert warnings == [[]]
     assert rotor["geometry"]["rotor_design"] == manual_inputs
 
 

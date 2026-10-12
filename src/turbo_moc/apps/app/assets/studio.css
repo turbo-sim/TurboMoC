@@ -48,6 +48,8 @@ summary small {float:right;color:#71858e;font-weight:400;font-size:10px}
 .computed-control input:disabled {background:#e8eef1;color:#526d79;border-color:#d4dfe5;
   opacity:1;cursor:not-allowed}
 .computed-inlet > small {display:block;line-height:1.5;margin-bottom:10px}
+.inlet-warning {color:#a51d24;background:#fff0f0;border-left:4px solid #c62828;
+  padding:10px 12px;margin:10px 0;font-size:12px;font-weight:600;line-height:1.5}
 .control .Select {min-width:0}
 .control.fluid-selector,.control.fluid-property {grid-template-columns:minmax(0,1fr);gap:6px}
 .fluid-selector > div,.fluid-selector > button {min-width:0}

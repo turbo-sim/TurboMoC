@@ -70,7 +70,21 @@ def resolve_configuration(project, row_id, registry):
     return config
 
 
+def inlet_warnings(config):
+    """Report unsupported vortex inlets without hiding the calculated state."""
+    design = config.get("rotor_design")
+    if design is None:
+        return []
+    warnings = []
+    if design["M_inlet"] <= 1:
+        warnings.append("The vortex rotor requires a supersonic relative inlet (M > 1). Adjust speed or inlet conditions.")
+    if design["beta_inlet"] < 0:
+        warnings.append("Negative relative inlet angle (beta_inlet < 0): the rotor blade concavity is reversed. Reduce speed or adjust inlet conditions.")
+    return warnings
+
+
 def require_supersonic_inlet(config):
-    """Block unsuitable coupled conditions while leaving the readout visible."""
-    if "rotor_design" in config and config["rotor_design"]["M_inlet"] <= 1:
-        raise ValueError("The vortex rotor requires a supersonic relative inlet (M > 1). Adjust speed or inlet conditions.")
+    """Block unsupported Mach numbers and angles before starting the solver."""
+    warnings = inlet_warnings(config)
+    if warnings:
+        raise ValueError(" ".join(warnings))
