@@ -7,10 +7,32 @@ import pytest
 
 from turbo_moc.configuration_project import default_project, row_configuration
 from turbo_moc.geometry.geometry_3d import design_data, load_design
-from turbo_moc.geometry.rotor_geometry import build_rotor_design
+from turbo_moc.geometry.rotor_geometry import _bezier_reference, build_rotor_design
+from turbo_moc.geometry import geometry_2d as planar
 from turbo_moc.geometry.meridional_channel import corresponding_boundary
 from turbo_moc.meshing import meshing_3d
 from turbo_moc.rotor import design_rotor_vortex_blade
+
+
+@pytest.mark.parametrize("angles", [(60., -60.), (0., 0.), (-60., 60.), (5., -5.)])
+def test_bezier_reference_handles_parallel_and_incompatible_guides_without_folding(angles):
+    station = np.linspace(0, 1, 101)
+    center = 1.2 * station * (1 - station)
+    upper = np.column_stack((center + .05, -station))
+    lower = np.column_stack((center - .05, -station))
+    contour = np.vstack((upper, lower[::-1], upper[:1]))
+    samples, spline, guides = _bezier_reference(contour, *angles, 120)
+    assert len(spline.c) == 4
+    assert np.all(np.diff(samples[:, 1]) < 0)
+    np.testing.assert_allclose(samples[[0, -1]], guides[[0, -1]])
+    for endpoint, angle in zip((0., 1.), angles):
+        tangent = spline(endpoint, 1)
+        np.testing.assert_allclose(tangent / np.linalg.norm(tangent), planar.metal_direction(angle), atol=1e-12)
+    if angles == (60., -60.):
+        np.testing.assert_allclose(spline(.5), guides[1])
+    # Sampling resolution changes plotting density, not the cubic geometry.
+    _, fine, _ = _bezier_reference(contour, *angles, 480)
+    np.testing.assert_allclose(spline.c, fine.c)
 
 
 def test_periodic_transfer_preserves_exact_cad_nodes_between_plot_samples():
@@ -50,6 +72,15 @@ def test_vortex_adapter_preserves_closed_contour_and_mapping(vortex_result, fami
         np.testing.assert_allclose(curves["periodic_right"] - curves["periodic_left"],
                                    np.tile([design.meridional_channel.pitch, 0.],
                                            (len(curves["periodic_left"]), 1)))
+        assert len(curves["blade_reference_spline"].c) == 4
+        assert np.all(np.diff(curves["passage_reference"][:, 1]) < 0)
+        guides = curves["blade_reference_guides"]
+        np.testing.assert_allclose(curves["blade_reference"][[0, -1]], guides[[0, -1]])
+        for side, reference_u, extension_u in (("inlet", 0., 1.), ("outlet", 1., 0.)):
+            reference_tangent = curves["blade_reference_spline"](reference_u, 1)
+            extension_tangent = curves[f"{side}_spline"](extension_u, 1)
+            np.testing.assert_allclose(reference_tangent / np.linalg.norm(reference_tangent),
+                                       extension_tangent / np.linalg.norm(extension_tangent), atol=1e-12)
         left = restored.meridional_channel.map_points(curves["periodic_left"], eta)
         right = restored.meridional_channel.map_points(curves["periodic_right"], eta)
         transform = restored.meridional_channel.periodic_transform()

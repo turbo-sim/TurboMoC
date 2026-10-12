@@ -44,6 +44,14 @@ the current interface. The rotor provider uses the existing vortex-flow method;
 the earlier planning-only `conventional` value migrates to `vortex` when loading
 an old placeholder. It is not exposed as an alternative rotor solver.
 
+Rotor periodic boundaries use one cubic Bezier reference guided by blade
+midpoints at 10%, 50% and 90% of the streamwise chord. Endpoint handles follow
+the relative inlet/outlet angles, with conservative handles when the direct
+two-handle solve would fold the curve. The existing extension settings and
+clearance-maximizing tangential shift remain in use; no additional YAML fields
+are needed. The [construction example](../../../../examples/moc_design/rotor_flow_domain_construction.py)
+plots the package geometry, its control points and extension joins.
+
 **Apply calculations to** provides an independent checkbox for each active row.
 Check both Stator and Rotor to calculate both; uncheck all rows to disable the
 calculation buttons. Selection order does not change machine execution order.

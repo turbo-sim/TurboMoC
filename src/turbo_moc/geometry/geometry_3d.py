@@ -48,7 +48,7 @@ class Design:
             "inlet_extension", "outlet_extension", "inlet_control_points",
             "outlet_control_points", "inlet_spline", "outlet_spline",
             "convergent_spline",
-            "blade_reference", "blade_reference_spline",
+            "blade_reference", "blade_reference_spline", "blade_reference_guides",
         ):
             value = self.curves.get(name)
             if isinstance(value, BSpline):

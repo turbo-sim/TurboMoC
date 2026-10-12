@@ -84,7 +84,7 @@ def apply_domain_shift(blade, domain, domain_shift):
     result = dict(domain)
     for name in ("passage_reference", "periodic_left", "periodic_right", "inlet", "outlet",
                  "convergent", "divergent", "inlet_extension", "outlet_extension",
-                 "inlet_control_points", "outlet_control_points", "blade_reference"):
+                 "inlet_control_points", "outlet_control_points", "blade_reference", "blade_reference_guides"):
         if name in domain:
             result[name] = domain[name] + [delta, 0.]
     for name in ("inlet_spline", "convergent_spline", "outlet_spline", "blade_reference_spline"):

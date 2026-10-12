@@ -7,7 +7,7 @@ the blade count; a linear cascade preserves the solver's natural pitch/chord.
 """
 
 import numpy as np
-from scipy.interpolate import make_interp_spline
+from scipy.interpolate import BSpline, make_interp_spline
 
 from . import geometry_2d as planar
 from .geometry_3d import Design, require_containment
@@ -59,14 +59,10 @@ def _boundary_splines(result, points):
     return splines
 
 
-def _blade_reference(contour, count):
-    """Midpoint of the solid profile's pitchwise extent at each chord station.
-
-    Intersecting the complete polygon handles rounded edges and avoids treating
-    the solver's open passage walls as the two sides of one solid blade.
-    """
+def _midpoint_guides(contour):
+    """Three interior slice midpoints, avoiding the rounded blade extremities."""
     top, bottom = contour[:, 1].max(), contour[:, 1].min()
-    y = np.linspace(top, bottom, count)
+    y = top + np.array([.1, .5, .9]) * (bottom - top)
     a, b = contour[:-1], contour[1:]
     dy = b[:, 1] - a[:, 1]
     transverse = np.abs(dy) > 1e-12
@@ -77,8 +73,39 @@ def _blade_reference(contour, count):
     left = np.min(np.where(valid, crossings, np.inf), axis=1)
     right = np.max(np.where(valid, crossings, -np.inf), axis=1)
     if not np.isfinite([left, right]).all():
-        raise ValueError("Could not construct a continuous vortex blade passage reference.")
+        raise ValueError("Could not construct vortex blade midpoint guides.")
     return np.column_stack(((left + right) / 2, y))
+
+
+def _bezier_reference(contour, beta_in, beta_out, count):
+    """One flow-aligned cubic, guided by the 10/50/90% chord midpoints.
+
+    Solve two handle lengths to pass through the middle guide at t=0.5.
+    Positive, downstream-ordered control points prevent folding. Parallel or
+    incompatible directions use short conservative handles instead; the middle
+    guide then becomes an approximate target. No iterative curve fitting.
+    """
+    guides = _midpoint_guides(contour)
+    start, middle, end = guides
+    incoming, outgoing = planar.metal_direction(beta_in), planar.metal_direction(beta_out)
+    matrix = np.column_stack((incoming, -outgoing))
+    rhs = (8 / 3) * (middle - (start + end) / 2)
+    downstream = start[1] - end[1]
+    handles = None
+    if np.linalg.cond(matrix) < 1e8:
+        candidate = np.linalg.solve(matrix, rhs)
+        axial_travel = -candidate @ np.array([incoming[1], outgoing[1]])
+        if np.all(candidate > 0) and axial_travel < downstream:
+            handles = candidate
+    if handles is None:
+        handles = np.full(2, .25 * np.linalg.norm(end - start))
+        axial_travel = -handles @ np.array([incoming[1], outgoing[1]])
+        if axial_travel > .9 * downstream:
+            handles *= .9 * downstream / axial_travel
+    controls = np.array([start, start + handles[0] * incoming,
+                         end - handles[1] * outgoing, end])
+    spline = BSpline([0, 0, 0, 0, 1, 1, 1, 1], controls, 3)
+    return spline(np.linspace(0, 1, count)), spline, guides
 
 
 def _flow_domain(blade, settings):
@@ -88,16 +115,17 @@ def _flow_domain(blade, settings):
     })
     count = options["num_points"]
     contour = planar.blade_contour(blade)
-    middle = _blade_reference(contour, count)
     chord = np.ptp(contour[:, 1])
     beta_in, beta_out = blade["metal_angle_in"], blade["metal_angle_out"]
-    middle_spline = make_interp_spline(
-        np.linspace(0, 1, count), middle, k=3,
-        bc_type=([(1, [chord * np.tan(np.deg2rad(beta_in)), -chord])],
-                 [(1, [chord * np.tan(np.deg2rad(beta_out)), -chord])]),
-    )
-    upstream = settings["inlet_chords"] * chord
-    downstream = settings["outlet_chords"] * chord
+    middle, middle_spline, guides = _bezier_reference(contour, beta_in, beta_out, count)
+    # Caps remain beyond the FULL blade despite the interior cubic anchors.
+    extents = np.array([settings["inlet_chords"], settings["outlet_chords"]]) * chord
+    if not np.isfinite(extents).all() or min(extents) <= 0:
+        raise ValueError("Flow-domain inlet_chords and outlet_chords must be positive.")
+    inlet_y = contour[:, 1].max() + extents[0]
+    outlet_y = contour[:, 1].min() - extents[1]
+    upstream = inlet_y - middle[0, 1]
+    downstream = middle[-1, 1] - outlet_y
     if not np.isfinite([upstream, downstream]).all() or min(upstream, downstream) <= 0:
         raise ValueError("Flow-domain inlet_chords and outlet_chords must be positive.")
     inlet_point = middle[0] + [-.5 * upstream * np.tan(np.deg2rad(beta_in)), upstream]
@@ -111,6 +139,7 @@ def _flow_domain(blade, settings):
     reference = np.vstack((inlet, middle[1:], outlet[1:]))
     domain = planar._domain(reference, blade["pitch"]) | {
         "blade_reference": middle, "blade_reference_spline": middle_spline,
+        "blade_reference_guides": guides,
         "inlet_extension": inlet, "outlet_extension": outlet,
         "inlet_control_points": inlet_cp, "outlet_control_points": outlet_cp,
         "inlet_spline": inlet_spline, "outlet_spline": outlet_spline,

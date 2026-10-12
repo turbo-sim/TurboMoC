@@ -113,7 +113,7 @@ class CoreDeformation:
         self.section = section
         xy = section["xy"]
         wall = np.unique(section["boundaries"]["blade"])
-        # Distance to sampled wall nodes conservatively protects extra core rows.
+        # Distance to sampled wall nodes estimates the protected layer stack.
         distance = cKDTree(xy[wall]).query(xy)[0]
         thickness = (
             section["profile"]["stack_thickness"]
@@ -129,10 +129,9 @@ class CoreDeformation:
                 ]
             )
         )
-        # The extra protected *core* buffer is optional. Near a shared stage
-        # interface it can reach the outer boundary even when every requested
-        # inflation layer fits. Keep the full layer stack, reducing only that
-        # artificial buffer to leave room for harmonic core displacement.
+        # Protect the full inflation stack, without pinning extra core rows.
+        # An artificial buffer can leave a narrow strip beside the periodics
+        # that inverts during span scaling although the actual layers fit.
         # Nearest wall-node distance overestimates distance to a wall segment;
         # hypot(thickness, half_max_edge) accounts for normal-layer nodes
         # midway along a sampled wall edge. This remains a sampled-distance
@@ -147,8 +146,7 @@ class CoreDeformation:
                 "Insufficient sampled wall clearance to protect the full inflation stack. "
                 "Increase the blade gap/domain clearance or reduce the requested inflation thickness."
             )
-        protect = min(1.5 * thickness + numerics["blade_size"], .5 * (required + clearance))
-        self.collar = np.flatnonzero(distance <= max(required, protect))
+        self.collar = np.flatnonzero(distance <= required)
         self.fixed = np.union1d(self.collar, outer)
         self.free = np.setdiff1d(np.arange(len(xy)), self.fixed)
         edges = np.unique(

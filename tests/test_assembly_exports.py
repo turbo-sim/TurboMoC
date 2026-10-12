@@ -74,6 +74,47 @@ def test_close_shared_cap_preserves_collar_and_slides_only_tangentially():
         mesh.CoreDeformation(section, {"blade_size": .25}, sliding_boundaries=("inlet",))
 
 
+def test_narrow_periodic_core_strip_can_move_without_erasing_inflation_layers():
+    """Extra pinned core rows would cross a periodic side under 12% scaling."""
+    x = np.array([-2.3, -2.1, -1.8, -1.5, -1, 0, 1, 1.5, 1.8, 2.1, 2.3])
+    y = np.array([-3, -2.5, -2, -1, 0, 1, 2, 2.5, 3])
+    points = np.array([(a, b) for b in y for a in x])
+    cells = np.array([[len(x)*j+i, len(x)*j+i+1, len(x)*(j+1)+i+1, len(x)*(j+1)+i]
+                      for j in range(len(y)-1) for i in range(len(x)-1)
+                      if not (-1 <= x[i] < 1 and -1 <= y[j] < 1)])
+    used = np.unique(cells)
+    points, cells = points[used], np.searchsorted(used, cells)
+    edges = np.sort(np.concatenate([cells[:, [j, (j+1) % 4]] for j in range(4)]), axis=1)
+    edges, counts = np.unique(edges, return_counts=True, axis=0)
+    boundaries = {name: [] for name in ("blade", "inlet", "outlet", "periodic_left", "periodic_right")}
+    for edge in edges[counts == 1]:
+        ends = points[edge]
+        name = ("inlet" if np.all(ends[:, 1] == 3) else "outlet" if np.all(ends[:, 1] == -3) else
+                "periodic_left" if np.all(ends[:, 0] == -2.3) else
+                "periodic_right" if np.all(ends[:, 0] == 2.3) else "blade")
+        boundaries[name].append(edge)
+    section = {"xy": points, "cells": {3: cells},
+               "boundaries": {name: np.array(items) for name, items in boundaries.items()},
+               "profile": {"enabled": True, "stack_thickness": .8},
+               "slave": np.flatnonzero(points[:, 0] == 2.3),
+               "master": np.flatnonzero(points[:, 0] == -2.3)}
+    reference = {"inlet": np.array([[-2.3, 3], [2.3, 3]]),
+                 "outlet": np.array([[-2.3, -3], [2.3, -3]]),
+                 "periodic_left": np.array([[-2.3, 3], [-2.3, -3]]),
+                 "periodic_right": np.array([[2.3, 3], [2.3, -3]])}
+    scale = 1.12
+    target = {name: values * [1, scale] for name, values in reference.items()}
+    deformation = mesh.CoreDeformation(section, {"blade_size": .25})
+    result = deformation.deform(scale, reference, target, 4.6)
+    # The node at the nominal outer layer retains the complete scaled stack.
+    layer = np.flatnonzero(np.all(np.isclose(points, [1.8, 0]), axis=1))[0]
+    core = np.flatnonzero(np.all(np.isclose(points, [2.1, 0]), axis=1))[0]
+    np.testing.assert_allclose(result[layer], points[layer] * scale)
+    assert result[layer, 0] < result[core, 0] < 2.3
+    np.testing.assert_allclose(result[section["slave"]] - result[section["master"]],
+                               np.tile([4.6, 0], (len(section["slave"]), 1)))
+
+
 @pytest.mark.parametrize("family,outflow", [("axial", False), ("radial", False), ("radial", True)])
 def test_export_applies_assembly_placement_and_preserves_periodicity(tmp_path, family, outflow):
     config = row_configuration(default_project(family), "stator_1")
