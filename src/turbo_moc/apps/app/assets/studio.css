@@ -79,21 +79,34 @@ button:disabled {opacity:.4;cursor:default}
 .plot-group {background:white;border:1px solid #dfe7eb;border-radius:7px;margin:0 0 14px;overflow:hidden}
 .plot-group > summary {padding:11px 14px;background:#fafcfc;border-bottom:1px solid transparent;font-size:13px}
 .plot-group[open] > summary {border-bottom-color:#e4ebee}
-.plot-group .view-controls {padding:12px 14px}
 .split {display:flex;align-items:stretch;gap:12px}
 .pane {flex:1;min-width:0;background:white;border-radius:7px;padding:8px}
 .pane > small {display:block;line-height:1.5;padding:0 8px 8px}
 .engineering-plot {height:46vh;min-height:330px;max-height:560px}
 .vtk-frame {height:58vh;min-height:370px;display:flex;flex-direction:column;padding:8px}
 .vtk-host {min-height:0;flex:1}
+.display-viewport {display:flex;align-items:stretch;min-width:0}
+.display-viewport > .vtk-frame {flex:1;min-width:0}
+.cascade-display-toolbar {display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid #e4ebee}
+.cascade-display-button {display:flex;align-items:center;gap:12px;font-size:12px}
+.cascade-display-button input {margin-right:6px;accent-color:#376a7d}
+.display-panel {flex:0 0 285px;width:285px;background:#fafcfc;border-left:1px solid #dfe7eb;
+  padding:14px;overflow:auto;max-height:58vh;min-height:370px}
+.display-panel-header {display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.display-panel-header button {font-size:20px;padding:0 8px;border:none;background:transparent}
+.display-panel .control {grid-template-columns:minmax(0,1fr) 70px;gap:8px}
+.display-presets {display:flex;gap:5px;flex-wrap:wrap;margin:12px 0}
+.display-presets button,.display-panel > section > button {font-size:11px;padding:6px 8px}
+.display-surface-row {display:flex;align-items:center;justify-content:space-between;padding:7px 0;
+  border-bottom:1px solid #e4ebee;font-size:12px}
+.display-surface-row input[type=checkbox] {margin-right:7px;accent-color:#376a7d}
+.surface-color-picker input {width:32px;height:26px;padding:1px;border:1px solid #bacbd3;border-radius:4px;cursor:pointer}
+.display-panel > section > div:last-child,.display-panel > section > button:last-child {margin-top:12px}
+.mesh-quality {border-top:1px solid #e4ebee}
+.mesh-quality > summary {padding:10px 14px;font-size:12px}
+.mesh-quality .report {width:100%;max-width:none;min-width:0;height:auto;min-height:0;resize:none;border:none}
 .vtk-frame small {padding:8px;line-height:1.5}
 .mesh-pane {flex:1;min-width:0;background:white;border:1px solid #dfe7eb;border-radius:7px}
-.view-controls {display:flex;align-items:center;gap:18px;flex-wrap:wrap;padding:12px 0;font-size:12px}
-.blade-count {width:190px;flex-shrink:0}
-.blade-count > label {display:block;margin-bottom:6px}
-.surface-options {display:flex;flex-wrap:wrap;gap:8px 12px;flex:1;min-width:230px}
-.surface-options label,.view-controls > div > label {white-space:nowrap}
-.surface-options input,.view-controls input[type=checkbox] {margin-right:5px;accent-color:#376a7d}
 .report {width:355px;min-width:285px;max-width:50%;resize:horizontal;overflow:auto;height:58vh;
   min-height:370px;background:white;border:1px solid #dfe7eb;border-radius:7px;padding:14px}
 .report h3 {margin-top:0;font-size:15px}
@@ -114,5 +127,7 @@ a {color:#376a7d}
   .split {flex-direction:column}
   .report {width:100%;max-width:100%;height:500px}
   .engineering-plot,.vtk-frame {height:420px}
+  .display-viewport {flex-direction:column}
+  .display-panel {width:100%;flex:auto;max-height:none;min-height:0;border-left:none;border-top:1px solid #dfe7eb}
 }
 

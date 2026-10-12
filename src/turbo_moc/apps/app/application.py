@@ -16,7 +16,7 @@ from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, 
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
-from . import workflow as flow, plots, project_export, calculations, rotor_inlet, blade_counts
+from . import workflow as flow, plots, project_export, calculations, rotor_inlet, blade_counts, display_panel
 from ...meshing import meshing_3d as mesh
 from ... import configuration_project as project_model
 from ...configuration_rotor import default_axial_interspace_mm, SPEED_TYPES
@@ -322,29 +322,6 @@ def viewport(name):
         html.Small(id=f"{name}-note")], className="vtk-frame")
 
 
-def surface_options(family):
-    return [{"label": {"hub": "span start", "shroud": "span end"}.get(n, n.replace("_", " "))
-             if family == "linear" else n.replace("_", " "), "value": n}
-            for n in mesh.BOUNDARIES]
-
-
-def view_controls(pane, config, *, mesh_view=False):
-    family = config["meridional_channel"]["type"]
-    count = 25 if family == "linear" else config["meridional_channel"]["num_blades"]
-    defaults = config["mesh"]["pyvista"]
-    result = [html.Div([html.Label("Displayed blades"), dcc.Slider(
-        id=f"{pane}-copies", min=1, max=count, step=1,
-        value=min(count, config["mesh"]["matplotlib"]["num_blades"]),
-        marks={1: "1", count: str(count)}, updatemode="mouseup")], className="blade-count"),
-        dcc.Checklist(id=f"{pane}-surfaces", options=surface_options(family),
-            value=[n for n, chosen in defaults["surfaces"].items() if chosen],
-            inline=True, className="surface-options")]
-    if mesh_view:
-        result.append(dcc.Checklist(id="mesh-edges", options=[{"label": "Mesh edges", "value": "edges"}],
-            value=["edges"] if defaults["show_mesh_edges"] else []))
-    return html.Div(result, className="view-controls")
-
-
 @lru_cache(maxsize=8)
 def reference_artifact(session, job):
     return mesh.load_section(flow.directory({"session": session, "job": job}))
@@ -511,7 +488,7 @@ def create_app(config_file=None, output_dir=None):
                                 className="engineering-plot"), html.Small(id="assembly-basis")], className="pane"),
                         ], className="split")], open=True, className="plot-group"),
                         html.Details([html.Summary("Three-dimensional machine geometry"),
-                            view_controls("geometry", config), viewport("geometry")],
+                            *display_panel.view(project, "geometry", viewport("geometry"))],
                             open=True, className="plot-group", id="geometry-details"),
                     ], id="design-panel"),
                     html.Section([
@@ -522,10 +499,11 @@ def create_app(config_file=None, output_dir=None):
                                 className="engineering-plot"), html.Small(id="meridional-basis")], className="pane"),
                         ], className="split")], open=True, className="plot-group"),
                         html.Details([html.Summary("Three-dimensional mesh · selected-row quality"),
-                            view_controls("mesh", config, mesh_view=True), html.Div(id="volume-status", className="message"),
-                            html.Div([html.Div(viewport("mesh"), className="mesh-pane"),
+                            *display_panel.view(project, "mesh", viewport("mesh")),
+                            html.Div(id="volume-status", className="message"),
+                            html.Details([html.Summary("Selected-row mesh quality"),
                                 html.Aside(id="report", children="Generate a 3D mesh to see its report.", className="report")],
-                                className="split")], open=True, className="plot-group", id="mesh-details"),
+                                open=True, className="mesh-quality")], open=True, className="plot-group", id="mesh-details"),
                     ], id="mesh-panel"),
                 ], id="views"), type="circle", delay_show=300)],
                     className="content-scroll"),
@@ -533,6 +511,8 @@ def create_app(config_file=None, output_dir=None):
                     children="No background job yet.")], open=False, className="terminal", id="terminal"),
             ])], className="shell")], id="app")
     app.layout = layout
+    for pane in ("geometry", "mesh"):
+        display_panel.register(app, pane)
 
     @app.callback(Output({"type": "natural-blade-sizing", "row": ALL}, "children"),
         Input("config", "data"), Input("row-references", "data"),
@@ -804,22 +784,12 @@ def create_app(config_file=None, output_dir=None):
         return (f"active-{name}",
             {} if name == "design" else {"display": "none"}, {} if name == "mesh" else {"display": "none"})
 
-    @app.callback(*[Output(f"{pane}-copies", prop) for pane in ("geometry", "mesh")
-        for prop in ("max", "marks", "value")], Output("geometry-surfaces", "options"),
-        Output("mesh-surfaces", "options"), Output("mesh-width", "data"),
-        Input("config", "data"), State("geometry-copies", "value"), State("mesh-copies", "value"))
-    def display_settings(state, geometry_count, mesh_count):
+    @app.callback(Output("mesh-width", "data"), Input("config", "data"))
+    def display_settings(state):
         if not state or not state.get("valid"):
-            return (no_update,) * 9
-        family = state["project"]["machine"]["geometry_type"]
+            return no_update
         config = state.get("config")
-        annular_counts = [r["geometry"]["meridional_channel"]["num_blades"]
-            for r in project_model.active_rows(state["project"]) if family != "linear"]
-        count = 25 if family == "linear" else max(annular_counts, default=1)
-        values = tuple(value for current in (geometry_count, mesh_count)
-            for value in (count, {1: "1", count: str(count)}, min(count, max(1, current or 1))))
-        return (*values, surface_options(family), surface_options(family),
-                config["mesh"]["visualization"]["volume_edge_width"] if config else 0.35)
+        return config["mesh"]["visualization"]["volume_edge_width"] if config else 0.35
 
     @app.callback(Output("geometry-data", "data"), Output("geometry-key", "data"),
         Output("design-section", "figure"), Output("meridional_channel", "figure"),
@@ -1189,12 +1159,12 @@ def create_app(config_file=None, output_dir=None):
         except (OSError, ValueError, KeyError, TypeError) as exc:
             return no_update, f"Cannot download project: {exc}"
 
-    app.clientside_callback("function(data, copies, surfaces, rows) { return window.dash_clientside.studio.render(data, copies, surfaces, [], 1, 'geometry', rows); }",
+    app.clientside_callback("function(data, settings, rows) { return window.dash_clientside.studio.render(data, settings, 'geometry', rows, 1); }",
         Output("geometry-scene", "children"), Output("geometry-note", "children"), Input("geometry-data", "data"),
-        Input("geometry-copies", "value"), Input("geometry-surfaces", "value"), Input("plotted-rows", "value"))
-    app.clientside_callback("function(data, copies, surfaces, edges, width, rows) { return window.dash_clientside.studio.render(data, copies, surfaces, edges, width, 'mesh', rows); }",
-        Output("mesh-scene", "children"), Output("mesh-note", "children"), Input("volume-data", "data"), Input("mesh-copies", "value"),
-        Input("mesh-surfaces", "value"), Input("mesh-edges", "value"), Input("mesh-width", "data"), Input("plotted-rows", "value"))
+        Input("geometry-display", "data"), Input("plotted-rows", "value"))
+    app.clientside_callback("function(data, settings, width, rows) { return window.dash_clientside.studio.render(data, settings, 'mesh', rows, width); }",
+        Output("mesh-scene", "children"), Output("mesh-note", "children"), Input("volume-data", "data"),
+        Input("mesh-display", "data"), Input("mesh-width", "data"), Input("plotted-rows", "value"))
     return app
 
 

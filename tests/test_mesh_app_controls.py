@@ -74,9 +74,8 @@ def test_fractional_volume_width_reaches_shader_store_without_changing_mesh_iden
     state = {"project": project, "config": config, "valid": True, "supported": True,
              "row_id": "stator_1", "role": "stator", **app.keys(config)}
     application = create_app()
-    key = next(key for key in application.callback_map if key.startswith("..geometry-copies.max"))
-    display_settings = application.callback_map[key]["callback"].__wrapped__
-    assert display_settings(state, 2, 3)[-1] == 0.15
+    display_settings = application.callback_map["mesh-width.data"]["callback"].__wrapped__
+    assert display_settings(state) == 0.15
     assert app.keys(config) == before
     shader_key = next(key for key in application.callback_map if key.startswith("..mesh-scene.children"))
     shader = application.callback_map[shader_key]

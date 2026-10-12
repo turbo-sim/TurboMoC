@@ -35,6 +35,13 @@ also show every checked row in a shared midspan conformal chart, including the
 physical interspace and angular phase. Solid meridional outlines show the blade extent;
 dashed outlines show inlet/outlet flow-domain extensions. Hover over the compact
 control strip for interspace details and guidance.
+Each 3D view has a visibility checkbox and **Display** button for every cascade.
+**Display** opens a panel beside the viewer for that cascade's displayed blade
+count, surface visibility and colors. Geometry and mesh keep separate display
+settings; **Copy from geometry** transfers the selected cascade's settings to
+the mesh view. Display changes preserve the camera and do not alter the physical
+blade count, YAML configuration or exported meshes. Hover over **Displayed blades**
+for guidance.
 These are the only app YAML samples; the package has Python initialization
 defaults and accepts any caller-supplied project YAML.
 

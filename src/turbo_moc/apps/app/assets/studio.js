@@ -50,10 +50,9 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       const styleKey = [scene.width, scene.edges, pixelRatio].join("|");
       if (scene.styleKey === styleKey) return;
       scene.styleKey = styleKey;
-      const mapper = window.turbomocMeshEdges.mapper(scene.width, scene.edges, pixelRatio);
       for (const actor of scene.actors) {
         if (!actor.props.actor.visibility) continue;
-        actor.props.mapper = mapper;
+        actor.props.mapper = window.turbomocMeshEdges.mapper(scene.width, actor.displayEdges, pixelRatio);
       }
       studio.commit(scene);
       // Wait for React to apply mapper settings before requesting a new frame.
@@ -125,14 +124,17 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         actor: Object.assign({}, actor.props.actor, {visibility: false})
       })}));
     },
-    render: function(data, copies, selected, edges, width, pane, plottedRows) {
+    render: function(data, settings, pane, plottedRows, width) {
       const studio = window.dash_clientside.studio;
       const previous = studio.scenes[pane];
+      settings = settings || {};
       const rows = data && (data.rows || [data]).filter(row =>
-        plottedRows == null || plottedRows.includes(row.id || 'stator_1'));
+        (plottedRows == null || plottedRows.includes(row.id || 'stator_1')) &&
+        (!settings[row.id] || settings[row.id].visible !== false));
       if (!rows || !rows.length) {
         if (previous && previous.observer) previous.observer.disconnect();
         const note = plottedRows && !plottedRows.length ? "Check a row under Plot rows to display it."
+                   : data && data.rows && data.rows.length ? "Show a cascade using its display toolbar."
                    : pane === "mesh" ? "Generate a current 3D mesh to show its boundary cells."
                                     : "Compute current MoC to show geometry.";
         if (!previous) return [window.dash_clientside.no_update, note];
@@ -145,14 +147,13 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         studio.commit(hidden);
         return [window.dash_clientside.no_update, note];
       }
-      const count = Math.max(1, Math.round(copies || 1));
-      const names = selected || [];
-      const showEdges = pane === "mesh" && (edges || []).includes("edges");
       const lineWidth = Number(width) > 0 ? Number(width) : 0.35;
       // Visibility changes actor selection, but retains the numerical data key
       // and camera. No regeneration or removal of hidden row results is needed.
-      const key = [data.key, count, names.join(","), rows.map(row => row.id).join(",")].join("|");
-      const note = count + " displayed blade passage(s) · XYZ [mm] · " +
+      const key = [data.key, JSON.stringify(rows.map(row => [row.id, settings[row.id]]))].join("|");
+      const note = rows.map(row => (row.label || row.id) + ": " +
+        Math.min(row.is_linear ? 25 : row.num_blades, Math.max(1, Math.round((settings[row.id] || {}).copies || 1)))
+        + " displayed").join(" · ") + " · XYZ [mm] · " +
         (pane === "mesh" ? "actual volume boundary cells" : "geometry display tessellation") +
         ". Drag to rotate; scroll to zoom.";
       if (previous && previous.key === key) {
@@ -160,7 +161,6 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         // their data and the camera; no numerical job or geometry transfer.
         if (pane === "mesh") {
           previous.width = lineWidth;
-          previous.edges = showEdges;
           studio.updateMeshStyle(previous);
         }
         return [window.dash_clientside.no_update, note];
@@ -173,6 +173,9 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       // Row datasets remain independent. Translation/rotation is a display
       // transform, so changing assembly placement never mutates mesh nodes.
       for (const row of rows) {
+        const display = settings[row.id] || {};
+        const count = Math.max(1, Math.round(display.copies || 1));
+        const names = display.surfaces || ["blade", "hub"];
         const rowCount = row.is_linear ? count : Math.min(row.num_blades, count);
         const placement = row.placement || {};
         const rowId = row.id || 'stator_1';
@@ -190,14 +193,18 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
             type: "Float32Array", values: s.coordinates}});
         const fields = arrays.length ? [{namespace: "dash_vtk", type: "PointData",
           props: {children: arrays}}] : [];
-        actors.push({namespace: "dash_vtk", type: "GeometryRepresentation", props: {
+        const hex = (display.colors || {})[name];
+        const color = /^#[0-9a-f]{6}$/i.test(hex || "") ?
+          [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255) : colors[name];
+        actors.push({namespace: "dash_vtk", type: "GeometryRepresentation",
+          displayEdges: !!display.edges, props: {
           id: pane + "-actor-" + rowId + "-" + i + "-" + name,
           actor: {visibility: true,
             orientation: [0,0,row.is_linear ? 0 : (placement.angular_phase_deg || 0) - 360 * i / row.num_blades],
             position: row.is_linear ? [0, i * row.pitch_mm, 0] : [0, 0, placement.streamwise_offset_mm || 0]},
           mapper: pane === "mesh" ? window.turbomocMeshEdges.mapper(lineWidth, false)
                                   : {scalarVisibility: false},
-          property: {color: colors[name], edgeColor: [0,0,0],
+          property: {color, edgeColor: [0,0,0],
             edgeVisibility: false, ambient: .25, diffuse: .75,
             interpolation: pane === "geometry" ? 2 : 1},
           children: [{namespace: "dash_vtk", type: "PolyData", props: {
@@ -222,17 +229,17 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       pool.push(...desired.values());
       const mounted = studio.mount(pane);
       const id = mounted.id;
-      const fitted = !!(previous && previous.dataKey === data.key && previous.count === count && previous.fitted);
+      const fitted = !!(previous && previous.dataKey === data.key && previous.fitted);
       const scene = {id, pane, root: mounted.root, viewProps: previous ? previous.viewProps : {},
-        key, dataKey: data.key, count, width: lineWidth,
-        edges: showEdges, actors: pool, active: actors.length > 0, ready: false, fitted};
+        key, dataKey: data.key, width: lineWidth,
+        edges: JSON.stringify(rows.map(row => !!(settings[row.id] || {}).edges)),
+        actors: pool, active: actors.length > 0, ready: false, fitted};
       studio.scenes[pane] = scene;
       studio.commit(scene);
-      // New datasets/families and blade-copy counts fit the camera; surface
-      // visibility, edge width and edge toggles preserve the existing view.
+      // Fit new numerical datasets; display controls preserve the camera.
       if (scene.active) setTimeout(() => studio.fit(id, key, pane, pool.length, 0), 0);
       return [window.dash_clientside.no_update,
-              names.length ? note : "Select a surface to display."];
+              actors.length ? note : "Select a surface to display."];
     }
   }
 });
@@ -242,4 +249,25 @@ document.addEventListener("toggle", event => {
   if (event.target.tagName === "DETAILS" && event.target.open)
     window.dispatchEvent(new Event("resize"));
 }, true);
+
+// Native color controls feed Dash stores without adding a UI dependency.
+function mountSurfaceColors() {
+  document.querySelectorAll('.surface-color-picker').forEach(host => {
+    let picker = host.querySelector('input');
+    if (!picker) {
+      picker = document.createElement('input');
+      picker.type = 'color';
+      picker.addEventListener('input', () => {
+        window.dash_clientside.set_props(JSON.parse(host.dataset.colorId), {data: picker.value});
+      });
+      host.appendChild(picker);
+    }
+    picker.setAttribute('aria-label', host.dataset.colorLabel);
+    picker.title = host.dataset.colorLabel;
+    if (picker.value !== host.dataset.color) picker.value = host.dataset.color;
+  });
+}
+new MutationObserver(mountSurfaceColors).observe(document.documentElement,
+  {subtree: true, childList: true, attributes: true, attributeFilter: ['data-color']});
+mountSurfaceColors();
 
