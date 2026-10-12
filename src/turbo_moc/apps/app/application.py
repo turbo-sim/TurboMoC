@@ -19,7 +19,7 @@ from flask import abort, send_from_directory
 from . import workflow as flow, plots, project_export, calculations, rotor_inlet
 from ...meshing import meshing_3d as mesh
 from ... import configuration_project as project_model
-from ...configuration_rotor import default_axial_interspace_mm
+from ...configuration_rotor import default_axial_interspace_mm, SPEED_TYPES
 from ...api import list_supported_fluids
 from ...fluid_inputs import INLET_FIELDS, PROPERTIES, inlet_values, pair_properties, property_label
 from .preview import preview_geometry
@@ -151,9 +151,18 @@ def rotor_inlet_controls(geometry, row_id, combined):
             options=[{"label": "Specify manually", "value": "manual"},
                 {"label": "Couple to stator exit", "value": "stator_exit", "disabled": not combined}],
             value=coupling["mode"], clearable=False)], className="control"),
-        html.Div(html.Label([html.Span("Rotational speed [rpm]"), dcc.Input(
-            id={"type": "parameter", "row": row_id, "path": "inlet_coupling.rpm"},
-            value=coupling["rpm"], type="number", debounce=True, step="any")], className="control"),
+        html.Div([
+            html.Label([html.Span("Rotational speed type"), dcc.Dropdown(
+                id={"type": "parameter", "row": row_id, "path": "inlet_coupling.rotational_speed.type"},
+                options=[{"label": label, "value": name} for name, label in SPEED_TYPES.items()],
+                value=coupling["rotational_speed"]["type"], clearable=False)], className="control fluid-selector"),
+            html.Label([html.Span(SPEED_TYPES[coupling["rotational_speed"]["type"]],
+                id={"type": "rotor-speed-label", "row": row_id}), dcc.Input(
+                id={"type": "parameter", "row": row_id, "path": "inlet_coupling.rotational_speed.value"},
+                value=coupling["rotational_speed"]["value"], type="number", debounce=True, step="any")],
+                className="control"),
+            html.Small("Dimensionless speeds use the stator back pressure as their reference. Specific speed uses an estimated stator mass flow."),
+            ],
             id={"type": "rotor-coupling-speed", "row": row_id},
             style={} if coupled else {"display": "none"}),
         html.Div(id={"type": "rotor-inlet-warning", "row": row_id}),
@@ -499,6 +508,11 @@ def create_app(config_file=None, output_dir=None):
             ])], className="shell")], id="app")
     app.layout = layout
 
+    @app.callback(Output({"type": "rotor-speed-label", "row": MATCH}, "children"),
+        Input({"type": "parameter", "row": MATCH, "path": "inlet_coupling.rotational_speed.type"}, "value"))
+    def speed_value_label(kind):
+        return SPEED_TYPES[kind]
+
     @app.callback(Output(MACHINE_FLUID_ID, "options"), Output(MACHINE_FLUID_ID, "value"),
         Input("base-project", "data"))
     def machine_fluid(project):
@@ -682,6 +696,12 @@ def create_app(config_file=None, output_dir=None):
                     source = resolved["rotor_source"]
                     message += (f" Inlet midspan radius: {source['inlet_radius_mm']:.4g} mm; "
                                 f"blade speed: {source['triangle']['U']:.4g} m/s.")
+                    speed = source.get("rotational_speed")
+                    if speed:
+                        message += f" Resolved speed: {speed['rpm']:.5g} rpm."
+                        if "reference_pressure" in speed:
+                            message += (f" Stator back-pressure reference: {speed['reference_pressure']:.5g} Pa; "
+                                        f"c₀: {speed['c0']:.5g} m/s; estimated mass flow: {speed['mass_flow']:.5g} kg/s.")
                     warnings = rotor_inlet.inlet_warnings(resolved)
                 except (ValueError, OSError, RuntimeError) as exc:
                     message = str(exc)

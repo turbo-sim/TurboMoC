@@ -33,6 +33,28 @@ using SI units. Stator values describe the stagnation state; manual rotor values
 describe the relative stagnation state. A coupled rotor retains its manual pair
 and values for later use, while its effective inlet comes from the stator exit.
 
+For stator-to-rotor coupling, choose the speed type and value:
+
+```yaml
+inlet_coupling:
+  mode: stator_exit
+  rotational_speed:
+    type: actual  # actual, blade_velocity_ratio, or specific
+    value: 1000.0 # RPM for actual; dimensionless for the other modes
+```
+
+The ratio is `U/c0` at the rotor inlet midspan radius, with
+`c0 = sqrt(2 * delta_h_is)`. Specific speed follows TurboDash's dimensionless
+definition, `omega * sqrt(mass_flow / rho_out_s) / delta_h_is**0.75`.
+Both modes reference expansion from the stator stagnation state to its back
+pressure, rather than to the full stage outlet. Mass flow is a meanline estimate
+from stator exit density, meridional velocity and annular area, without blade
+blockage. The readout reports the resolved RPM, blade speed and reference data.
+Change the numeric value to suit the selected units when changing speed type.
+Historical `rpm` settings migrate to `rotational_speed: {type: actual, value: ...}`.
+Speed affects coupled inlet conditions; manually specified relative inlets remain
+independent of it.
+
 Historical case files with row-level fluids and pressure/quality or
 pressure/temperature inputs are migrated when loaded. If active manual rows
 specify different fluids, set `machine.fluid_name` explicitly to resolve the

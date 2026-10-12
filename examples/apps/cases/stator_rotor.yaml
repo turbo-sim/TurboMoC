@@ -138,7 +138,9 @@ rows:
       le_te_ratio: 25.0
     inlet_coupling:
       mode: stator_exit
-      rpm: 1000.0
+      rotational_speed:
+        type: actual
+        value: 1000.0  # RPM; dimensionless modes reference the stator back pressure
     flow_domain:
       inlet_chords: 1.5
       outlet_chords: 2.0

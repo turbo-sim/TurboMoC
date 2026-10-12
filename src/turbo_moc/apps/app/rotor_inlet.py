@@ -13,6 +13,7 @@ from ... import configuration_project as projects
 from ...configuration_rotor import inlet_radius_mm
 from ...fluid_inputs import INLET_FIELDS
 from ...coupling import derive_rotor_inlet_from_stator
+from .rotor_speed import resolve_speed, stator_reference
 
 
 @lru_cache(maxsize=32)
@@ -44,9 +45,19 @@ def resolve_configuration(project, row_id, registry):
     radius = inlet_radius_mm(config)
     if radius is None:
         raise ValueError("Stator-to-rotor coupling requires an axial or radial machine.")
-    from math import isfinite, pi
-    speed = config["inlet_coupling"]["rpm"] * 2 * pi / 60 * radius / 1000
+    from math import isfinite
     angle = upstream_config["blade_geometry"]["metal_angle_out"]
+    specification = config["inlet_coupling"]["rotational_speed"]
+    reference_state = {}
+    if specification["type"] != "actual":
+        try:
+            reference_state = stator_reference(upstream_config, nozzle, angle)
+        except (ValueError, RuntimeError) as exc:
+            raise ValueError(f"Cannot compute the rotor speed reference: {exc}") from exc
+    resolved_speed = resolve_speed(specification, radius, **{
+        key: reference_state[key] for key in ("enthalpy_drop", "exit_density", "mass_flow")
+        if key in reference_state})
+    speed = resolved_speed["U"]
     # Only the exit state is consumed by the existing velocity-triangle model.
     # Avoid serializing the entire characteristic net on every sidebar edit.
     exit_state = {"fluid_name": project["machine"]["fluid_name"], "wall_final": {
@@ -66,7 +77,8 @@ def resolve_configuration(project, row_id, registry):
                   beta_inlet=triangle["beta_rel_deg"])
     config["rotor_source"] = {"row_id": upstream["id"], "reference": {
         key: reference[key] for key in ("session", "job", "key")},
-        "alpha_deg": angle, "inlet_radius_mm": radius, "triangle": triangle}
+        "alpha_deg": angle, "inlet_radius_mm": radius, "triangle": triangle,
+        "rotational_speed": {**resolved_speed, **reference_state}}
     return config
 
 

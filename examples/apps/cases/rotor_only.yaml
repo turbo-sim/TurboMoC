@@ -37,7 +37,9 @@ rows:
       le_te_ratio: 25.0
     inlet_coupling:
       mode: manual
-      rpm: 20716.71
+      rotational_speed:
+        type: actual
+        value: 20716.71  # RPM; retained for use when coupled to a stator
     flow_domain:
       inlet_chords: 1.5
       outlet_chords: 2.0

@@ -13,7 +13,8 @@ from turbo_moc.apps.app import workflow as flow, rotor_inlet
 def coupled_project(tmp_path, monkeypatch):
     project = projects.set_design_mode(projects.default_project(), "stator_rotor")
     project["machine"]["fluid_name"] = "Air"
-    projects.get_row(project, "rotor_1")["geometry"]["inlet_coupling"].update(mode="stator_exit", rpm=4000)
+    projects.get_row(project, "rotor_1")["geometry"]["inlet_coupling"].update(
+        mode="stator_exit", rotational_speed={"type": "actual", "value": 4000})
     config = projects.row_configuration(project, "stator_1")
     reference = {"session": "a" * 32, "job": "b" * 32, "row_id": "stator_1",
                  "key": flow.keys(config)["nozzle"]}
@@ -173,6 +174,23 @@ def test_property_failure_is_a_readable_inlet_error(coupled_project, monkeypatch
     monkeypatch.setattr(rotor_inlet, "_triangle", fail)
     with pytest.raises(ValueError, match="Cannot compute the coupled rotor inlet.*property range"):
         flow.resolved_configuration(project, "rotor_1", registry)
+
+
+@pytest.mark.parametrize("kind,value", [("blade_velocity_ratio", .4), ("specific", .7)])
+def test_dimensionless_speed_drives_the_coupled_velocity_triangle(coupled_project, monkeypatch, kind, value):
+    from turbo_moc.apps.app.rotor_speed import resolve_speed
+    project, registry, calls = coupled_project
+    coupling = project["rows"][1]["geometry"]["inlet_coupling"]
+    coupling["rotational_speed"] = {"type": kind, "value": value}
+    reference = {"enthalpy_drop": 50000., "exit_density": 2., "mass_flow": 5.,
+                 "c0": math.sqrt(100000.), "reference_pressure": 95000.}
+    monkeypatch.setattr(rotor_inlet, "stator_reference", lambda *args: reference)
+    config = flow.resolved_configuration(project, "rotor_1", registry)
+    expected = resolve_speed(coupling["rotational_speed"], config["rotor_source"]["inlet_radius_mm"],
+        enthalpy_drop=50000., exit_density=2., mass_flow=5.)
+    assert calls[-1][2] == pytest.approx(expected["U"])
+    assert config["rotor_source"]["rotational_speed"]["rpm"] == pytest.approx(expected["rpm"])
+    assert config["rotor_source"]["rotational_speed"]["reference_pressure"] == 95000.
 
 
 @pytest.mark.parametrize("mach,beta,expected", [

@@ -16,7 +16,9 @@ ROTOR_DEFAULTS = {
     "M_inlet": 1.5, "M_outlet": 1.5, "M_lower": 1.05, "M_upper": 2.0,
     "beta_inlet": 65.0, "num_points": 60, "le_te_ratio": 25.0,
 }
-COUPLING_DEFAULTS = {"mode": "manual", "rpm": 20716.71}
+SPEED_TYPES = {"actual": "Actual speed [rpm]", "blade_velocity_ratio": "Blade velocity ratio U/c₀ [-]",
+               "specific": "Specific speed [-]"}
+COUPLING_DEFAULTS = {"mode": "manual", "rotational_speed": {"type": "actual", "value": 20716.71}}
 FLOW_DOMAIN_DEFAULTS = {
     "inlet_chords": 1.5, "outlet_chords": 2.0,
     "domain_shift_mode": "auto", "domain_shift": 0.0,
@@ -51,6 +53,10 @@ def normalize_rotor_geometry(geometry):
                            ("flow_domain", FLOW_DOMAIN_DEFAULTS)):
         values = result.setdefault(name, {})
         if isinstance(values, dict):
+            if name == "inlet_coupling" and "rpm" in values:
+                if "rotational_speed" in values:
+                    raise ValueError("Specify rotational_speed or legacy rpm, not both.")
+                values["rotational_speed"] = {"type": "actual", "value": values.pop("rpm")}
             if name == "flow_domain":
                 smooth = values.pop("smooth", {})
                 if not isinstance(smooth, dict):
@@ -61,7 +67,7 @@ def normalize_rotor_geometry(geometry):
                 if name == "rotor_design" and key in ("P0_rel", "T0_rel") and any(
                         field in values for field in INLET_FIELDS):
                     continue
-                values.setdefault(key, value)
+                values.setdefault(key, deepcopy(value))
     meridional_channel = result.get("meridional_channel", {})
     if isinstance(meridional_channel, dict) and meridional_channel.get("type") == "axial":
         if "axial_interspace_mm" not in result:
@@ -128,11 +134,16 @@ def validate_rotor_configuration(config):
         raise ValueError("rotor_design.num_points must be an integer >= 10.")
     coupling = config["inlet_coupling"]
     if not isinstance(coupling, dict) or set(coupling) != set(COUPLING_DEFAULTS):
-        raise ValueError("inlet_coupling requires mode and rpm.")
+        raise ValueError("inlet_coupling requires mode and rotational_speed.")
     if coupling["mode"] not in ("manual", "stator_exit"):
         raise ValueError("inlet_coupling.mode must be manual or stator_exit.")
-    # Signed RPM also represents reversing the rotor's rotation direction.
-    _finite(coupling["rpm"], "inlet_coupling.rpm")
+    speed = coupling["rotational_speed"]
+    if not isinstance(speed, dict) or set(speed) != {"type", "value"}:
+        raise ValueError("inlet_coupling.rotational_speed requires type and value.")
+    if speed["type"] not in SPEED_TYPES:
+        raise ValueError(f"rotational_speed.type must be one of {tuple(SPEED_TYPES)}.")
+    # Signed speed represents reversing the rotor's rotation direction.
+    _finite(speed["value"], "rotational_speed.value")
     domain = config["flow_domain"]
     if not isinstance(domain, dict) or set(domain) != set(FLOW_DOMAIN_DEFAULTS):
         raise ValueError(f"flow_domain requires {tuple(FLOW_DOMAIN_DEFAULTS)}.")
