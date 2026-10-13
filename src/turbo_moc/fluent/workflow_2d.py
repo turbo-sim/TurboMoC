@@ -1,7 +1,7 @@
 """Generate a 2D MoC mesh, barotropic model and staged Fluent solution.
 
 Run ``python -m examples.fluent_2D.run_fluent_case``.
-Settings live in the workflow YAML; the launcher accepts an optional --config.
+Settings live in the adjacent workflow YAML; the numerical callable accepts its path.
 """
 
 import json
@@ -38,7 +38,8 @@ from .common import (
 from turbo_moc.geometry import passage_2d as geo
 from turbo_moc.workflows.nozzle import solve_nozzle
 from turbo_moc.meshing.mesh_2d import create_mesh
-from turbo_moc.configuration.planar import read_configuration, validate_geometry_figure
+from turbo_moc.configuration.planar import read_configuration, validate_geometry_figure, from_project, build_geometry
+from turbo_moc.configuration.automation import split_workflow
 from turbo_moc.configuration.fluid_inputs import solver_parameters
 from turbo_moc.reporting import (
     display_path,
@@ -53,7 +54,7 @@ logger = get_logger("fluent.runner")
 
 
 def read_workflow(config_file):
-    """Load workflow settings and the existing, independently usable MoC YAML."""
+    """Load an embedded app project or a historical design_file workflow."""
     config_file = Path(config_file).resolve()
     with config_file.open(encoding="utf-8") as stream:
         workflow = yaml.safe_load(stream)
@@ -74,8 +75,7 @@ def validate_workflow(workflow, config_file):
         "fluent",
         "reporting",
     }
-    if not isinstance(workflow, dict) or set(workflow) != required:
-        raise ValueError(f"Workflow YAML must contain exactly {sorted(required)}.")
+    workflow, project = split_workflow(workflow, required, optional={"row_id"})
     validate_reporting(workflow["reporting"])
     validate_geometry_figure(workflow["geometry_figure"])
     for section in ("barotropic", "fluent"):
@@ -89,8 +89,16 @@ def validate_workflow(workflow, config_file):
         if type(workflow[name]) is not bool:
             raise ValueError(f"{name} must be true or false.")
     workflow["output_dir"] = workflow_output(workflow, config_file)
-    workflow["design_file"] = (config_file.parent / workflow["design_file"]).resolve()
-    config = read_configuration(workflow["design_file"])
+    if project is None:
+        workflow["design_file"] = (config_file.parent / workflow["design_file"]).resolve()
+        config = read_configuration(workflow["design_file"], row_id=workflow.get("row_id"))
+    else:
+        workflow["design_file"] = config_file
+        config = from_project(project, row_id=workflow.get("row_id"))
+    if ("row_configuration" in config and
+            config["row_configuration"]["meridional_channel"]["type"] != "linear"):
+        raise ValueError("Fluent 2D requires a linear-cascade app project. "
+                         "Use Fluent 3D for axial/radial passages; their 2D grids are conformal references.")
     nozzle = config["nozzle"]
     if nozzle.get("delta_flow", 0.0) != 0:
         raise ValueError(
@@ -406,7 +414,7 @@ def main(config_file):
         # same result; an earlier run's nozzle file is never used as input.
         nozzle = solve_nozzle(config["nozzle"])
         step(logger, 3, total_steps, "Build blade geometry and periodic passage")
-        blade, curves = geo.build_geometry(nozzle, config)
+        blade, curves = build_geometry(nozzle, config)
         if not geo.assess_clearance(blade, curves)["contained"]:
             raise ValueError("Cannot mesh: a periodic boundary intersects the blade.")
         log_summary(

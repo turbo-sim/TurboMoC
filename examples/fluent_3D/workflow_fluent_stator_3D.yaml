@@ -1,6 +1,119 @@
-# Full workflow settings. Paths resolve relative to this YAML file.
-# Inlet conditions and geometry/mesh parameters come from the shared Gmsh YAML.
-design_file: ../gmsh_3D/workflow_gmsh_stator_3D.yaml
+# App project plus Fluent automation settings (no external design_file needed).
+# Project inputs: MoC uses SI units; geometry and mesh targets use mm.
+# Each ordered row owns its geometry and meshing settings.
+# Radii/chords describe blade LE and TE, not extended-domain boundaries.
+# mesh.visualization widths are display pixels and do not change the grid.
+machine:
+  design_mode: stator
+  geometry_type: axial
+  fluid_name: Cyclopentane
+workflow:
+  save_figures: true
+  show_gmsh: true
+  show_pyvista: true
+  log_level: INFO
+rows:
+- id: stator_1
+  role: stator
+  geometry:
+    method_of_characteristics:
+      inlet_property_pair: PQ_INPUTS
+      inlet_property_1: 251300.0  # Stagnation pressure [Pa]
+      inlet_property_2: 0.025  # Vapor quality [kg/kg]
+      p_back: 95000.0
+      solver: conventional
+      use_true_sauer_line: true
+      y_t: 0.01
+      n: 15
+      rho_t: 0.2
+      rho_d: 0.1
+      delta_flow: 0.0
+      tau_max: 90.0
+      tau_step: 1.0
+    meridional_channel:
+      type: axial
+      hub_radius: 100.0
+      blade_height: 10.0
+      hub_chord: 20.0
+      tip_chord: 20.0
+      num_blades: 31
+    blade_geometry:
+      metal_angle_in: 0.0
+      metal_angle_out: 65.0
+      r_trailing: 0.5
+      inlet_opening_ratio: 1.3
+      n_cp: 30
+      num_baseline_points: 500
+      num_curve_points: 500
+    flow_domain:
+      domain_shift_mode: auto
+      domain_shift_value: 0.0  # Manual pitchwise shift / pitch [-]; ignored in auto mode
+      number_of_points: 120  # Curve samples, not mesh nodes
+      inlet:
+        extension_type: bspline  # bspline or straight; tangent handles apply only to bspline
+        extension_length: 1.5  # Extension distance / reference chord [-]
+        axial_tangent: 0.35
+        blade_tangent: 0.35
+      outlet:
+        extension_type: straight  # bspline or straight; tangent handles apply only to bspline
+        extension_length: 2.0  # Extension distance / reference chord [-]
+        axial_tangent: 0.55
+        blade_tangent: 0.15
+  mesh:
+    show_gui: false
+    numerics:
+      terminal_output: true
+      verbosity: 2
+      blade_size: 0.25
+      domain_size: 1.0
+      curvature_elements: 50
+      algorithm: 8
+      recombine: true
+      recombination_algorithm: 1
+      recombine_minimum_quality: 0.1
+      smoothing_steps: 5
+      inflation_layers:
+        enabled: true
+        first_height: 0.03
+        growth_ratio: 1.2
+        thickness: 1.0
+      span_layers: 25
+      span_stretch: 1.5
+    matplotlib:
+      num_blades: 3
+      annotate_boundaries: true
+      mesh_color: orange
+      edge_color: black
+      domain_color: lightgrey
+      dpi: 500
+      rasterize_mesh: true
+    visualization:
+      section_edge_width: 0.35
+      volume_edge_width: 0.35
+    pyvista:
+      show_mesh_edges: true
+      surfaces:
+        blade: true
+        hub: true
+        shroud: false
+        inlet: false
+        outlet: false
+        periodic_left: false
+        periodic_right: false
+    cgns:
+      enabled: true
+      filename: stator_mesh_3d.cgns
+      length_scale: 0.001
+      boundary_types:
+        blade: BCWallViscous
+        inlet: BCInflowSubsonic
+        outlet: BCOutflowSubsonic
+        periodic_left: BCGeneral
+        periodic_right: BCGeneral
+        hub: BCWallViscous
+        shroud: BCWallViscous
+
+# Fluent-only settings. Preserve these when replacing machine/workflow/rows.
 row_id: stator_1             # Select one stationary stator row from the project
 output_dir: output
 # Blade/passage construction in the 2D reference plane used to build the volume.

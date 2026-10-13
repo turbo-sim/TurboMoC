@@ -43,15 +43,19 @@ rows:
       num_baseline_points: 500
       num_curve_points: 500
     flow_domain:
-      inlet_chords: 1.5
-      outlet_chords: 2.0
       domain_shift_mode: auto
-      domain_shift: 0.0
-      inlet_axial_tangent: 0.35
-      inlet_blade_tangent: 0.35
-      outlet_blade_tangent: 0.15
-      outlet_axial_tangent: 0.55
-      num_points: 120
+      domain_shift_value: 0.0  # Manual pitchwise shift / pitch [-]; ignored in auto mode
+      number_of_points: 120  # Curve samples, not mesh nodes
+      inlet:
+        extension_type: bspline  # bspline or straight; tangent handles apply only to bspline
+        extension_length: 1.5  # Extension distance / reference chord [-]
+        axial_tangent: 0.35
+        blade_tangent: 0.35
+      outlet:
+        extension_type: straight  # bspline or straight; tangent handles apply only to bspline
+        extension_length: 2.0  # Extension distance / reference chord [-]
+        axial_tangent: 0.55
+        blade_tangent: 0.15
   mesh:
     show_gui: false
     numerics:
@@ -63,6 +67,7 @@ rows:
       algorithm: 8
       recombine: true
       recombination_algorithm: 1
+      recombine_minimum_quality: 0.1
       smoothing_steps: 5
       inflation_layers:
         enabled: true

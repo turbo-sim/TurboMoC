@@ -68,6 +68,10 @@ def validate_mesh_settings(settings):
         3,
     ):
         raise ValueError("mesh.numerics.recombination_algorithm must be 0, 1, 2, or 3.")
+    minimum_quality = numerics.get("recombine_minimum_quality", 0.1)
+    if (type(minimum_quality) not in (int, float)
+            or not np.isfinite(minimum_quality) or not 0 <= minimum_quality <= 1):
+        raise ValueError("mesh.numerics.recombine_minimum_quality must be a finite number from 0 to 1.")
     for name in ("smoothing_steps", "curvature_elements"):
         if not isinstance(numerics[name], int) or numerics[name] < 0:
             raise ValueError(f"mesh.numerics.{name} must be a nonnegative integer.")
@@ -505,9 +509,14 @@ def configure_recombination(fluid_surface, numerics):
 
     Algorithm 8 prepares triangles for recombination; setRecombine actually
     enables their conversion to quadrilaterals outside the inflation layers.
+    The minimum is Gmsh's recombination quality, not an equiangular-skewness
+    limit. Retain triangles when recombination would produce poor quads.
     """
     gmsh.option.setNumber(
         "Mesh.RecombinationAlgorithm", numerics.get("recombination_algorithm", 1)
+    )
+    gmsh.option.setNumber(
+        "Mesh.RecombineMinimumQuality", numerics.get("recombine_minimum_quality", 0.1)
     )
     if numerics.get("recombine", True):
         gmsh.model.mesh.setRecombine(2, fluid_surface)
@@ -1681,19 +1690,19 @@ def create_mesh(blade, curves, settings, output_dir, show_gui=True):
 # =============================================================================
 # 9. Callable planar case workflow (used by the minimal example launcher)
 # =============================================================================
-def main(config_file, output_dir="output"):
+def main(config_file, output_dir="output", *, row_id=None):
     """Run the planar workflow using execution and viewer options from its YAML."""
     # Validation imports the meshing APIs, so import the reader only at execution.
     import jaxprop as jxp
     import matplotlib.pyplot as plt
-    from turbo_moc.configuration.planar import read_configuration
+    from turbo_moc.configuration.planar import read_configuration, build_geometry
     from turbo_moc.geometry import passage_2d as geo
     from turbo_moc.workflows.nozzle import solve_nozzle
     from turbo_moc.progress import make_progress_reporter
 
     config_file, output_dir = Path(config_file), Path(output_dir)
     # Load execution controls first: they determine logging, stages and viewers.
-    config = read_configuration(config_file)
+    config = read_configuration(config_file, row_id=row_id)
     workflow = config["workflow"]
     figure_options = workflow["geometry_figure"]
     reporting = workflow["reporting"]
@@ -1745,7 +1754,7 @@ def main(config_file, output_dir="output"):
         # 3. Fit the blade and construct the surrounding periodic flow passage.
         # The figure shows these construction curves and the domain we will mesh.
         log.step(logger, 3, total_steps, "Build blade geometry and periodic passage")
-        blade, curves = geo.build_geometry(nozzle, config)
+        blade, curves = build_geometry(nozzle, config)
         log.summary(
             logger,
             "Geometry",

@@ -1,3 +1,5 @@
+> **App YAML compatibility:** see [Reuse an app project](../workflow_configuration.md) for the shared schema, copy/paste instructions, and 2D/3D restrictions.
+
 > Run the adjacent Python script without arguments. Its configuration path
 > resolves relative to the script; this example writes to its adjacent `output/`.
 > Package numerical callables require an explicit configuration path and contain
@@ -31,8 +33,8 @@ checkout into the same environment:
 poetry run python -m pip install -e ../barotropy
 ```
 
-Edit `examples/gmsh_2D/workflow_gmsh_stator_2D.yaml` to set the `nozzle`, `blade`, `passage`, `mesh`, and `workflow`
-parameters. Lengths in the nozzle inputs are metres; blade geometry, passage
+Edit `examples/gmsh_2D/workflow_gmsh_stator_2D.yaml` to set the app `machine`, `workflow`, and `rows`
+parameters. Each row owns `geometry` and `mesh`; below, abbreviated geometry and mesh paths refer to that selected row. Lengths in the nozzle inputs are metres; blade geometry, passage
 geometry, mesh sizes, and plots use millimetres. In the cascade frame, x is
 pitchwise, y is axial, and flow proceeds toward decreasing y.
 
@@ -42,7 +44,7 @@ under `workflow.geometry_figure`; mesh images have separate `mesh.matplotlib`
 settings. The supplied construction defaults are PNG/SVG at 300 DPI.
 
 The launcher resolves the YAML beside itself and writes to adjacent `output/`.
-All execution controls are in the YAML; the runner needs no arguments:
+App workflow controls work directly. The additional 2D overrides below are optional; the runner needs no arguments:
 
 | Setting | Purpose |
 | --- | --- |
@@ -54,9 +56,9 @@ All execution controls are in the YAML; the runner needs no arguments:
 | `workflow.geometry_figure.formats` | Export extensions, e.g. `[.png, .svg, .pdf]` |
 | `workflow.reporting.level` | Console and file logging level |
 | `workflow.reporting.filename` | Log filename within the output folder |
-| `mesh.show_gui` | Open Gmsh after generating and saving the mesh |
+| `workflow.show_gmsh` | Open Gmsh after generating and saving the mesh |
 
-`mesh.show_gui: true` is sufficient to open Gmsh; there is no second runner flag.
+`workflow.show_gmsh: true` opens Gmsh for app project files.
 Set it to `false` for unattended runs. It has no effect in geometry-only mode.
 
 Programmatic runs use `turbo_moc.meshing.mesh_2d.main`, with explicit
@@ -155,18 +157,19 @@ uses the same definition: three B-splines and one straight line per side,
 with shared endpoint tags. It transfers the cubic extensions and convergent
 interpolant directly rather than converting plotting samples into CAD edges.
 
-| `passage` setting | Meaning |
+| `flow_domain` setting | Meaning |
 | --- | --- |
-| `inlet_chords` / `outlet_chords` | Cap distance from the blade's upstream/downstream axial extremum, divided by nominal total axial chord |
+| `inlet.extension_length` / `outlet.extension_length` | Cap distance from the blade's upstream/downstream axial extremum, divided by nominal total axial chord |
+| `inlet.extension_type` / `outlet.extension_type` | `bspline` or `straight`; tangent handles apply only to B-splines |
 | `domain_shift_mode` | `manual` or `auto` |
-| `domain_shift` | Manual pitchwise offset divided by pitch; positive moves the entire domain toward +x |
-| `smooth.inlet_axial_tangent` | Inlet extension's axial endpoint handle length / extension axial length |
-| `smooth.inlet_blade_tangent` | Inlet extension's blade-angle endpoint handle length / extension axial length |
-| `smooth.outlet_blade_tangent` | Outlet extension's blade-angle endpoint handle length / extension axial length |
-| `smooth.outlet_axial_tangent` | Outlet extension's axial endpoint handle length / extension axial length |
-| `smooth.num_points` | Plot samples per section and convergent interpolant samples; does not prescribe mesh node counts |
+| `domain_shift_value` | Manual pitchwise offset divided by pitch; positive moves the entire domain toward +x |
+| `inlet.axial_tangent` | Inlet extension's axial endpoint handle length / extension axial length |
+| `inlet.blade_tangent` | Inlet extension's blade-angle endpoint handle length / extension axial length |
+| `outlet.blade_tangent` | Outlet extension's blade-angle endpoint handle length / extension axial length |
+| `outlet.axial_tangent` | Outlet extension's axial endpoint handle length / extension axial length |
+| `number_of_points` | Plot samples per section and convergent interpolant samples; does not prescribe mesh node counts |
 
-Manual mode applies `domain_shift` as an absolute offset from the initial
+Manual mode applies `domain_shift_value` as an absolute offset from the initial
 reference. Auto mode ignores that value and searches within plus/minus half
 a pitch for the rigid translation maximizing the smaller Euclidean
 blade-to-periodic clearance. A coarse scan brackets a bounded scalar search.
@@ -451,7 +454,7 @@ and the callable case `main`. Configuration validation is imported inside
 `main`, so validation can use numerical functions without a module cycle.
 Only entry points configure logging handlers.
 
-For reuse, import `build_geometry` from `turbo_moc.geometry.passage_2d` and
+For app-compatible workflow reuse, import `build_geometry` from `turbo_moc.configuration.planar` and
 `plot_construction` from `turbo_moc.visualization.geometry_mpl`; import `create_mesh`,
 `analyze_mesh`, `compute_mesh_report` or `main` from
 `turbo_moc.meshing.mesh_2d`. The MoC solver entry point is
@@ -486,7 +489,7 @@ then inspect `mesh_generation.log`, the CGNS mesh and the quality report.
 ## Shared Fluent workflow
 
 The full workflow in [../fluent_2D/readme.md](../fluent_2D/readme.md) imports these
-geometry, MoC-solving, plotting and mesh functions and reads `workflow_gmsh_stator_2D.yaml`.
+geometry, MoC-solving, plotting and mesh functions. Its YAML embeds the same app project plus Fluent settings.
 It sends a separate output directory to `create_mesh`, so running Fluent writes
 mesh artifacts to `examples/fluent_2D/output/gmsh/`.
 

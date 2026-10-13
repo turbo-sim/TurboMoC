@@ -111,14 +111,15 @@ def meridional_controls(dimensions, row_id):
     return fields
 
 
-def controls(value, prefix, row_id):
+def controls(value, prefix, row_id, *, hidden_paths=()):
     """Stable row IDs separate field ownership from display order."""
     result = []
     for name, item in value.items():
         path = f"{prefix}.{name}" if prefix else name
         if isinstance(item, dict):
-            result.append(html.Details([html.Summary(name.replace("_", " ")),
-                *controls(item, path, row_id)], open=True))
+            result.append(html.Details([html.Summary(name.replace("_", " ").capitalize()),
+                *controls(item, path, row_id, hidden_paths=hidden_paths)], open=True,
+                className="nested-field-group"))
             continue
         if path == "meridional_channel.type":
             continue
@@ -129,6 +130,11 @@ def controls(value, prefix, row_id):
         identifier = {"type": "parameter", "row": row_id, "path": path}
         if name == "fluid_name":
             widget = fluid_dropdown(identifier, item)
+        elif name == "extension_type" and prefix.startswith("flow_domain."):
+            widget = dcc.Dropdown(id=identifier, options=[
+                {"label": "Smooth B-spline", "value": "bspline"},
+                {"label": "Straight line", "value": "straight"}],
+                value=item, clearable=False)
         elif isinstance(item, bool):
             widget = dcc.Dropdown(id=identifier, options=[
                 {"label": "Yes", "value": True}, {"label": "No", "value": False}],
@@ -142,8 +148,30 @@ def controls(value, prefix, row_id):
             widget = dcc.Input(id=identifier, value=item,
                 type="number" if isinstance(item, (int, float)) else "text", debounce=True,
                 step=1 if name in flow.INTEGER_KEYS else "any")
-        result.append(html.Label([html.Span(name.replace("_", " ")), widget],
-            title=f"{row_id}.{path}", className="control"))
+        title = f"{row_id}.{path}"
+        if name == "extension_type" and prefix.startswith("flow_domain."):
+            title = ("Smooth B-spline turns from the blade direction to the axial direction. "
+                     "Straight line continues the blade-reference tangent to the cap plane. "
+                     "Tangent handle settings apply only to the B-spline. "
+                     "Defaults: smooth inlet, straight outlet.")
+        if path == "mesh.numerics.recombine_minimum_quality":
+            widget.min, widget.max = 0, 1
+            title = ("Minimum Gmsh quality for recombined quadrilaterals (0–1; default 0.1). "
+                     "Higher values can retain more triangles. This is not a maximum skewness "
+                     "limit; inspect the final 2D and 3D mesh quality.")
+        label = name.replace("_", " ")
+        if prefix.startswith("flow_domain"):
+            label = {"extension_length": "Extension length [chords]",
+                     "domain_shift_value": "Domain shift value [pitch]",
+                     "axial_tangent": "Axial tangent [-]",
+                     "blade_tangent": "Blade tangent [-]"}.get(name, label.capitalize())
+            if name == "extension_length":
+                title = "Extension distance divided by the row's reference chord; the existing chord-based convention is unchanged."
+            elif name == "number_of_points":
+                title = "Curve sampling points, not mesh nodes."
+                widget.min = 3
+        result.append(html.Label([html.Span(label), widget],
+            title=title, className="control", style={"display": "none"} if path in hidden_paths else {}))
     return result
 
 
@@ -212,11 +240,8 @@ def flow_domain_controls(project, row):
     saved extension, instead of writing the derived assembly value into YAML.
     """
     internal = internal_domain_sides(project, row["id"])
-    children = []
-    for name, value in row["geometry"]["flow_domain"].items():
-        side = name.removesuffix("_chords") if name.endswith("_chords") else None
-        children.append(html.Div(controls({name: value}, "flow_domain", row["id"]),
-            style={"display": "none"} if side in internal else {}))
+    children = controls(row["geometry"]["flow_domain"], "flow_domain", row["id"],
+        hidden_paths={f"flow_domain.{side}.extension_length" for side in internal})
     children.append(html.Div(id={"type": "shared-domain", "row": row["id"]},
         className="computed-inlet"))
     return group("Flow domain definition", children)
@@ -329,11 +354,7 @@ def row_controls(project, row):
             dcc.Dropdown(id="calculation-scope", clearable=False, searchable=False,
                 value="all", options=[{"label": "All rows", "value": "all"}, *options])],
             id="calculation-controls", className="control",
-            title="Selected rows calculate sequentially in machine order. Show is independent."),
-        html.Label([html.Span("Show"),
-            dcc.Dropdown(id="plot-scope", clearable=False, searchable=False, value="all",
-                options=[{"label": "All rows", "value": "all"}, *options])],
-            className="control", title="Show these rows in every 2D and 3D geometry and mesh plot."),
+            title="Selected rows calculate sequentially in machine order. Display selection is independent."),
         # Internal workflow state; report and display configuration have their
         # own independent selectors.
         html.Div([dcc.Checklist(id="plotted-rows", value=[item["value"] for item in options], options=options),
@@ -502,7 +523,6 @@ def create_app(config_file=None, output_dir=None):
                         ], className="split")], open=True, className="plot-group"),
                         html.Details([html.Summary("Three dimensional mesh"),
                             *display_panel.view(project, "mesh", viewport("mesh")),
-                            html.Div(id="mesh-inspection-summary", className="mesh-inspection-summary"),
                             html.Div(id="volume-status", className="message")], open=True, className="plot-group", id="mesh-details"),
                         html.Details([html.Summary("Mesh quality report"),
                                 html.Div([html.Label("Report", htmlFor="report-scope"), dcc.Dropdown(id="report-scope", value="all",
@@ -598,19 +618,34 @@ def create_app(config_file=None, output_dir=None):
             return property_label(pair, 1), property_label(pair, 2)
 
     @app.callback(Output("calculation-scope", "options"), Output("calculation-scope", "value"),
-        Output("plotted-rows", "options"), Output("plotted-rows", "value"),
-        Output("plot-scope", "options"), Output("plot-scope", "value"),
         Output("report-scope", "options"), Output("report-scope", "value"),
-        Input("base-project", "data"), Input("plot-scope", "value"),
-        State("calculation-scope", "value"), State("report-scope", "value"))
-    def calculation_scope(project, plotted, scope, report):
+        Input("base-project", "data"), State("calculation-scope", "value"), State("report-scope", "value"))
+    def calculation_scope(project, scope, report):
         options = calculations.scope_options(project)
         available = {"all", *[item["value"] for item in options]}
-        scope, plotted, report = [value if value in available else "all" for value in (scope, plotted, report)]
-        ids = [item["value"] for item in options if plotted == "all" or item["value"] == plotted]
-        return ([{"label": "All rows", "value": "all"}, *options], scope, options, ids,
-            [{"label": "All rows", "value": "all"}, *options], plotted,
+        scope, report = [value if value in available else "all" for value in (scope, report)]
+        return ([{"label": "All rows", "value": "all"}, *options], scope,
             [{"label": "Total", "value": "all"}, *options], report)
+
+    @app.callback(Output("geometry-display-row", "options"), Output("geometry-display-row", "value"),
+        Output("mesh-display-row", "options"), Output("mesh-display-row", "value"),
+        Output("plotted-rows", "options"), Output("plotted-rows", "value"),
+        Input("base-project", "data"), Input("geometry-display-row", "value"), Input("mesh-display-row", "value"),
+        State("plotted-rows", "value"), State("plotted-rows", "options"))
+    def displayed_rows(project, geometry, mesh, previous, old_options):
+        options = calculations.scope_options(project)
+        available = [item["value"] for item in options]
+        if ctx.triggered_id == "base-project" or not ctx.triggered_id:
+            old = [item["value"] for item in old_options or []]
+            selected = available if set(previous or []) == set(old) else [r for r in available if r in (previous or [])]
+            if previous and not selected:
+                selected = available
+        else:
+            chosen = mesh if ctx.triggered_id == "mesh-display-row" else geometry
+            selected = display_panel.selected_rows(chosen, previous, available)
+        checked = (["all"] if selected == available else []) + selected
+        choices = [{"label": "All rows", "value": "all"}, *options]
+        return choices, checked, choices, checked, options, selected
 
     @app.callback(Output("loaded-project", "data"), Output("configuration-download", "data"),
         Output("configuration-message", "children"),
@@ -823,7 +858,8 @@ def create_app(config_file=None, output_dir=None):
             try:
                 design = flow.get_design(config, reference)
                 dataset = deepcopy(cached_preview(keys["geometry"], design))
-                dataset.update(id=row["id"], label=row_label(row), placement=placements[row["id"]])
+                dataset.update(id=row["id"], role=row["role"], label=row_label(row), placement=placements[row["id"]],
+                    geometry_type=config["meridional_channel"]["type"])
                 datasets.append(dataset)
                 if row["id"] in visible:
                     views.append((row_label(row), design, placements[row["id"]]))
@@ -850,7 +886,7 @@ def create_app(config_file=None, output_dir=None):
             basis = ("Shared midspan conformal chart: m′ starts at the first active row's leading edge; "
                 "physical interspace and angular phase are included. " if len(active) > 1 else "") + " ".join(basis_notes)
         elif not visible:
-            basis = "Select a row under Show to display its geometry."
+            basis = "Select a row under Configure display > Blade rows to display its geometry."
         note = ("Shared machine view. Adjacent row domains meet at the marked physical interface; "
                 "3D CGNS meshes use this assembly placement. Each row remains a separate mesh; "
                 "solver interface coupling is configured in the CFD solver." if interfaces else
@@ -909,7 +945,7 @@ def create_app(config_file=None, output_dir=None):
                     span_patch["data"][index]["line"]["width"] = widths[row_id]
             section_patch["layout"]["meta"]["widths"] = widths
             return section_patch, span_patch, no_update, no_update
-        basis = "Generate an up-to-date 2D mesh for a plotted row." if visible else "Select a row under Show to display its mesh."
+        basis = "Generate an up-to-date 2D mesh for a plotted row." if visible else "Select a row under Configure display > Blade rows to display its mesh."
         entries, section_entries, basis_notes = [], [], []
         for row, config, reference, _ in available:
             section, design = reference_artifact(reference["session"], reference["job"])
@@ -962,8 +998,9 @@ def create_app(config_file=None, output_dir=None):
                 assembly = summary.get("assembly") or {}
                 placement = assembly.get("placement") or project_model.assembly_placement(
                     state["project"], row["id"])
-                dataset = {"id": row["id"], "label": row_label(row), "surfaces": surfaces,
+                dataset = {"id": row["id"], "role": row["role"], "label": row_label(row), "surfaces": surfaces,
                     "is_linear": linear, "placement": placement,
+                    "geometry_type": display_panel.geometry_family(definition, state["project"]["machine"]["geometry_type"]),
                     "job": reference["job"], "session": reference["session"],
                     "span_stations": summary.get("span_stations", [])}
                 if linear:

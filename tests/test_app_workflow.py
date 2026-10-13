@@ -122,7 +122,7 @@ def test_machine_family_switch_preserves_row_design_and_mesh_inputs():
     from turbo_moc.app import create_app
     config = flow.read_configuration(CASES["axial_stator"])
     config["method_of_characteristics"]["n"] = 18
-    config["flow_domain"]["outlet_chords"] = 2.7
+    config["flow_domain"]["outlet"]["extension_length"] = 2.7
     config["mesh"]["numerics"]["blade_size"] = 0.37
     app = create_app()
     state = row_state(config)

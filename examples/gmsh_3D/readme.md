@@ -1,3 +1,5 @@
+> **App YAML compatibility:** see [Reuse an app project](../workflow_configuration.md) for the shared schema, copy/paste instructions, and 2D/3D restrictions.
+
 # Gmsh 3D workflow
 
 Edit `workflow_gmsh_stator_3D.yaml` and run `run_mesh_generation.py` without

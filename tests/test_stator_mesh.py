@@ -60,7 +60,7 @@ def mesh_example():
         settings["numerics"]["recombine"] = True
         settings["matplotlib"].update(dpi=40, num_blades=3, annotate_boundaries=True)
         # Full quality-report generation belongs to the example execution check.
-        settings["report"]["enabled"] = False
+        settings.setdefault("report", {})["enabled"] = False
         yield runner, meshing, blade, curves, settings
 
 
@@ -199,13 +199,13 @@ def test_planar_workflow_obeys_yaml_controls(
     runner, _, blade, curves, _ = mesh_example
     source = Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml"
     config = yaml.safe_load(source.read_text())
-    config["workflow"] = {
+    config["workflow"].update({
         "generate_mesh": generate_mesh,
         "geometry_figure": {"save": save_figure, "show": show_figure,
                             "size": [9, 5], "dpi": 123, "formats": [".svg"]},
         "reporting": {"level": "DEBUG", "filename": "custom.log"},
-    }
-    config["mesh"]["show_gui"] = show_gui
+        "show_gmsh": show_gui,
+    })
     case = tmp_path / "case.yaml"
     case.write_text(yaml.safe_dump(config))
     solve = Mock(return_value={})
@@ -218,7 +218,8 @@ def test_planar_workflow_obeys_yaml_controls(
                         formats, Path(filename).name))
 
     monkeypatch.setattr(moc, "solve_nozzle", solve)
-    monkeypatch.setattr(geometry_2d, "build_geometry", lambda *args: (blade, curves))
+    from turbo_moc.configuration import planar
+    monkeypatch.setattr(planar, "build_geometry", lambda *args: (blade, curves))
     plot = Mock(wraps=geometry_2d.plot_construction)
     monkeypatch.setattr(geometry_2d, "plot_construction", plot)
     monkeypatch.setattr(runner, "create_mesh", mesh)
@@ -252,6 +253,12 @@ def test_invalid_workflow_settings_fail_before_moc(monkeypatch, tmp_path, sectio
 
     source = Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml"
     config = yaml.safe_load(source.read_text())
+    config["workflow"].update({
+        "generate_mesh": True,
+        "geometry_figure": {"save": False, "show": False, "size": [14, 8],
+                            "dpi": 300, "formats": [".png", ".svg"]},
+        "reporting": {"level": "INFO", "filename": "mesh_generation.log"},
+    })
     settings = config["workflow"] if section is None else config["workflow"][section]
     settings[key] = value
     case = tmp_path / "invalid.yaml"

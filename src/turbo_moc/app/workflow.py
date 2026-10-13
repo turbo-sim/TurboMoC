@@ -20,7 +20,7 @@ from turbo_moc.geometry import blade_row as geo
 APP_DIR = Path(__file__).resolve().parent
 SOURCE_DIR = APP_DIR.parent
 OUTPUT = Path("output").resolve()
-INTEGER_KEYS = {"n", "n_cp", "num_baseline_points", "num_curve_points", "num_points",
+INTEGER_KEYS = {"n", "n_cp", "num_baseline_points", "num_curve_points", "num_points", "number_of_points",
                 "num_blades", "curvature_elements", "algorithm", "recombination_algorithm",
                 "smoothing_steps", "span_layers", "verbosity"}
 

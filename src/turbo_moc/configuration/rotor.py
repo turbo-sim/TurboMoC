@@ -9,6 +9,7 @@ import numpy as np
 
 from turbo_moc.configuration.row import SMOOTH_FIELDS, validate_mesh_configuration
 from turbo_moc.configuration.fluid_inputs import INLET_FIELDS, validate_inlet_inputs
+from turbo_moc.configuration.flow_domain import DEFAULTS as FLOW_DOMAIN_DEFAULTS, normalize as normalize_domain, to_flat
 
 
 ROTOR_DEFAULTS = {
@@ -19,13 +20,6 @@ ROTOR_DEFAULTS = {
 SPEED_TYPES = {"actual": "Actual speed [rpm]", "blade_velocity_ratio": "Blade velocity ratio U/c₀ [-]",
                "specific": "Specific speed [-]"}
 COUPLING_DEFAULTS = {"mode": "manual", "rotational_speed": {"type": "actual", "value": 20716.71}}
-FLOW_DOMAIN_DEFAULTS = {
-    "inlet_chords": 1.5, "outlet_chords": 2.0,
-    "domain_shift_mode": "auto", "domain_shift": 0.0,
-    "inlet_axial_tangent": 0.35, "inlet_blade_tangent": 0.35,
-    "outlet_blade_tangent": 0.15, "outlet_axial_tangent": 0.55,
-    "num_points": 120,
-}
 
 
 def default_axial_interspace_mm(meridional_channel):
@@ -48,21 +42,15 @@ def normalize_rotor_geometry(geometry):
     if planning and result.get("parametrization_type", "conventional") == "conventional":
         result["parametrization_type"] = "vortex"
     result.setdefault("parametrization_type", "vortex")
+    result["flow_domain"] = normalize_domain(result.get("flow_domain", {}), defaults=FLOW_DOMAIN_DEFAULTS)
     for name, defaults in (("rotor_design", ROTOR_DEFAULTS),
-                           ("inlet_coupling", COUPLING_DEFAULTS),
-                           ("flow_domain", FLOW_DOMAIN_DEFAULTS)):
+                           ("inlet_coupling", COUPLING_DEFAULTS)):
         values = result.setdefault(name, {})
         if isinstance(values, dict):
             if name == "inlet_coupling" and "rpm" in values:
                 if "rotational_speed" in values:
                     raise ValueError("Specify rotational_speed or legacy rpm, not both.")
                 values["rotational_speed"] = {"type": "actual", "value": values.pop("rpm")}
-            if name == "flow_domain":
-                smooth = values.pop("smooth", {})
-                if not isinstance(smooth, dict):
-                    raise ValueError("flow_domain.smooth must be a mapping.")
-                for key, value in smooth.items():
-                    values.setdefault(key, value)
             for key, value in defaults.items():
                 if name == "rotor_design" and key in ("P0_rel", "T0_rel") and any(
                         field in values for field in INLET_FIELDS):
@@ -147,6 +135,7 @@ def validate_rotor_configuration(config):
     domain = config["flow_domain"]
     if not isinstance(domain, dict) or set(domain) != set(FLOW_DOMAIN_DEFAULTS):
         raise ValueError(f"flow_domain requires {tuple(FLOW_DOMAIN_DEFAULTS)}.")
+    domain = to_flat(domain)
     validate_flow_domain_settings({name: domain[name] for name in SMOOTH_FIELDS})
     validate_domain_shift(domain["domain_shift_mode"], domain["domain_shift"])
     for name in ("inlet_chords", "outlet_chords"):

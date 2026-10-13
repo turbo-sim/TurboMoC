@@ -1,3 +1,5 @@
+> **App YAML compatibility:** see [Reuse an app project](../workflow_configuration.md) for the shared schema, copy/paste instructions, and 2D/3D restrictions.
+
 # MoC stator volume mesh and barotropic Fluent simulation
 
 This example generates a fresh 3D stator passage with the existing
@@ -21,8 +23,9 @@ All paths inside that YAML resolve relative to it.
 
 ## Configuration and execution
 
-Edit `workflow_fluent_stator_3D.yaml`. `design_file` points to the shared 3D
-Gmsh project and `row_id: stator_1` selects its stator. Geometry, mesh settings,
+Edit `workflow_fluent_stator_3D.yaml`. Its `machine`, `workflow`, and `rows` blocks
+are a complete app project; replace them directly with an app download. Keep the
+Fluent-only fields. `row_id: stator_1` selects its stator. Geometry, mesh settings,
 inlet conditions and outlet pressure come from that row. The Fluent workflow
 uses the existing volume mesher and barotropic model without changing their
 algorithms or thermodynamic closure. Geometry and material preparation share

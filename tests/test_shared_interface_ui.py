@@ -22,12 +22,20 @@ def test_internal_extension_controls_are_hidden_but_solo_values_are_retained():
     project = paired_project()
     original = deepcopy(project)
     stator, rotor = project["rows"]
-    for row, internal in ((stator, "outlet_chords"), (rotor, "inlet_chords")):
+    def labels(component):
+        if isinstance(component, application.html.Label):
+            yield component
+        children = getattr(component, "children", None)
+        for child in children if isinstance(children, list) else [children]:
+            if hasattr(child, "children"):
+                yield from labels(child)
+
+    for row, internal in ((stator, "outlet"), (rotor, "inlet")):
         group = application.flow_domain_controls(project, row)
-        for wrapper in group.children[1:-1]:
-            widget = wrapper.children[0].children[1]
-            path = widget.id["path"].split(".")[-1]
-            assert wrapper.style == ({"display": "none"} if path == internal else {})
+        for wrapper in labels(group):
+            widget = wrapper.children[1]
+            hidden = widget.id["path"] == f"flow_domain.{internal}.extension_length"
+            assert wrapper.style == ({"display": "none"} if hidden else {})
         solo = projects.set_design_mode(project, row["role"])
         assert not application.internal_domain_sides(solo, row["id"])
     assert project == original

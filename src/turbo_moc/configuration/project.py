@@ -120,6 +120,8 @@ def normalize_project(config):
                 if isinstance(geometry, dict):
                     row["geometry"] = normalize_rotor_geometry(geometry)
                 if isinstance(row.get("mesh"), dict):
+                    if isinstance(row["mesh"].get("numerics"), dict):
+                        row["mesh"]["numerics"].setdefault("recombine_minimum_quality", 0.1)
                     view = row["mesh"].setdefault("visualization", {})
                     for name, value in VIEW_DEFAULTS.items():
                         view.setdefault(name, value)
@@ -275,15 +277,17 @@ _DEFAULT_STATOR_ROW = {'id': 'stator_1',
                                  'n_cp': 30,
                                  'num_baseline_points': 500,
                                  'num_curve_points': 500},
-              'flow_domain': {'inlet_chords': 1.5,
-                              'outlet_chords': 2.0,
-                              'domain_shift_mode': 'auto',
-                              'domain_shift': 0.0,
-                              'inlet_axial_tangent': 0.35,
-                              'inlet_blade_tangent': 0.35,
-                              'outlet_blade_tangent': 0.15,
-                              'outlet_axial_tangent': 0.55,
-                              'num_points': 120}},
+              'flow_domain': {'domain_shift_mode': 'auto',
+                              'domain_shift_value': 0.0,
+                              'number_of_points': 120,
+                              'inlet': {'extension_type': 'bspline',
+                                        'extension_length': 1.5,
+                                        'axial_tangent': 0.35,
+                                        'blade_tangent': 0.35},
+                              'outlet': {'extension_type': 'straight',
+                                         'extension_length': 2.0,
+                                         'axial_tangent': 0.55,
+                                         'blade_tangent': 0.15}}},
  'mesh': {'show_gui': False,
           'numerics': {'terminal_output': True,
                        'verbosity': 2,
@@ -293,6 +297,7 @@ _DEFAULT_STATOR_ROW = {'id': 'stator_1',
                        'algorithm': 8,
                        'recombine': True,
                        'recombination_algorithm': 1,
+                       'recombine_minimum_quality': 0.1,
                        'smoothing_steps': 5,
                        'inflation_layers': {'enabled': True,
                                             'first_height': 0.03,

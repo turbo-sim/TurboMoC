@@ -13,7 +13,9 @@ def small_design_config():
     config["meridional_channel"].update(num_blades=12, hub_chord=20., tip_chord=22.)
     config["blade_geometry"].update(r_trailing=.1, num_baseline_points=100,
                                   num_curve_points=100, n_cp=15)
-    config["flow_domain"].update(inlet_chords=.5, outlet_chords=.5, num_points=40)
+    config["flow_domain"]["inlet"]["extension_length"] = .5
+    config["flow_domain"]["outlet"]["extension_length"] = .5
+    config["flow_domain"]["number_of_points"] = 40
     config["mesh"]["numerics"].update(terminal_output=False, blade_size=.7,
         domain_size=3., curvature_elements=16, smoothing_steps=1,
         span_layers=3, span_stretch=.8)

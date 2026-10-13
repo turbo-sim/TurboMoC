@@ -4,6 +4,15 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
   studio: {
     scenes: {},
     roots: {},
+    home: function(data) {
+      // Use the displayed artifact's family, including when its design is old.
+      // Row visibility must not change the shared camera convention.
+      const row = (data.rows || [data])[0] || {};
+      const family = row.geometry_type || (row.is_linear ? "linear" : "axial");
+      if (family === "radial") return {family, direction: [0,0,1], up: [0,1,0]};
+      if (family === "linear") return {family, direction: [1,1,1], up: [0,0,1]};
+      return {family, direction: [-1,.12,.20], up: [0,1,0]};
+    },
     element: function(description) {
       const props = Object.assign({}, description.props);
       const children = props.children || [];
@@ -28,16 +37,24 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         // camera/context lifetime follows React reconciliation instead.
         const root = ReactDOM.createRoot ? ReactDOM.createRoot(host)
           : {render: element => ReactDOM.render(element, host)};
-        mounted = {host, root, id: pane + "-vtk-" + Date.now()};
+        const navigation = window.turbomocOrientation.create(target, pane);
+        mounted = {host, root, navigation, bindView: instance => {
+          mounted.view = instance;
+          navigation.attach(instance);
+        },
+          id: pane + "-vtk-" + Date.now()};
         studio.roots[pane] = mounted;
       } else if (mounted.host.parentElement !== target) {
         target.appendChild(mounted.host);
+        target.appendChild(mounted.navigation.host);
       }
       return mounted;
     },
     commit: function(scene) {
       const studio = window.dash_clientside.studio;
       if (studio.scenes[scene.pane] !== scene) return;
+      studio.roots[scene.pane].navigation.setHome(scene.home.direction, scene.home.up);
+      studio.roots[scene.pane].navigation.setEnabled(scene.active);
       scene.root.render(studio.view(scene));
     },
     updateMeshStyle: function(scene) {
@@ -115,12 +132,11 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
     },
     view: function(scene) {
       const studio = window.dash_clientside.studio;
-      return React.createElement(React.Suspense, {fallback: null},
-        React.createElement(window.dash_vtk.View,
-          Object.assign({}, scene.viewProps, {key: scene.id, id: scene.id,
-            background: [.98,.985,.987], style: {width: "100%", height: "100%"},
-            cameraPosition: [1,1,1], cameraViewUp: [0,0,1]}),
-          ...scene.actors.map(actor => studio.element(actor))));
+      return window.turbomocOrientation.vtkView(
+        Object.assign({}, scene.viewProps, {id: scene.id,
+          background: [.98,.985,.987], style: {width: "100%", height: "100%"},
+          cameraPosition: scene.home.direction, cameraViewUp: scene.home.up}),
+        scene.actors.map(actor => studio.element(actor)), studio.roots[scene.pane].bindView);
     },
     hideActors: function(actors) {
       return actors.map(actor => Object.assign({}, actor, {props: Object.assign({}, actor.props, {
@@ -135,7 +151,7 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         plottedRows == null || plottedRows.includes(row.id || 'stator_1'));
       if (!rows || !rows.length) {
         if (previous && previous.observer) previous.observer.disconnect();
-        const note = plottedRows && !plottedRows.length ? "Select a row under Show to display it."
+        const note = plottedRows && !plottedRows.length ? "Select a row under Configure display > Blade rows to display it."
                    : data && data.rows && data.rows.length ? "No generated mesh or geometry for the shown rows."
                    : pane === "mesh" ? "Generate a current 3D mesh to show its boundary cells."
                                     : "Compute current MoC to show geometry.";
@@ -151,15 +167,17 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       }
       // Selection data belong to exactly one immutable mesh artifact. Never
       // render a late result on a replacement mesh or a hidden blade row.
-      const inspectionRow = pane === "mesh" && inspection && inspection.mode !== "off" &&
-        rows.find(row => row.id === inspection.row_id && row.job === inspection.job);
-      const inspecting = !!inspectionRow;
+      const selections = pane === "mesh" && inspection ? (inspection.rows || [inspection]) : [];
+      const home = studio.home(data);
+      const selectionFor = row => selections.find(item => item.mode !== "off" &&
+        row.id === item.row_id && row.job === item.job);
+      const inspecting = rows.some(row => selectionFor(row));
       const lineWidth = Number(width) > 0 ? Number(width) : 0.35;
       // Visibility changes actor selection, but retains the numerical data key
       // and camera. No regeneration or removal of hidden row results is needed.
-      const key = [data.key, JSON.stringify(rows.map(row => [row.id, settings[row.id]])),
-        inspecting ? JSON.stringify([inspection.row_id, inspection.job, inspection.key, inspection.context]) : ""].join("|");
-      const note = inspecting ? inspection.note : rows.map(row => (row.label || row.id) + ": " +
+      const key = [data.key, home.family, JSON.stringify(rows.map(row => [row.id, settings[row.id]])),
+        inspecting ? JSON.stringify(selections.map(item => [item.row_id, item.job, item.key, item.context])) : ""].join("|");
+      const note = inspecting ? selections.map(item => item.note).join(" | ") : rows.map(row => (row.label || row.id) + ": " +
         Math.min(row.is_linear ? 25 : row.num_blades, Math.max(1, Math.round((settings[row.id] || {}).copies || 1)))
         + " displayed").join(" · ") + " · XYZ [mm] · " +
         (pane === "mesh" ? "actual volume boundary cells" : "geometry display tessellation") +
@@ -174,16 +192,18 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         return [window.dash_clientside.no_update, note];
       }
       if (previous && previous.observer) previous.observer.disconnect();
-      const colors = {blade: [1,.55,.08], hub: [.65,.70,.72], shroud: [.8,.82,.84],
-        inlet: [.4,.6,.75], outlet: [.45,.65,.55], periodic_left: [.7,.6,.75],
-        periodic_right: [.75,.71,.52]};
+      const colors = {hub: [.65,.70,.72], shroud: [.65,.70,.72],
+        inlet: [201/255,79/255,79/255], outlet: [201/255,79/255,79/255], periodic_left: [77/255,153/255,102/255],
+        periodic_right: [77/255,153/255,102/255]};
       const actors = [];
       // Row datasets remain independent. Translation/rotation is a display
       // transform, so changing assembly placement never mutates mesh nodes.
-      for (const row of inspecting ? [inspectionRow] : rows) {
+      for (const row of rows) {
+        const rowInspection = selectionFor(row);
+        const inspecting = !!rowInspection;
         const display = settings[row.id] || {};
-        const count = inspecting ? 1 : Math.max(1, Math.round(display.copies || 1));
-        const names = inspecting ? ["inspection", ...(inspection.context === false ? [] : display.surfaces || [])]
+        const count = Math.max(1, Math.round(display.copies || 1));
+        const names = inspecting ? ["inspection", ...(rowInspection.context || [])]
           : display.surfaces || ["blade", "hub"];
         const rowCount = row.is_linear ? count : Math.min(row.num_blades, count);
         const placement = row.placement || {};
@@ -191,7 +211,7 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         for (let i = 0; i < rowCount; ++i) for (const name of names) {
         const quality = inspecting && name === "inspection";
         const context = inspecting && !quality;
-        const original = quality ? (inspection.surfaces || {}).inspection : row.surfaces[name];
+        const original = quality ? (rowInspection.surfaces || {}).inspection : row.surfaces[name];
         if (!original || !original.polys.length) continue;
         const s = pane === "mesh" ? window.turbomocMeshEdges.prepare(original) : original;
         const arrays = [];
@@ -217,8 +237,10 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
           fields.push({namespace: "dash_vtk", type: "CellData", props: {children: cells}});
         }
         const hex = (display.colors || {})[name];
+        const fallback = name === "blade" ? (row.role === "rotor" ? [239/255,140/255,38/255]
+          : [71/255,125/255,179/255]) : colors[name] || [1,1,1];
         const color = context ? [.56, .61, .65] : /^#[0-9a-f]{6}$/i.test(hex || "") ?
-          [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255) : colors[name] || [1,1,1];
+          [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255) : fallback;
         // vtk.js: USE_CELL_FIELD_DATA=4, DIRECT_SCALARS=2. Explicit RGB values
         // keep the same green-to-red legend across metrics, subsets and layers.
         const scalarMapper = quality && s.colors ? {scalarVisibility: true,
@@ -228,7 +250,10 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
           displayEdges: !context && !!display.edges, scalarMapper, props: {
           id: pane + "-actor-" + rowId + "-" + i + "-" + name,
           actor: {visibility: true,
-            orientation: [0,0,row.is_linear ? 0 : (placement.angular_phase_deg || 0) - 360 * i / row.num_blades],
+            // A proper rotation gives the annular display frame (-X,-Y,Z).
+            // +Y follows positive rotor motion at the reference passage; the
+            // source coordinates, connectivity and exported meshes stay fixed.
+            orientation: [0,0,row.is_linear ? 0 : 180 + (placement.angular_phase_deg || 0) - 360 * i / row.num_blades],
             position: row.is_linear ? [0, i * row.pitch_mm, 0] : [0, 0, placement.streamwise_offset_mm || 0]},
           mapper: pane === "mesh" ? window.turbomocMeshEdges.mapper(lineWidth, false, 1, scalarMapper)
                                   : {scalarVisibility: false},
@@ -258,9 +283,9 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       pool.push(...desired.values());
       const mounted = studio.mount(pane);
       const id = mounted.id;
-      const fitted = !!(previous && previous.dataKey === data.key && previous.fitted);
+      const fitted = !!(previous && previous.dataKey === data.key && previous.home.family === home.family && previous.fitted);
       const scene = {id, pane, root: mounted.root, viewProps: previous ? previous.viewProps : {},
-        key, dataKey: data.key, width: lineWidth,
+        key, dataKey: data.key, home, width: lineWidth,
         edges: JSON.stringify(rows.map(row => !!(settings[row.id] || {}).edges)),
         actors: pool, active: actors.length > 0, ready: false, fitted};
       studio.scenes[pane] = scene;

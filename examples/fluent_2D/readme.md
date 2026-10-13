@@ -1,3 +1,5 @@
+> **App YAML compatibility:** see [Reuse an app project](../workflow_configuration.md) for the shared schema, copy/paste instructions, and 2D/3D restrictions.
+
 > Run the adjacent Python script without arguments. Its configuration path
 > resolves relative to the script; this example writes to its adjacent `output/`.
 > Package numerical callables require an explicit configuration path and contain
@@ -42,10 +44,7 @@ and case-creation runs.
 
 ## Configuration
 
-`design_file: ../gmsh_2D/workflow_gmsh_stator_2D.yaml` is the shared source for MoC inlet
-conditions, nozzle design, blade/passage geometry, mesh parameters, named
-boundaries and CGNS export. The Fluent workflow creates the mesh with viewers
-disabled, regardless of the mesh-only example's viewer switches.
+The YAML embeds the app's `machine`, `workflow`, and `rows` blocks, followed by Fluent-only settings. Replace those three blocks with an app download and retain the Fluent-only settings. `row_id` selects the active stator. This 2D workflow requires a linear cascade; use Fluent 3D for axial/radial app geometries. The example embeds the same project as Gmsh 2D. Top-level Fluent viewer switches control this run independently of the app workflow preferences.
 
 | Workflow setting | Purpose |
 | --- | --- |
@@ -107,7 +106,7 @@ uses pressure/temperature.
 
 The barotropic model's exit pressure is configured independently of the MoC
 back pressure. With the current YAML, the model covers **251,300 to 31,412.5 Pa**,
-while the Fluent pressure outlet remains **95,000 Pa**, from `nozzle.p_back`.
+while the Fluent pressure outlet remains **95,000 Pa**, from the selected row's `geometry.method_of_characteristics.p_back`.
 The model's minimum pressure must be strictly below the CFD outlet pressure;
 both must exceed the fluid's triple-point pressure.
 
@@ -122,7 +121,7 @@ exponential extrapolation underflow found during troubleshooting.
 Fluent imports metre-scaled CGNS coordinates (`length_scale: 0.001`), assigns
 pressure inlet/outlet conditions, a stationary no-slip blade, and a conformal
 translational periodic pair verified against the blade pitch. The inlet total
-pressure is `nozzle.P0`; zero operating pressure makes gauge pressure equal
+pressure is resolved from the row's stagnation property pair; zero operating pressure makes gauge pressure equal
 absolute pressure. Turbulence intensity and viscosity ratio are configurable.
 
 ### Solver and export

@@ -2,14 +2,21 @@
 from pathlib import Path
 import numpy as np
 import yaml
+from turbo_moc.configuration.flow_domain import to_passage
 
-def read_configuration(config_file):
+def read_configuration(config_file, row_id=None):
     """Read and validate geometry, mesh and workflow settings from the YAML."""
     from turbo_moc.geometry import passage_2d as geo
     from turbo_moc.meshing import mesh_2d as msh
 
     with Path(config_file).open(encoding="utf-8") as stream:
         config = yaml.safe_load(stream)
+    if isinstance(config, dict) and "rows" in config:
+        return from_project(config, row_id=row_id)
+    if isinstance(config, dict) and "flow_domain" in config:
+        if "passage" in config:
+            raise ValueError("Use flow_domain or legacy passage, not both.")
+        config["passage"] = to_passage(config.pop("flow_domain"))
     if not isinstance(config, dict) or set(config) != {
         "nozzle",
         "blade",
@@ -77,3 +84,50 @@ def validate_geometry_figure(figure):
                 extension[1:] not in supported for extension in formats) or
             len(set(formats)) != len(formats)):
         raise ValueError("workflow.geometry_figure.formats must list unique supported extensions, e.g. [.png, .svg].")
+
+
+def from_project(project, row_id=None):
+    """Adapt the app project to a 2D reference workflow without changing its inputs.
+
+    Span controls remain stored but are unused in 2D; only the five section
+    boundary types are passed to the planar CGNS writer.
+    """
+    from copy import deepcopy
+    from turbo_moc.configuration.row import configuration_from_data, to_shared
+    row = configuration_from_data(project, row_id=row_id)
+    shared = to_shared(row)
+    mesh = deepcopy(row["mesh"])
+    mesh["cgns"]["boundary_types"] = {key: value for key, value in
+        mesh["cgns"]["boundary_types"].items() if key not in ("hub", "shroud")}
+    workflow = row["workflow"]
+    mesh["show_gui"] = workflow["show_gmsh"]
+    execution = {
+        "generate_mesh": workflow.get("generate_mesh", True),
+        "geometry_figure": workflow.get("geometry_figure", {
+            "save": workflow["save_figures"], "show": False,
+            "size": [14, 8], "dpi": 300, "formats": [".png", ".svg"]}),
+        "reporting": workflow.get("reporting", {
+            "level": workflow["log_level"],
+            "filename": workflow.get("log_filename", "mesh_generation.log")}),
+    }
+    validate_workflow(execution)
+    from turbo_moc.meshing.mesh_2d import validate_mesh_settings
+    validate_mesh_settings(mesh)
+    return {"nozzle": shared["nozzle"], "blade": shared["blade"],
+            "passage": shared["passage"], "mesh": mesh, "workflow": execution,
+            "row_configuration": row}
+
+
+def build_geometry(nozzle, config):
+    """Use the app geometry/scaling when a project was supplied."""
+    from turbo_moc.geometry import passage_2d, blade_row
+    if "row_configuration" in config:
+        design = blade_row.build_design(nozzle, config["row_configuration"])
+        suction = passage_2d.xy(design.blade["suction"])
+        count = len(suction) - len(nozzle["wall_final"]["x"]) - 3
+        curves = design.curves | {
+            "suction": suction, "pressure": passage_2d.xy(design.blade["pressure"]),
+            "construction_camberline": suction[:count],
+        }
+        return design.blade, curves
+    return passage_2d.build_geometry(nozzle, config)

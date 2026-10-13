@@ -6,10 +6,11 @@ from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 
 from turbo_moc.app import workflow as flow
 from turbo_moc.meshing import inspection
+from turbo_moc.meshing.mesh_3d import BOUNDARIES
 
 
 DEFAULTS = {"mode": "surface", "method": "worst", "metric": "skewness", "n": 100,
-    "threshold": .8, "layer": 1, "context": ["surfaces"]}
+    "threshold": .8, "layer": 1, "context": list(BOUNDARIES)}
 METRICS = inspection.METRIC_LABELS
 
 
@@ -24,8 +25,6 @@ def stores():
 
 def controls(row, appearance, saved=None):
     settings = {**DEFAULTS, **(saved or {})}
-    if "blade" in settings["context"]:
-        settings["context"] = ["surfaces"]
     def dropdown(field, options):
         return dcc.Dropdown(id=identifier(field, row), options=[{"label": label, "value": value}
             for value, label in options], value=settings[field], clearable=False, searchable=False)
@@ -54,9 +53,10 @@ def controls(row, appearance, saved=None):
                     html.Div([html.Button("Previous", id=identifier("previous", row), n_clicks=0),
                         html.Button("Next", id=identifier("next", row), n_clicks=0)], className="inspection-step"),
                 ], id=identifier("layer-fields", row)),
-                dcc.Checklist(id=identifier("context", row), options=[{"label": "Faint boundary surfaces", "value": "surfaces"}],
-                    value=settings["context"]),
-                html.Small("Context follows your Boundary surfaces selection. Inspection shows one passage of this row."),
+                html.Details([html.Summary("Transparent surfaces"),
+                    dcc.Checklist(id=identifier("context", row),
+                        options=[{"label": name.replace("_", " ").title(), "value": name} for name in BOUNDARIES],
+                        value=settings["context"])], className="display-selection"),
         ], id=identifier("active-fields", row),
             style={"display": "none"} if settings["mode"] == "surface" else {}, className="inspection-controls")]
 
@@ -65,6 +65,21 @@ def extract(request):
     """Read the requested artifact, independently of the current design settings."""
     if not request:
         return None
+    if "rows" in request:
+        rows = deepcopy(request["rows"])
+        aspect_rows = [row for row in rows if row.get("options", {}).get("metric") == "aspect_ratio" and not row.get("error")]
+        maxima = []
+        for row in aspect_rows:
+            try:
+                info = inspection.inspection_info(flow.directory(row["reference"]))
+                maxima.append(info["metric_ranges"]["aspect_ratio"][1])
+            except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+                row["error"] = "Cannot inspect mesh: " + str(exc)
+        if maxima:
+            maximum = inspection._aspect_color_ceiling(max(maxima))
+            for row in aspect_rows:
+                row["options"]["aspect_max"] = maximum
+        return {"key": request["key"], "rows": [extract(row) for row in rows]}
     identity = {key: request.get(key) for key in ("key", "row_id", "job", "context", "status", "label")}
     if request.get("error"):
         return {**identity, "error": request["error"], "note": request["error"]}
@@ -79,8 +94,23 @@ def extract(request):
 
 
 def summary(result, request):
+    """One common quality scale in the display panel, plus actionable errors."""
     if not request:
         return []
+    if "rows" in request:
+        if not result or result.get("key") != request["key"]:
+            return html.Div("Updating mesh inspection...", className="inspection-caption")
+        results = {row["row_id"]: row for row in result.get("rows", [])}
+        children = []
+        legend_added = False
+        for row in request["rows"]:
+            current = results.get(row["row_id"])
+            if row.get("error") or not current or current.get("error") or current.get("key") != row["key"]:
+                children.append(html.Div(summary(current, row)))
+            elif not legend_added:
+                children.extend(summary(current, row))
+                legend_added = True
+        return children
     if request.get("error"):
         return html.Div(request["error"], className="message")
     if not result or result.get("key") != request["key"]:
@@ -90,16 +120,10 @@ def summary(result, request):
     lower, upper = result["color_range"]
     midpoint = math.sqrt(lower * upper) if result["logarithmic"] else (lower + upper) / 2
     ends = [upper, midpoint, lower] if result["metric"] == "orthogonality" else [lower, midpoint, upper]
-    status = " · Outdated mesh" if result.get("status") == "Outdated" else ""
     scale = " · logarithmic" if result["logarithmic"] else ""
-    return [html.Div([
-        html.Div([html.Strong(f"{result.get('label', result['row_id'])} · {result['metric_label']}{status}"),
-            html.Div(f"{result['selected_count']:,} of {result['total_count']:,} volume cells selected · one passage"),
-            html.Small(result["note"])], className="inspection-count"),
-        html.Div([html.Div("Better → Worse" + scale), html.Div(className="inspection-gradient"),
+    return [html.Div([html.Div("Better → Worse" + scale), html.Div(className="inspection-gradient"),
             html.Div([html.Span(f"{value:.4g}") for value in ends], className="inspection-ticks")],
-            className="inspection-scale", title=result["definition"]),
-    ], className="inspection-readout")]
+            className="inspection-scale", title=result["definition"])]
 
 
 def register(app):
@@ -117,8 +141,12 @@ def register(app):
             1 if metric == "aspect_ratio" else 0, None if metric == "aspect_ratio" else 1)
 
     @app.callback(Output(identifier("threshold", MATCH), "value"),
-        Input(identifier("metric", MATCH), "value"), prevent_initial_call=True)
-    def threshold_default(metric):
+        Input(identifier("metric", MATCH), "value"), State(identifier("metric", MATCH), "id"),
+        State("mesh-inspection-settings", "data"), prevent_initial_call=True)
+    def threshold_default(metric, item, preferences):
+        saved = (preferences or {}).get(item["row"], {})
+        if saved.get("metric") == metric:
+            return saved.get("threshold", DEFAULTS["threshold"])
         return {"skewness": .8, "orthogonality": .2, "aspect_ratio": 10}[metric]
 
     @app.callback(Output(identifier("layer", MATCH), "max"), Output(identifier("layer", MATCH), "value"),
@@ -145,20 +173,28 @@ def register(app):
             elif triggered["type"] == "inspection-next" and next_:
                 layer = min(count, layer + 1)
         ends = ("Span start", "Span end") if row.get("is_linear") else ("Hub", "Shroud/tip")
-        caption = f"Layer {layer} of {count} · η = {stations[layer-1]:.4g}–{stations[layer]:.4g}"
+        position = 50 * (stations[layer-1] + stations[layer])
+        caption = f"Layer {layer} of {count} · {position:.1f}% span"
         marks = {1: ends[0], count: ends[1]} if count > 1 else {1: "Single layer"}
         return count, layer, marks, caption, layer <= 1, layer >= count, False
 
     names = list(DEFAULTS)
     @app.callback(Output("mesh-inspection-settings", "data"),
         *[Input(identifier(name, ALL), "value") for name in names],
-        *[State(identifier(name, ALL), "id") for name in names], State("mesh-inspection-settings", "data"))
+        *[State(identifier(name, ALL), "id") for name in names], State("mesh-inspection-settings", "data"),
+        State("mesh-display-row", "value"))
     def preferences(*args):
-        result = deepcopy(args[-1] or {})
-        for name, values, ids in zip(names, args[:len(names)], args[len(names):-1]):
+        saved, selected = args[-2:]
+        result = deepcopy(saved or {})
+        changed = list(ctx.triggered_prop_ids.values())
+        for name, values, ids in zip(names, args[:len(names)], args[len(names):-2]):
             for value, item in zip(values or [], ids or []):
-                result.setdefault(item["row"], deepcopy(DEFAULTS))[name] = value
-        return no_update if result == args[-1] else result
+                if item not in changed or value == (saved or {}).get(item["row"], DEFAULTS).get(name):
+                    continue
+                for row in selected or []:
+                    if row != "all":
+                        result.setdefault(row, deepcopy(DEFAULTS))[name] = value
+        return no_update if result == saved else result
 
     app.clientside_callback("function(settings, row, data, shown) { return window.turbomocInspection.request(settings, row, data, shown); }",
         Output("mesh-inspection-request", "data"), Input("mesh-inspection-settings", "data"),

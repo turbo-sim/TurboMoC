@@ -22,7 +22,9 @@ def linear_case():
     config = read_configuration("examples/apps/cases/axial_stator.yaml")
     config["meridional_channel"] = {"type": "linear", "meridional_chord": 20.0, "blade_height": 10.0}
     config["blade_geometry"].update(r_trailing=0.1, num_baseline_points=100, num_curve_points=100, n_cp=15)
-    config["flow_domain"].update(inlet_chords=0.5, outlet_chords=0.5, num_points=40)
+    config["flow_domain"]["inlet"]["extension_length"] = 0.5
+    config["flow_domain"]["outlet"]["extension_length"] = 0.5
+    config["flow_domain"]["number_of_points"] = 40
     config["mesh"]["numerics"].update(
         terminal_output=False, blade_size=0.7, domain_size=3.0,
         curvature_elements=16, smoothing_steps=1, span_layers=3, span_stretch=0.8,

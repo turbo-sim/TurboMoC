@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+from turbo_moc.configuration.flow_domain import normalize as normalize_domain, to_passage
+
 
 def validate_mesh_configuration(mesh):
     """Validate reusable section/span/export controls independently of a blade provider."""
@@ -85,6 +87,7 @@ SECTIONS = {
     "passage": "flow_domain",
 }
 SMOOTH_FIELDS = (
+    "inlet_extension_type", "outlet_extension_type",
     "inlet_axial_tangent", "inlet_blade_tangent",
     "outlet_blade_tangent", "outlet_axial_tangent", "num_points",
 )
@@ -92,18 +95,16 @@ VIEW_DEFAULTS = {"section_edge_width": 0.35, "volume_edge_width": 0.35}
 
 
 def normalize(config):
-    """Accept old case files; publish only the current, flat configuration."""
+    """Accept old case files; publish current row names and nested domain inputs."""
     result = deepcopy(config)
     for old, new in SECTIONS.items():
         if old in result:
             if new in result:
                 raise ValueError(f"Use either {old} or {new}, not both.")
             result[new] = result.pop(old)
-    domain = result["flow_domain"]
-    smooth = domain.pop("smooth", {})
-    # Explicit flat values take precedence when migrating a partially edited file.
-    for name, value in smooth.items():
-        domain.setdefault(name, value)
+    result["flow_domain"] = normalize_domain(result["flow_domain"])
+    if isinstance(result["mesh"].get("numerics"), dict):
+        result["mesh"]["numerics"].setdefault("recombine_minimum_quality", 0.1)
     view = result["mesh"].setdefault("visualization", {})
     for name, value in VIEW_DEFAULTS.items():
         view.setdefault(name, value)
@@ -115,8 +116,7 @@ def to_shared(config):
     result = deepcopy(config)
     for old, new in SECTIONS.items():
         result[old] = result.pop(new)
-    domain = result["passage"]
-    domain["smooth"] = {name: domain.pop(name) for name in SMOOTH_FIELDS if name in domain}
+    result["passage"] = to_passage(result["passage"])
     return result
 
 
@@ -133,6 +133,11 @@ def read_configuration(path, row_id=None):
     """
     with Path(path).open(encoding="utf-8") as stream:
         content = yaml.safe_load(stream)
+    return configuration_from_data(content, row_id=row_id)
+
+
+def configuration_from_data(content, row_id=None):
+    """Validate an in-memory project/row and select an active stator."""
     if isinstance(content, dict) and "rows" in content:
         from turbo_moc.configuration.project import normalize_project, validate_project, active_rows, get_row, row_configuration, row_assembly
         project = validate_project(normalize_project(content))

@@ -15,6 +15,35 @@ CASE_DIR = Path(__file__).resolve().parents[1] / "examples/apps/cases"
 CASES = {n: CASE_DIR / f"{n}.yaml" for n in ("axial_stator", "radial_stator")}
 
 
+@pytest.mark.parametrize("family", ["axial", "radial", "linear"])
+def test_geometry_camera_family_comes_from_rendered_configuration(family, monkeypatch):
+    from turbo_moc.app import application
+    project = projects.default_project("axial")
+    row = projects.active_rows(project)[0]
+    config = projects.row_configuration(projects.default_project(family), row["id"])
+    preview = {"is_linear": family == "linear", "surfaces": {"blade": {
+        "points": [100., -2., 0., 101., -2., 0., 100., -2., 1.],
+        "polys": [3, 0, 1, 2]}}}
+    original = deepcopy(preview)
+    monkeypatch.setattr(application, "ready_rows", lambda *_: [
+        (row, config, {}, {"geometry": "saved-geometry"})])
+    monkeypatch.setattr(flow, "get_design", lambda *_: object())
+    monkeypatch.setattr(application, "cached_preview", lambda *_: preview)
+    app = application.create_app()
+    callback = next(value["callback"].__wrapped__ for key, value in app.callback_map.items()
+                    if key.startswith("..geometry-data.data"))
+
+    # Hidden rows retain their datasets. Their camera metadata follows the
+    # configuration used to build that geometry, rather than the sidebar.
+    data, *_ = callback({"valid": True, "project": project}, {}, [], None)
+    dataset, = data["rows"]
+    assert dataset["geometry_type"] == family
+    assert dataset["is_linear"] == (family == "linear")
+    assert dataset["placement"] == projects.assembly_placement(project, row["id"])
+    assert dataset["surfaces"] == original["surfaces"]
+    assert preview == original
+
+
 @pytest.mark.parametrize("family", ["axial", "radial", "curved"])
 def test_preview_blade_is_closed_and_has_smooth_normals(family, small_design):
     from turbo_moc.visualization.geometry_preview import preview_geometry
@@ -44,19 +73,20 @@ def test_preview_blade_is_closed_and_has_smooth_normals(family, small_design):
     assert np.all(counts == 2), "Blade preview has an uncapped or mismatched edge."
     assert len(welded) - len(unique_edges) + len(triangles) == 2
 
-    # The supporting hub is a single revolution sector without a blade hole.
-    # Its Euler characteristic is one (a disk), rather than zero (an annulus).
-    hub = data["surfaces"]["hub"]
-    xyz = np.asarray(hub["points"]).reshape(-1, 3)
-    welded, inverse = np.unique(xyz, axis=0, return_inverse=True)
-    triangles = inverse[np.asarray(hub["polys"]).reshape(-1, 4)[:, 1:]]
-    edges = np.concatenate([triangles[:, [0,1]], triangles[:, [1,2]], triangles[:, [2,0]]])
-    unique_edges, counts = np.unique(np.sort(edges, axis=1), axis=0, return_counts=True)
-    assert np.isfinite(xyz).all() and np.all(np.isin(counts, [1, 2]))
-    assert len(welded) - len(unique_edges) + len(triangles) == 1
-    boundary = unique_edges[counts == 1]
-    _, degree = np.unique(boundary, return_counts=True)
-    assert np.all(degree == 2), "Hub boundary contains an open or branched seam."
+    # Both supports are continuous sectors without blade holes: their Euler
+    # characteristic is one (a disk), rather than zero (an annulus).
+    for name in ("hub", "shroud"):
+        support = data["surfaces"][name]
+        xyz = np.asarray(support["points"]).reshape(-1, 3)
+        welded, inverse = np.unique(xyz, axis=0, return_inverse=True)
+        triangles = inverse[np.asarray(support["polys"]).reshape(-1, 4)[:, 1:]]
+        edges = np.concatenate([triangles[:, [0,1]], triangles[:, [1,2]], triangles[:, [2,0]]])
+        unique_edges, counts = np.unique(np.sort(edges, axis=1), axis=0, return_counts=True)
+        assert np.isfinite(xyz).all() and np.all(np.isin(counts, [1, 2]))
+        assert len(welded) - len(unique_edges) + len(triangles) == 1
+        boundary = unique_edges[counts == 1]
+        _, degree = np.unique(boundary, return_counts=True)
+        assert np.all(degree == 2), f"{name} boundary contains an open or branched seam."
 
 
 def test_meridional_mesh_is_empty_until_reference_is_current(small_design, monkeypatch):

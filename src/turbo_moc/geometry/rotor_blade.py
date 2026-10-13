@@ -10,6 +10,7 @@ import numpy as np
 from scipy.interpolate import BSpline, make_interp_spline
 
 from turbo_moc.geometry import passage_2d as planar
+from turbo_moc.configuration.flow_domain import to_flat
 from turbo_moc.geometry.blade_row import Design, require_containment
 from .flow_interfaces import apply_interfaces
 from .linear_cascade import LinearCascadeDefinition, LinearCascadeMapping
@@ -109,7 +110,8 @@ def _bezier_reference(contour, beta_in, beta_out, count):
 
 
 def _flow_domain(blade, settings):
-    """Build smooth periodics around the rotor, with the shared extension controls."""
+    """Build rotor periodics using the shared inlet/outlet extension controls."""
+    settings = to_flat(settings)
     options = planar.validate_flow_domain_settings({
         key: settings[key] for key in planar.DEFAULTS if key in settings
     })
@@ -130,12 +132,14 @@ def _flow_domain(blade, settings):
         raise ValueError("Flow-domain inlet_chords and outlet_chords must be positive.")
     inlet_point = middle[0] + [-.5 * upstream * np.tan(np.deg2rad(beta_in)), upstream]
     outlet_point = middle[-1] + [.5 * downstream * np.tan(np.deg2rad(beta_out)), -downstream]
-    inlet, inlet_cp, inlet_spline = planar.cubic_blend(
+    inlet, inlet_cp, inlet_spline = planar.extension_curve(
         inlet_point, middle[0], [0., -1.], planar.metal_direction(beta_in),
-        upstream * options["inlet_axial_tangent"], upstream * options["inlet_blade_tangent"], count)
-    outlet, outlet_cp, outlet_spline = planar.cubic_blend(
+        upstream * options["inlet_axial_tangent"], upstream * options["inlet_blade_tangent"], count,
+        kind=options["inlet_extension_type"], side="inlet")
+    outlet, outlet_cp, outlet_spline = planar.extension_curve(
         middle[-1], outlet_point, planar.metal_direction(beta_out), [0., -1.],
-        downstream * options["outlet_blade_tangent"], downstream * options["outlet_axial_tangent"], count)
+        downstream * options["outlet_blade_tangent"], downstream * options["outlet_axial_tangent"], count,
+        kind=options["outlet_extension_type"], side="outlet")
     reference = np.vstack((inlet, middle[1:], outlet[1:]))
     domain = planar._domain(reference, blade["pitch"]) | {
         "blade_reference": middle, "blade_reference_spline": middle_spline,

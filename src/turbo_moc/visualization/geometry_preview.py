@@ -169,34 +169,24 @@ def preview_geometry(design, *, span_sections=9, curve_points=180, subdivisions=
                 triangles = np.vstack((triangles, cap_cells + len(parameters)))
                 parameters = np.vstack((parameters, cap))
         surfaces[name] = _display_surface(design, parameters, triangles, subdivisions, boundary_name=name)
-    # Span-start support follows the mapped periodic edges. In an annular row
-    # this is a revolution sector; in a linear cascade it is a planar strip.
-    # This is a continuous display surface, with no blade-shaped cutout. It
+    # Both span supports follow their mapped periodic edges. In an annular row
+    # these are revolution sectors; in a linear cascade they are planar strips.
+    # These are continuous display surfaces, with no blade-shaped cutouts. This
     # leaves the numerical CFD boundary and the closed blade shell unchanged.
-    row = sections[0]
     mapping = design.meridional_channel
     angular_samples = (3 if mapping.is_linear else
                        max(3, int(np.ceil(mapping.pitch_angle / np.deg2rad(4))) + 1))
     fraction = np.linspace(0, 1, angular_samples)
-    left, right = row["periodic_left"], row["periodic_right"]
-    q = left[:, None, :] + fraction[None, :, None] * (right - left)[:, None, :]
-    parameters = np.column_stack((q.reshape(-1, 2), np.zeros(q.shape[0] * q.shape[1])))
-    start = (np.arange(len(left) - 1)[:, None] * angular_samples
-             + np.arange(angular_samples - 1))
-    quads = np.stack((start, start + 1, start + angular_samples + 1,
-                      start + angular_samples), axis=-1).reshape(-1, 4)
-    triangles = np.concatenate((quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]))
-    surfaces["hub"] = _display_surface(design, parameters, triangles, subdivisions)
-
-    # The shroud retains its blade clearance opening.
-    outer, inner = sections[-1]["outer"], sections[-1]["blade"]
-    def area(p):
-        return np.sum(p[:, 0] * np.roll(p[:, 1], -1) - p[:, 1] * np.roll(p[:, 0], -1))
-    if area(outer) * area(inner) > 0:
-        inner = inner[::-1]
-    q, triangles = _triangulate([outer, inner])
-    parameters = np.column_stack((q, np.ones(len(q))))
-    surfaces["shroud"] = _display_surface(design, parameters, triangles, subdivisions)
+    for name, row, value in (("hub", sections[0], 0.0), ("shroud", sections[-1], 1.0)):
+        left, right = row["periodic_left"], row["periodic_right"]
+        q = left[:, None, :] + fraction[None, :, None] * (right - left)[:, None, :]
+        parameters = np.column_stack((q.reshape(-1, 2), np.full(q.shape[0] * q.shape[1], value)))
+        start = (np.arange(len(left) - 1)[:, None] * angular_samples
+                 + np.arange(angular_samples - 1))
+        quads = np.stack((start, start + 1, start + angular_samples + 1,
+                          start + angular_samples), axis=-1).reshape(-1, 4)
+        triangles = np.concatenate((quads[:, [0, 1, 2]], quads[:, [0, 2, 3]]))
+        surfaces[name] = _display_surface(design, parameters, triangles, subdivisions)
     result = {"section": section_data(design), "surfaces": surfaces,
               "is_linear": mapping.is_linear, "pitch_mm": mapping.pitch,
               "shift_mm": design.curves["shift_mm"]}

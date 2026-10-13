@@ -9,6 +9,7 @@ import numpy as np
 from scipy.optimize import brentq
 
 from turbo_moc.geometry import passage_2d as planar
+from turbo_moc.configuration.flow_domain import to_flat
 
 
 def interface_prime(mapping, interface, placement, eta):
@@ -45,7 +46,7 @@ def interface_prime(mapping, interface, placement, eta):
 
 
 def apply_interfaces(mapping, blade, curves, assembly, settings, eta):
-    """Reconstruct smooth extensions against the prescribed physical caps.
+    """Reconstruct the selected extensions against the prescribed physical caps.
 
     The adjoining blade-reference endpoint and tangent are retained. Handle
     proportions follow the existing flow-domain settings; their dimensional
@@ -55,6 +56,7 @@ def apply_interfaces(mapping, blade, curves, assembly, settings, eta):
     interfaces = assembly.get("interfaces", {})
     if not interfaces:
         return curves
+    settings = to_flat(settings)
     result = dict(curves)
     options = planar.DEFAULTS | {key: settings[key] for key in planar.DEFAULTS if key in settings}
     count = options["num_points"]
@@ -81,8 +83,9 @@ def apply_interfaces(mapping, blade, curves, assembly, settings, eta):
         tangents = ([0., -1.], direction) if inlet else (direction, [0., -1.])
         handles = (("inlet_axial_tangent", "inlet_blade_tangent") if inlet else
                    ("outlet_blade_tangent", "outlet_axial_tangent"))
-        samples, controls, spline = planar.cubic_blend(
-            start, end, *tangents, *(extension * options[key] for key in handles), count)
+        samples, controls, spline = planar.extension_curve(
+            start, end, *tangents, *(extension * options[key] for key in handles), count,
+            kind=options[f"{side}_extension_type"], side=side)
         result[f"{side}_extension"] = samples
         result[f"{side}_control_points"] = controls
         result[f"{side}_spline"] = spline

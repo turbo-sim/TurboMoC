@@ -29,7 +29,11 @@ CASES = ROOT / "examples/apps/cases"
 
 @pytest.fixture
 def raw_workflow():
-    return yaml.safe_load(WORKFLOW_FILE.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(WORKFLOW_FILE.read_text(encoding="utf-8"))
+    for key in ("machine", "workflow", "rows"):
+        raw.pop(key)
+    raw["design_file"] = "../gmsh_3D/workflow_gmsh_stator_3D.yaml"
+    return raw
 
 
 def test_example_resolves_project_and_all_three_momentum_equations():
@@ -653,7 +657,9 @@ def test_prepare_mesh_saves_reference_figures_from_real_3d_geometry(
     config["blade_geometry"].update(
         r_trailing=0.1, num_baseline_points=100, num_curve_points=100, n_cp=15
     )
-    config["flow_domain"].update(inlet_chords=0.5, outlet_chords=0.5, num_points=40)
+    config["flow_domain"]["inlet"]["extension_length"] = 0.5
+    config["flow_domain"]["outlet"]["extension_length"] = 0.5
+    config["flow_domain"]["number_of_points"] = 40
     if family != "linear":
         config["meridional_channel"]["num_blades"] = 12
     x = np.linspace(0, 0.01, 80)

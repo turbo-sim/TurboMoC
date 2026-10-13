@@ -26,6 +26,8 @@ from ..visualization.geometry_mpl import draw_domain, plot_construction, plot_fl
 
 
 DEFAULTS = {
+    "inlet_extension_type": "bspline",
+    "outlet_extension_type": "straight",
     "inlet_axial_tangent": 0.35,
     "inlet_blade_tangent": 0.35,
     "outlet_blade_tangent": 0.35,
@@ -35,12 +37,15 @@ DEFAULTS = {
 
 
 def validate_flow_domain_settings(settings):
-    """Validate dimensionless handle lengths and sampling resolution."""
+    """Validate extension types, dimensionless handles, and sampling resolution."""
     options = DEFAULTS | settings
     unknown = set(settings) - set(DEFAULTS)
     if unknown:
         raise ValueError(f"Unknown passage.smooth settings: {sorted(unknown)}")
-    for key in DEFAULTS.keys() - {"num_points"}:
+    for side in ("inlet", "outlet"):
+        if options[f"{side}_extension_type"] not in ("bspline", "straight"):
+            raise ValueError(f"flow_domain.{side}_extension_type must be bspline or straight.")
+    for key in DEFAULTS.keys() - {"num_points", "inlet_extension_type", "outlet_extension_type"}:
         value = options[key]
         if not np.isfinite(value) or not 0 < value < 1:
             raise ValueError(f"passage.smooth.{key} must be in (0, 1).")
@@ -124,6 +129,30 @@ def cubic_blend(start, end, tangent_start, tangent_end,
     return spline(np.linspace(0, 1, num_points)), controls, spline
 
 
+def extension_curve(start, end, tangent_start, tangent_end,
+                    length_start, length_end, num_points, *, kind, side):
+    """Smooth blend or tangent-aligned straight line to the same axial cap.
+
+    Straight extensions preserve the blade-reference tangent and cap y,
+    allowing the pitchwise cap position to change. Handles apply only to blends.
+    """
+    if kind == "bspline":
+        return cubic_blend(start, end, tangent_start, tangent_end,
+                           length_start, length_end, num_points)
+    if kind != "straight":
+        raise ValueError("Extension type must be bspline or straight.")
+    start, end = np.array(start, float), np.array(end, float)
+    tangent = np.asarray(tangent_end if side == "inlet" else tangent_start, float)
+    travel = (end[1] - start[1]) / tangent[1]
+    if side == "inlet":
+        start = end - travel * tangent
+    else:
+        end = start + travel * tangent
+    controls = np.array([start, end])
+    spline = BSpline([0, 0, 1, 1], controls, 1)
+    return spline(np.linspace(0, 1, num_points)), controls, spline
+
+
 def blade_reference_camberline(blade, wall, num_points=200):
     """Return convergent and divergent references anchored at the fitted LE.
 
@@ -163,8 +192,9 @@ def generate_flow_domain(blade, wall, *, inlet_chords, outlet_chords, smooth=Non
     """Build the extended reference, +/- half-pitch periodics, and flat caps.
 
     Cap axial positions use the contour extrema and nominal axial chord.
-    Far-field pitchwise positions assume half of each
-    extension's axial travel occurs at the blade angle. Handle lengths are
+    Smooth far-field pitchwise positions assume half of each
+    extension's axial travel occurs at the blade angle; straight extensions
+    continue the blade tangent for the full travel. Handle lengths are
     proportions of the respective extension's axial length, not its arc length.
     """
     validate_domain_shift(domain_shift_mode, domain_shift)
@@ -196,14 +226,16 @@ def generate_flow_domain(blade, wall, *, inlet_chords, outlet_chords, smooth=Non
     axial = np.array([0., -1.])
     inlet_point = convergent[0] + [-0.5 * upstream * np.tan(np.deg2rad(blade["metal_angle_in"])), upstream]
     outlet_point = divergent[-1] + [0.5 * downstream * np.tan(np.deg2rad(blade["metal_angle_out"])), -downstream]
-    inlet, inlet_cp, inlet_spline = cubic_blend(
+    inlet, inlet_cp, inlet_spline = extension_curve(
         inlet_point, convergent[0], axial, direction_in,
         upstream * options["inlet_axial_tangent"],
-        upstream * options["inlet_blade_tangent"], count)
-    outlet, outlet_cp, outlet_spline = cubic_blend(
+        upstream * options["inlet_blade_tangent"], count,
+        kind=options["inlet_extension_type"], side="inlet")
+    outlet, outlet_cp, outlet_spline = extension_curve(
         divergent[-1], outlet_point, direction_out, axial,
         downstream * options["outlet_blade_tangent"],
-        downstream * options["outlet_axial_tangent"], count)
+        downstream * options["outlet_axial_tangent"], count,
+        kind=options["outlet_extension_type"], side="outlet")
     reference = np.vstack((inlet, convergent[1:], divergent[1:], outlet[1:]))
     domain = _domain(reference, blade["pitch"]) | {
         "convergent": convergent, "divergent": divergent,

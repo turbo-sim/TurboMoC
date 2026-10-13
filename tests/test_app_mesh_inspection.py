@@ -43,18 +43,21 @@ def test_controls_are_available_without_modifying_configuration(app):
     assert "Display mode" in controls and "Boundary surfaces" in controls
     assert "Mesh quality filter" in controls and "Spanwise layer" in controls
     assert "inspection-tab" not in controls and "inspection-aspect_max" not in controls
+    assert panel.DEFAULTS["context"] == list(panel.BOUNDARIES)
+    assert "Transparent surfaces are independent" not in controls
     for pane in ("geometry", "mesh"):
         assert f"{pane}-configure-display" not in layout
         assert f"{pane}-close-display" not in layout
 
 
-def test_inspection_preferences_are_independent_per_row(app):
+def test_inspection_preferences_are_independent_per_row(app, monkeypatch):
     saved = {"stator_1": deepcopy(panel.DEFAULTS), "rotor_1": deepcopy(panel.DEFAULTS)}
     original = deepcopy(saved)
     names = list(panel.DEFAULTS)
     values = [["filter" if name == "mode" else 42 if name == "n" else saved["rotor_1"][name]] for name in names]
     ids = [[panel.identifier(name, "rotor_1")] for name in names]
-    changed = app.callback_map["mesh-inspection-settings.data"]["callback"].__wrapped__(*values, *ids, saved)
+    monkeypatch.setattr(panel, "ctx", SimpleNamespace(triggered_prop_ids={str(i): item[0] for i, item in enumerate(ids)}))
+    changed = app.callback_map["mesh-inspection-settings.data"]["callback"].__wrapped__(*values, *ids, saved, ["rotor_1"])
     assert changed["rotor_1"]["mode"] == "filter" and changed["rotor_1"]["n"] == 42
     assert changed["stator_1"] == saved["stator_1"] and saved == original
 
@@ -108,10 +111,10 @@ def test_extraction_errors_are_visible_and_keep_request_identity(monkeypatch):
 def test_legend_uses_fixed_metric_direction_and_logarithmic_ticks(metric, expected):
     payload = {**result(metric), **{key: value for key, value in request().items() if key != "options"}}
     children = panel.summary(payload, request())
-    legend = children[0].children[1]
+    legend = children[0]
     assert [item.children for item in legend.children[2].children] == expected
     text = str(children)
-    assert "Outdated mesh" in text and "12 of 1,000 volume cells selected" in text
+    assert "volume cells selected" not in text and "Selection note" not in text
     assert "Metric definition and selected cell IDs" not in text and "Original cell ID" not in text
     assert "Updating mesh inspection" in str(panel.summary({**payload, "key": "old"}, request()))
     assert panel.summary(payload, None) == []
@@ -123,7 +126,7 @@ def test_layer_controls_use_saved_nonuniform_stations_and_clamp(app, monkeypatch
     item = panel.identifier("layer", "rotor_1")
     monkeypatch.setattr(panel, "ctx", SimpleNamespace(triggered_id=panel.identifier("next", "rotor_1")))
     maximum, value, marks, caption, previous_disabled, next_disabled, slider_disabled = change(data, 1, 0, 1, item)
-    assert maximum == 3 and value == 2 and "0.1–0.4" in caption
+    assert maximum == 3 and value == 2 and caption == "Layer 2 of 3 · 25.0% span"
     assert not previous_disabled and not next_disabled and not slider_disabled
     monkeypatch.setattr(panel, "ctx", SimpleNamespace(triggered_id="volume-data"))
     assert change(data, 99, 0, 1, item)[1] == 3
@@ -143,3 +146,37 @@ def test_mode_controls_show_only_relevant_fields(app):
     assert result[:6] == ({"display": "none"}, {}, {}, {"display": "none"}, {"display": "none"}, {})
     assert result[6:] == ("Orthogonality ≤", 0, 1)
     assert fields("surface", "worst", "skewness")[:2] == ({}, {"display": "none"})
+
+
+def test_multirow_extraction_uses_shared_aspect_scale_and_keeps_partial_errors(monkeypatch):
+    calls = []
+    monkeypatch.setattr(panel.flow, "directory", lambda ref: ref["job"])
+    monkeypatch.setattr(panel.inspection, "inspection_info", lambda directory:
+        {"metric_ranges": {"aspect_ratio": [1, 27 if directory == "first" else 130]}})
+    def inspect(directory, **options):
+        calls.append((directory, options))
+        return result("aspect_ratio")
+    monkeypatch.setattr(panel.inspection, "inspect_mesh", inspect)
+    first = request(metric="aspect_ratio")
+    first.update(row_id="stator_1", reference={"job": "first"})
+    second = request(metric="aspect_ratio")
+    second.update(reference={"job": "second"})
+    missing = {**request(), "row_id": "missing", "error": "Generate a mesh"}
+    batch = {"key": "batch", "rows": [first, second, missing]}
+    original = deepcopy(batch)
+    response = panel.extract(batch)
+    assert response["key"] == "batch" and len(response["rows"]) == 3
+    assert [options["aspect_max"] for _, options in calls] == [200, 200]
+    assert response["rows"][2]["error"] == "Generate a mesh"
+    assert batch == original
+    summary = panel.summary(response, batch)
+    assert len(summary) == 2  # One shared scale plus the missing row's error.
+    assert str(summary).count("inspection-gradient") == 1
+    assert "Generate a mesh" in str(summary)
+
+
+def test_threshold_default_preserves_saved_value_when_rebuilding_editor(app):
+    change = callback(app, '\"type\":\"inspection-threshold\"}.value')
+    saved = {"rotor_1": {"metric": "skewness", "threshold": .93}}
+    assert change("skewness", panel.identifier("metric", "rotor_1"), saved) == .93
+    assert change("orthogonality", panel.identifier("metric", "rotor_1"), saved) == .2

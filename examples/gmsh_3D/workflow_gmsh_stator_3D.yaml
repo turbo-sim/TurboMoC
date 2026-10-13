@@ -1,3 +1,4 @@
+# App-compatible project. This entire document can be replaced by an app download.
 # Project inputs: MoC uses SI units; geometry and mesh targets use mm.
 # Each ordered row owns its geometry and meshing settings.
 # Radii/chords describe blade LE and TE, not extended-domain boundaries.
@@ -5,21 +6,20 @@
 machine:
   design_mode: stator
   geometry_type: axial
+  fluid_name: Cyclopentane
 workflow:
   save_figures: true
   show_gmsh: true
   show_pyvista: true
   log_level: INFO
-  log_filename: mesh_generation.log # Inside output/
 rows:
 - id: stator_1
   role: stator
   geometry:
     method_of_characteristics:
-      fluid_name: Cyclopentane
       inlet_property_pair: PQ_INPUTS
-      inlet_property_1: 251300.0
-      inlet_property_2: 0.025
+      inlet_property_1: 251300.0  # Stagnation pressure [Pa]
+      inlet_property_2: 0.025  # Vapor quality [kg/kg]
       p_back: 95000.0
       solver: conventional
       use_true_sauer_line: true
@@ -46,15 +46,19 @@ rows:
       num_baseline_points: 500
       num_curve_points: 500
     flow_domain:
-      inlet_chords: 1.5
-      outlet_chords: 2.0
       domain_shift_mode: auto
-      domain_shift: 0.0
-      inlet_axial_tangent: 0.35
-      inlet_blade_tangent: 0.35
-      outlet_blade_tangent: 0.15
-      outlet_axial_tangent: 0.55
-      num_points: 120
+      domain_shift_value: 0.0  # Manual pitchwise shift / pitch [-]; ignored in auto mode
+      number_of_points: 120  # Curve samples, not mesh nodes
+      inlet:
+        extension_type: bspline  # bspline or straight; tangent handles apply only to bspline
+        extension_length: 1.5  # Extension distance / reference chord [-]
+        axial_tangent: 0.35
+        blade_tangent: 0.35
+      outlet:
+        extension_type: straight  # bspline or straight; tangent handles apply only to bspline
+        extension_length: 2.0  # Extension distance / reference chord [-]
+        axial_tangent: 0.55
+        blade_tangent: 0.15
   mesh:
     show_gui: false
     numerics:
@@ -66,6 +70,7 @@ rows:
       algorithm: 8
       recombine: true
       recombination_algorithm: 1
+      recombine_minimum_quality: 0.1
       smoothing_steps: 5
       inflation_layers:
         enabled: true
@@ -86,8 +91,6 @@ rows:
       section_edge_width: 0.35
       volume_edge_width: 0.35
     pyvista:
-      window_size: [1500, 800] # Interactive and exported image dimensions [pixels]
-      figure_filename: pyvista_mesh.png
       show_mesh_edges: true
       surfaces:
         blade: true

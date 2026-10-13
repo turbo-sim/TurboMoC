@@ -16,9 +16,10 @@ from . import common
 from .barotropic_model import generate_barotropic_model, positive
 from .graphics_3d import prepare_contour_graphics, export_contours
 from .import_checks import validate_import
-from turbo_moc.configuration.row import read_configuration, to_shared
+from turbo_moc.configuration.row import read_configuration, to_shared, configuration_from_data
+from turbo_moc.configuration.automation import split_workflow
 from turbo_moc.configuration.planar import validate_geometry_figure
-from turbo_moc.configuration.project import get_row, load_project
+from turbo_moc.configuration.project import get_row, load_project, normalize_project, validate_project
 from turbo_moc.configuration.fluid_inputs import solver_parameters
 from turbo_moc.geometry import blade_row as geo
 from turbo_moc.workflows.nozzle import solve_nozzle
@@ -68,8 +69,7 @@ def validate_workflow(workflow, config_file):
         "fluent",
         "reporting",
     }
-    if not isinstance(workflow, dict) or set(workflow) != required:
-        raise ValueError(f"Workflow YAML must contain exactly {sorted(required)}.")
+    workflow, inline_project = split_workflow(workflow, required)
     common.validate_reporting(workflow["reporting"])
     validate_geometry_figure(workflow["geometry_figure"])
     for name in (
@@ -85,15 +85,19 @@ def validate_workflow(workflow, config_file):
         raise ValueError("row_id must explicitly select a stationary stator row.")
     config_file = Path(config_file).resolve()
     workflow["output_dir"] = common.workflow_output(workflow, config_file)
-    workflow["design_file"] = (config_file.parent / workflow["design_file"]).resolve()
-    project = load_project(workflow["design_file"])
+    if inline_project is None:
+        workflow["design_file"] = (config_file.parent / workflow["design_file"]).resolve()
+        project = load_project(workflow["design_file"])
+    else:
+        workflow["design_file"] = config_file
+        project = validate_project(normalize_project(inline_project))
     row = get_row(project, workflow["row_id"])
     if row["role"] != "stator":
         raise ValueError(
             "The Fluent 3D workflow supports stationary stator rows only; "
             f"selected row {workflow['row_id']!r} is a {row['role']}."
         )
-    config = read_configuration(workflow["design_file"], row_id=workflow["row_id"])
+    config = configuration_from_data(project, row_id=workflow["row_id"])
     nozzle = config["method_of_characteristics"]
     if nozzle.get("delta_flow", 0.0) != 0:
         raise ValueError(
