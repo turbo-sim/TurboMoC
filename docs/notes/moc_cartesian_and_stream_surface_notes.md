@@ -883,7 +883,7 @@ In the solver, however, the kernel-arc radius $\rho_d$ (`rotation_around_center`
 
 The exit Mach number is unchanged in all three cases, since the area ratio is set by the back pressure. The third case is a pure scaling and gives the same machine as the first. The relevant design parameters are $\rho_d/y_t$ (kernel curvature, hence nozzle length and chord), $\rho_t/y_t$ and $r_{\rm TE}/y_t$ (exit blockage in the pitch relation), together with the exit Mach number, the metal angles and `inlet_opening_ratio`.
 
-> **TODO.** Expose $\rho_t$, $\rho_d$ and `r_trailing` as multiples of $y_t$ (e.g. `rho_t_ratio`, `rho_d_ratio`, `r_trailing_ratio`) in `design_nozzle`, `parametrize_stator_blade`, the YAML schema and both apps. $y_t$ then becomes a pure length scale with no effect on the scaled machine, and the inputs read as shape parameters. Keep the absolute inputs readable for existing YAML files by converting them on load.
+Expressing these inputs relative to $y_t$ is tracked as F04 in `docs/internal_information/app_development_checklist.md`.
 
 ## 13. Verification before using the method for blade design
 

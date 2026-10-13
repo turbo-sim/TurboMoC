@@ -59,6 +59,7 @@ def _run_job(request_path, request):
             if reference and reference.get("row_id", "stator_1") != row_id:
                 raise ValueError("A blade-row job cannot use artifacts from another row.")
         action = handle["action"]
+        nozzle_only = (request.get("project") or {}).get("machine", {}).get("design_mode") == "nozzle"
         action_name = "vortex blade design" if role == "rotor" and action == "nozzle" else action
         progress(f"Run {action_name} from configuration snapshot")
         if action == "nozzle":
@@ -92,10 +93,17 @@ def _run_job(request_path, request):
                 # reused by a new MoC job.
                 flow.write_json(folder / "moc_result.json", nozzle)
                 result = {"reference": handle}
-                if nozzle.get("converged"):
+                if nozzle.get("converged") and not nozzle_only:
                     from turbo_moc.app.blade_counts import native_passage, sizing
                     template = flow.get_stator_template(config, handle, nozzle)
                     result["blade_sizing"] = sizing(config, native_passage(config, nozzle, template=template))
+        elif action in ("reference", "volume") and nozzle_only:
+            from turbo_moc.meshing import nozzle_mesh
+            nozzle = flow.load_nozzle(refs["nozzle"], config)
+            build = nozzle_mesh.mesh_2d if action == "reference" else nozzle_mesh.mesh_3d
+            summary = build(nozzle, config["method_of_characteristics"], config["mesh"]["nozzle"], folder,
+                            progress=meshing_progress)
+            result = {"reference": handle, "summary": summary, "export": summary["export"]}
         elif action == "reference":
             progress("Fit/reference geometry (one placement search)", 0.02)
             design = flow.get_design(config, refs["nozzle"])

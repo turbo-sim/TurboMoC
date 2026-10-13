@@ -519,7 +519,7 @@ class InternalPoint:
         # Additional MoC parameters
         self.y_t = None
         self.rho_t = None
-        self.delta = 0.0
+        self.delta = float(getattr(fluid_manager, "delta", 0.0))
         self.GasEqu = "CoolProp"
 
         # Label for identification
@@ -709,6 +709,19 @@ class InternalPoint:
 
         return self
 
+    def _source(self, theta, mu, y):
+        if not self.delta or abs(float(y)) < 1e-12:
+            return None
+        return self.delta * float(np.sin(mu)) * float(np.sin(theta)) / float(y)
+
+    @staticmethod
+    def _mean_source(*values):
+        values = [value for value in values if value is not None]
+        return sum(values) / len(values) if values else 0.0
+
+    def _mach_angle(self, point):
+        return float(np.arcsin(np.clip(float(point.a) / float(point.V), -1.0, 1.0)))
+
     def solve_centerline_point(self, paramP, paramM):
         """
         Calculates the properties of a new point on the Axis of Symmetry (y=0).
@@ -726,6 +739,11 @@ class InternalPoint:
 
         nu_M = self.manager.nu_of_V(paramM.V)
         nu_axis = paramM.theta + nu_M
+        if self.delta:
+            S_M = self._source(paramM.theta, self._mach_angle(paramM), paramM.y)
+            if S_M is not None:
+                x_guess = float(paramM.x) - float(paramM.y) / float(paramM.lamM)
+                nu_axis = nu_axis + S_M * float(np.hypot(x_guess - float(paramM.x), float(paramM.y)))
         V_axis = self.manager.V_of_nu(nu_axis)
         a_axis = self.manager.a_of_V(V_axis)
 
@@ -812,16 +830,43 @@ class InternalPoint:
         x3 = (lamM * float(paramM.x) - lamP * float(paramP.x) + float(paramP.y) - float(paramM.y)) / (lamM - lamP)
         y3 = float(paramM.y) + lamM * (x3 - float(paramM.x))
 
-        for _ in range(6):
-            lamM_avg = np.tan(0.5 * (theta_M + theta3_f) - 0.5 * (mu_M + mu_3))
-            lamP_avg = np.tan(0.5 * (theta_P + theta3_f) + 0.5 * (mu_P + mu_3))
-            denom = lamM_avg - lamP_avg
-            x_new = (lamM_avg * float(paramM.x) - lamP_avg * float(paramP.x) + float(paramP.y) - float(paramM.y)) / denom
-            y_new = float(paramM.y) + lamM_avg * (x_new - float(paramM.x))
-            if abs(x_new - x3) < 1e-10 and abs(y_new - y3) < 1e-10:
+        def locate(x3, y3, theta3_f, mu_3):
+            for _ in range(6):
+                lamM_avg = np.tan(0.5 * (theta_M + theta3_f) - 0.5 * (mu_M + mu_3))
+                lamP_avg = np.tan(0.5 * (theta_P + theta3_f) + 0.5 * (mu_P + mu_3))
+                denom = lamM_avg - lamP_avg
+                x_new = (lamM_avg * float(paramM.x) - lamP_avg * float(paramP.x) + float(paramP.y) - float(paramM.y)) / denom
+                y_new = float(paramM.y) + lamM_avg * (x_new - float(paramM.x))
+                if abs(x_new - x3) < 1e-10 and abs(y_new - y3) < 1e-10:
+                    return x_new, y_new
                 x3, y3 = x_new, y_new
-                break
-            x3, y3 = x_new, y_new
+            return x3, y3
+
+        x3, y3 = locate(x3, y3, theta3_f, mu_3)
+
+        if self.delta:
+            S_P = self._source(theta_P, mu_P, paramP.y)
+            S_M = self._source(theta_M, mu_M, paramM.y)
+            S_P, S_M = (S_M if S_P is None else S_P), (S_P if S_M is None else S_M)
+            for _ in range(20):
+                d_P = float(np.hypot(x3 - float(paramP.x), y3 - float(paramP.y)))
+                d_M = float(np.hypot(x3 - float(paramM.x), y3 - float(paramM.y)))
+                S_3 = None
+                if abs(y3) > 2.0 * np.sin(mu_3) * max(d_P, d_M):
+                    S_3 = self._source(theta3_f, mu_3, y3)
+                I_plus_s = float(I_plus) - self._mean_source(S_P, S_3) * d_P
+                I_minus_s = float(I_minus) + self._mean_source(S_M, S_3) * d_M
+                theta_new = 0.5 * (I_minus_s + I_plus_s)
+                nu_new = 0.5 * (I_minus_s - I_plus_s)
+                V3 = self.manager.V_of_nu(nu_new)
+                a3 = self.manager.a_of_V(V3)
+                mu_3 = float(np.arcsin(np.clip(a3 / V3, -1.0, 1.0)))
+                converged = abs(theta_new - theta3_f) < 1e-10 and abs(nu_new - float(nu3)) < 1e-10
+                theta3_f, nu3 = theta_new, nu_new
+                x3, y3 = locate(x3, y3, theta3_f, mu_3)
+                if converged:
+                    break
+            theta3 = theta3_f
 
         self.x = x3
         self.y = y3
@@ -1023,7 +1068,7 @@ class InternalPoint:
             rad_wall = jnp.radians(wall_ang)
             nu_p2 = self.manager.nu_of_V(p2.V)
             nu_wall = rad_wall - p2.theta + nu_p2
-            V_wall = self.manager.V_of_nu(nu_wall)
+            V_wall = self._wall_source_correction(p2, rad_wall, nu_wall)
 
             self.u = V_wall * jnp.cos(rad_wall)
             self.v = V_wall * jnp.sin(rad_wall)
@@ -1090,7 +1135,7 @@ class InternalPoint:
             rad_wall = jnp.radians(wall_ang)
             nu_p2 = self.manager.nu_of_V(p2.V)
             nu_wall = rad_wall - p2.theta + nu_p2
-            V_wall = self.manager.V_of_nu(nu_wall)
+            V_wall = self._wall_source_correction(p2, rad_wall, nu_wall)
 
             self.u = V_wall * jnp.cos(rad_wall)
             self.v = V_wall * jnp.sin(rad_wall)
@@ -1098,6 +1143,24 @@ class InternalPoint:
             self.ThermoFlowProp()
 
             return p2
+
+    def _wall_source_correction(self, p2, rad_wall, nu_wall):
+        V_wall = self.manager.V_of_nu(nu_wall)
+        if not self.delta:
+            return V_wall
+        S_2 = self._source(p2.theta, self._mach_angle(p2), p2.y)
+        length = float(np.hypot(float(self.x) - float(p2.x), float(self.y) - float(p2.y)))
+        nu_planar = float(nu_wall)
+        for _ in range(20):
+            a_wall = self.manager.a_of_V(V_wall)
+            mu_wall = float(np.arcsin(np.clip(a_wall / V_wall, -1.0, 1.0)))
+            S_w = self._source(rad_wall, mu_wall, self.y)
+            nu_new = nu_planar + self._mean_source(S_2, S_w) * length
+            V_new = self.manager.V_of_nu(nu_new)
+            if abs(float(V_new) - float(V_wall)) < 1e-9 * abs(float(V_wall)):
+                return V_new
+            V_wall = V_new
+        return V_wall
 
     def ReflexLine(self, n, l):
         """
@@ -1329,6 +1392,27 @@ def RotVec(vec, angle_deg):
 # Mass Flow Calculator (MAIN FUNCTION)
 #
 # -----------------------------------------------------------------------------#
+
+def segment_mass_flow(p_prev, p_cur, delta=0.0):
+    seg_len = DistCalc(p_prev.x, p_prev.y, p_cur.x, p_cur.y)
+    rot_vec = RotVec(MakeVec(p_prev.x, p_prev.y, p_cur.x, p_cur.y), -90)
+    rho_avg = (p_prev.rho + p_cur.rho) / 2
+    u_avg = (p_prev.u + p_cur.u) / 2
+    v_avg = (p_prev.v + p_cur.v) / 2
+    V_avg = vecDotVec(u_avg, v_avg, rot_vec[0], rot_vec[1])
+    weight = abs(float(p_prev.y) + float(p_cur.y)) / 2 if delta else 1.0
+    return rho_avg * seg_len * V_avg * weight
+
+
+def reflex_length(point, mass, delta=0.0):
+    flux = float(MassFlowCalc((point,)))
+    if not delta:
+        return mass / flux
+    angle = float(np.arcsin(1 / float(point.M)) + float(point.theta))
+    a = 0.5 * flux * np.sin(angle)
+    b = flux * abs(float(point.y))
+    return float(2 * float(mass) / (b + np.sqrt(b * b + 4 * a * float(mass))))
+
 
 def MassFlowCalc(IO):
     """

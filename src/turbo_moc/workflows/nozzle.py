@@ -4,7 +4,7 @@ import numpy as np
 import turbo_moc
 
 from turbo_moc import reporting as log
-from turbo_moc.configuration.fluid_inputs import solver_parameters
+from turbo_moc.configuration.fluid_inputs import outlet_parameters, solver_parameters
 
 logger = log.get_logger("moc")
 
@@ -18,7 +18,7 @@ def solve_nozzle(parameters, *, progress_callback=None):
     """
     logger.info("  Calculating a new MoC solution (solver output follows).")
     result = turbo_moc.design_nozzle(
-        **solver_parameters(parameters), progress_callback=progress_callback
+        **outlet_parameters(solver_parameters(parameters)), progress_callback=progress_callback
     )
 
     # A successful status alone is insufficient: downstream blade fitting needs

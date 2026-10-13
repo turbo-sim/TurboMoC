@@ -34,8 +34,10 @@
 ## 2. Blade parametrization and meridional geometry
 
 - [ ] **B01 — Develop a subsonic rotor parametrization.** Support a camberline-plus-thickness representation for subsonic rotor inlets, including cases such as the EMPOWER turbine. The source proposes implementing the parametrization in TurboDash first and importing it into the turbine-design workflow.
-- [ ] **B02 — Add a conventional constant-width rotor option.** Provide an alternative to vortex-designed blades so that conventional constant-width blading can be compared with the vortex method in the 2027 Turbo Expo paper. Define the parameters held fixed for a fair comparison.
-- [ ] **B03 — Extend flaring and hub/shroud shape options.** Support axial and radial blades and linear cascades with varying channel height. Include straight-line flaring, a logarithmic shroud profile where appropriate, and smooth B-spline flaring. **Decision:** investigate whether interpolating B-splines of degree 1, 2, and 3 can provide one coherent interface.
+- [ ] **B02 — Add a streamline curvature method for rotor blade design.** Implement a meridional throughflow solver based on the streamline curvature method: radial equilibrium along quasi-orthogonals, iterated streamline positions and curvature, and real-gas properties along each streamline. Use it to design the rotor along the span: spanwise velocity triangles, blade angles and loading, including flared or curved endwalls (B04). Its stream-surface positions and stream-sheet thicknesses can also provide the $r(m)$ and $b(m)$ that the stream-sheet MoC requires (§5 and §14 of `docs/notes/moc_cartesian_and_stream_surface_notes.md`). **Decision:** define where it applies (subsonic or transonic meridional flow; supersonic relative flow inside the blade row is outside the classical method), which loss and deviation models to use, how it couples with the vortex blade (supersonic) and the B01 parametrization (subsonic), and whether an existing implementation (e.g. TurboDash) can be reused.
+- [ ] **B03 — Add a conventional constant-width rotor option.** Provide an alternative to vortex-designed blades so that conventional constant-width blading can be compared with the vortex method in the 2027 Turbo Expo paper. Define the parameters held fixed for a fair comparison.
+- [ ] **B04 — Extend flaring and hub/shroud shape options.** Support axial and radial blades and linear cascades with varying channel height. Include straight-line flaring, a logarithmic shroud profile where appropriate, and smooth B-spline flaring. **Decision:** investigate whether interpolating B-splines of degree 1, 2, and 3 can provide one coherent interface.
+- [ ] **B05 — Add pitch-based scaling to impose a fixed blade count.** The current app imposes the meridional chord and derives the natural blade count $N^*=2\pi/(k_d C')$, rounded up (`apps/app/blade_counts.py`). Add the alternative used by the legacy app: impose $N$, set the reference pitch $2\pi R_{\rm ref}/N$ equal to the scaled design pitch, and derive the chord from the solver's pitch-to-chord ratio $k_d$, so the designed passage is reproduced exactly with the chosen count. Expose this as a per-row sizing selector ("Chord" / "Blade count"). For axial rows, keep the hub/tip chord ratio, or use chord $\propto r$ for exact similarity along the span. For radial rows, the chosen $N$ fixes the conformal chord, i.e. the radius ratio $r_{\rm out}/r_{\rm in}$ (as `consistent_radial_wrap` does in the legacy app). Mass flow follows from the annulus in either mode. See §12.4–12.7 of `docs/notes/moc_cartesian_and_stream_surface_notes.md`.
 
 ## 3. Flow definitions, operating conditions, and solver validation
 
@@ -63,6 +65,7 @@
 - [ ] **F01 — Separate advanced numerical settings.** Move less frequently changed MoC controls, such as numerical point counts, into an advanced app section. **Decision:** assess a corresponding nested YAML dictionary while preserving defaults and compatibility with existing cases.
 - [ ] **F02 — Use descriptive configuration names.** Prepare a naming table for stator MoC and rotor vortex settings, replacing terse mathematical abbreviations with clear English names. Distinguish readable UI labels, such as “Exit Mach number” and “Backpressure,” from machine-readable YAML keys, such as `exit_mach_number` and `backpressure`. Include units, frame conventions, and a migration strategy for existing keys.
 - [x] **F03 — Audit YAML consistency across entry points.** Compare app-loaded cases with automated 2D workflow configurations. Identify differences in keys, nesting, defaults, units, validation, and solver behavior, distinguishing intentional workflow-specific settings from accidental incompatibilities.
+- [ ] **F04 — Express nozzle and blade curvature inputs relative to the throat half-height.** After uniform scaling only scale-free ratios reach the machine, so $y_t$ itself should not matter. In the solver, however, the kernel-arc radius $\rho_d$, the Sauer throat curvature $\rho_t$ and the blade's `r_trailing` are absolute lengths. Changing $y_t$ alone changes the shape through $\rho_d/y_t$, $\rho_t/y_t$ and $r_{\rm TE}/y_t$: for a nitrogen test case, doubling $y_t$ changed pitch/chord by 7 % and the natural blade count from 29.1 to 27.2, with the same exit Mach number. Expose them as multiples of $y_t$ (e.g. `rho_t_ratio`, `rho_d_ratio`, `r_trailing_ratio`) in `design_nozzle`, `parametrize_stator_blade`, the YAML schema and both apps, so $y_t$ becomes a pure length scale and the inputs read as shape parameters. Convert existing absolute values on load. See §12.7 of `docs/notes/moc_cartesian_and_stream_surface_notes.md`.
 
 ## 7. Codebase maintenance
 
@@ -178,7 +181,23 @@ geometric feasibility from aerodynamic validation. Report missing inputs,
 ownership decisions, and the smallest reusable integration interface.
 ```
 
-### B02 — Constant-width conventional rotor
+### B02 — Streamline curvature method for rotor design
+
+```text
+Explore a streamline curvature throughflow method for rotor blade design.
+Inventory any existing throughflow or radial-equilibrium code in this
+repository and in TurboDash. Write a small standalone solver for one axial
+rotor with straight endwalls: quasi-orthogonals, radial equilibrium,
+iterated streamline positions and curvature, real-gas properties along each
+streamline. Check mass conservation per stream tube and convergence of the
+streamline positions, and compare with a free-vortex analytical solution.
+Plot the meridional streamlines and the spanwise velocity triangles. Report
+the range of validity (subsonic/transonic meridional flow, supersonic relative
+flow), the loss and deviation models needed, and how its stream sheets could
+supply r(m) and b(m) to the stream-sheet MoC.
+```
+
+### B03 — Constant-width conventional rotor
 
 ```text
 Explore a conventional constant-width rotor option for comparison with the
@@ -190,7 +209,7 @@ which comparison is fair for the paper and which performance conclusions
 would require CFD or other evidence beyond this geometric demonstration.
 ```
 
-### B03 — Flaring and hub/shroud shapes
+### B04 — Flaring and hub/shroud shapes
 
 ```text
 Explore prescribed flaring for axial, radial, and linear-cascade geometries.
@@ -203,6 +222,20 @@ profiles would need approximation. Separately write a feasibility note on
 hub-to-shroud MoC design: governing assumptions, available solver support,
 and a minimal numerical experiment. Do not conflate a prescribed wall curve
 with a flow-designed wall. Recommend a coherent parametrization interface.
+```
+
+### B05 — Pitch-based scaling with a fixed blade count
+
+```text
+Explore a "Blade count" sizing mode beside the current "Chord" mode. Trace how
+the stator MoC template and the rotor vortex blade are scaled today
+(blade_counts.py, meridional_channel.build_section) and how the legacy app
+sized from the pitch. For one axial stator, one axial rotor and one radial
+stator, compute the chord (or radius ratio) implied by a chosen N, then compare
+pitch/design, throat/design and section scale at hub, midspan and tip against
+the current chord-imposed, rounded-up count. Include chord proportional to r.
+Report which inputs become derived or read-only, how existing YAML files load,
+and how the mode interacts with the stage interspace and shared interfaces.
 ```
 
 ### C01 — High-speed inlet-angle warning (verification)
@@ -393,6 +426,18 @@ coverage, or behavioral mismatches; cite the consuming code. Save a Markdown
 comparison report and a minimal reproducer for each material mismatch.
 Recommend a shared configuration contract without assuming identical files
 are appropriate for workflows with different responsibilities.
+```
+
+### F04 — Curvature inputs relative to the throat half-height
+
+```text
+Trace how y_t, rho_t, rho_d and r_trailing enter the MoC solvers and the
+stator parametrization. For one small case, run (i) the reference inputs,
+(ii) y_t doubled with the other lengths unchanged and (iii) all four doubled.
+Report exit Mach number, nozzle length/y_t, pitch/chord, throat/pitch and the
+natural blade count, and confirm that (iii) reproduces (i) after scaling.
+Propose ratio-based keys, their defaults, UI labels and the conversion of
+existing absolute YAML values, and list every consumer that must change.
 ```
 
 ### G01 — Deprecated-code audit

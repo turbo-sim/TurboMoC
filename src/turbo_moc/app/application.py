@@ -16,13 +16,15 @@ from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, 
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
-from turbo_moc.app import workflow as flow, plots, project_export, calculations, rotor_inlet, blade_counts, display_panel, mesh_reporting, inspection_panel
+from turbo_moc.app import workflow as flow, plots, nozzle_views, project_export, calculations, rotor_inlet, blade_counts, display_panel, mesh_reporting, inspection_panel
 from turbo_moc.meshing import mesh_3d as mesh
 from turbo_moc.configuration import project as project_model
 from turbo_moc.configuration.rotor import default_axial_interspace_mm, SPEED_TYPES
 from turbo_moc.api import list_supported_fluids
-from turbo_moc.configuration.fluid_inputs import INLET_FIELDS, PROPERTIES, inlet_values, pair_properties, property_label
+from turbo_moc.configuration.fluid_inputs import INLET_FIELDS, OUTLET_FIELDS, PROPERTIES, inlet_values, pair_properties, property_label
 from turbo_moc.visualization.geometry_preview import preview_geometry
+from turbo_moc.visualization import plotly as nozzle_plots
+from turbo_moc.geometry import nozzle as nozzle_geometry
 
 ACTIONS = ("nozzle", "reference", "volume", "cancel")
 MACHINE_FLUID_ID = {"type": "parameter", "row": "", "path": "fluid_name"}
@@ -67,11 +69,79 @@ def fluid_inlet_controls(parameters, prefix, row_id, *, rotor=False):
     return result
 
 
-def moc_controls(parameters, row_id):
+def moc_controls(parameters, row_id, exclude=()):
     return [*fluid_inlet_controls(parameters, "method_of_characteristics", row_id),
         *controls({name: value for name, value in parameters.items()
-            if name not in {"fluid_name", "P0", "T0", "Q0", *INLET_FIELDS}},
+            if name not in {"fluid_name", "P0", "T0", "Q0", *INLET_FIELDS, *OUTLET_FIELDS, *exclude}},
             "method_of_characteristics", row_id)]
+
+
+NOZZLE_SETUP_FIELDS = {
+    "delta_flow": ("Nozzle type", [{"label": "Planar", "value": 0.0},
+                                   {"label": "Axisymmetric", "value": 1.0}]),
+    "solver": ("Nozzle contour", [{"label": "Conventional (rounded throat)", "value": "conventional"},
+                                  {"label": "Minimum length (sharp corner)", "value": "mln"}]),
+}
+
+
+def nozzle_setup(project):
+    if project["machine"]["design_mode"] != "nozzle":
+        return []
+    row = project_model.active_rows(project)[0]
+    parameters = row["geometry"]["method_of_characteristics"]
+    return [html.Label([html.Span(label), dcc.Dropdown(
+        id={"type": "parameter", "row": row["id"], "path": f"method_of_characteristics.{name}"},
+        value=parameters[name], options=options, clearable=False, searchable=False)], className="control")
+        for name, (label, options) in NOZZLE_SETUP_FIELDS.items()]
+
+
+OUTLET_OPTIONS = [{"label": "Static pressure", "value": "pressure"},
+                  {"label": "Mach number", "value": "mach"}]
+
+
+def outlet_controls(parameters, row_id):
+    condition = parameters.get("outlet_condition", "pressure")
+
+    def field(name, label, key):
+        return html.Div(html.Label([html.Span(label), dcc.Input(
+            id={"type": "parameter", "row": row_id, "path": f"method_of_characteristics.{key}"},
+            value=parameters.get(key), type="number", debounce=True, step="any")], className="control"),
+            id={"type": "outlet-field", "row": row_id, "condition": name},
+            style={} if condition == name else {"display": "none"})
+
+    return group("Outlet", [html.Label([html.Span("Outlet condition"), dcc.Dropdown(
+            id={"type": "parameter", "row": row_id, "path": "method_of_characteristics.outlet_condition"},
+            value=condition, options=OUTLET_OPTIONS, clearable=False, searchable=False)], className="control"),
+        field("pressure", "Exit static pressure [Pa]", "p_back"),
+        field("mach", "Exit Mach number [-]", "exit_mach")])
+
+
+def number_field(row_id, path, label, value, kind=None):
+    widget = html.Label([html.Span(label), dcc.Input(
+        id={"type": "parameter", "row": row_id, "path": path}, value=value, type="number",
+        debounce=True, step=1 if path.rsplit(".", 1)[-1] in flow.INTEGER_KEYS else "any")], className="control")
+    if kind is None:
+        return widget
+    return html.Div(widget, id={"type": "nozzle-kind", "row": row_id, "field": f"{kind}:{path}"})
+
+
+def nozzle_mesh_sidebar(row, settings):
+    identifier = row["id"]
+    return html.Details([html.Summary("Nozzle mesh"),
+        group("Structured 2D mesh", [
+            number_field(identifier, "mesh.nozzle.axial_cells", "Axial cells", settings["axial_cells"]),
+            number_field(identifier, "mesh.nozzle.radial_cells", "Radial cells (axis to wall)", settings["radial_cells"]),
+            number_field(identifier, "mesh.nozzle.wall_growth_ratio", "Wall growth ratio [-]",
+                         settings["wall_growth_ratio"]),
+            html.Small("Cell height grows by this ratio from the wall towards the axis; 1 gives uniform cells.")]),
+        group("3D sweep", [
+            number_field(identifier, "mesh.nozzle.circumferential_cells", "Circumferential cells (multiple of 4)",
+                         settings["circumferential_cells"], "axisymmetric"),
+            number_field(identifier, "mesh.nozzle.depth_cells", "Depth cells", settings["depth_cells"], "planar"),
+            html.Small("Axisymmetric: full revolution with an O-grid core (all hexahedra). "
+                       "Planar: full-height section extruded through the slab depth.")]),
+        group("CGNS boundary types", controls(settings["boundary_types"], "mesh.nozzle.boundary_types", identifier)),
+    ], open=True, className="settings mesh row-settings", **{"data-row": identifier})
 
 
 def row_label(row):
@@ -279,9 +349,27 @@ def shared_domain_readout(project, row_id):
     return result
 
 
+def nozzle_mode(project):
+    return project["machine"]["design_mode"] == "nozzle"
+
+
 def sidebar(project):
     result = []
     family = project["machine"]["geometry_type"]
+    if nozzle_mode(project):
+        row = project_model.active_rows(project)[0]
+        parameters = row["geometry"]["method_of_characteristics"]
+        settings = row["mesh"]["nozzle"]
+        return [html.Details([html.Summary("Nozzle"), group("Method of characteristics",
+            moc_controls(parameters, row["id"], (*NOZZLE_SETUP_FIELDS, "p_back"))),
+            outlet_controls(parameters, row["id"]),
+            group("Nozzle geometry", [
+                number_field(row["id"], "mesh.nozzle.convergent_length", "Convergent length [m]",
+                             settings["convergent_length"]),
+                number_field(row["id"], "mesh.nozzle.planar_depth", "Slab depth [m]",
+                             settings["planar_depth"], "planar")])],
+            open=True, className="settings design row-settings", **{"data-row": row["id"]}),
+            nozzle_mesh_sidebar(row, settings)]
     for row in project_model.active_rows(project):
         identifier, geometry = row["id"], row["geometry"]
         if row["role"] == "stator":
@@ -470,6 +558,7 @@ def create_app(config_file=None, output_dir=None):
                     html.H3("Machine setup", className="sidebar-box-title"),
                     html.Label([html.Span("Design mode"), dcc.Dropdown(id="design-mode", clearable=False,
                         value=project["machine"]["design_mode"], options=[
+                            {"label": "Nozzle only", "value": "nozzle"},
                             {"label": "Stator only", "value": "stator"},
                             {"label": "Rotor only", "value": "rotor"},
                             {"label": "Stator + Rotor", "value": "stator_rotor"}])], className="control"),
@@ -477,7 +566,9 @@ def create_app(config_file=None, output_dir=None):
                         value=project["machine"]["geometry_type"], options=[
                             {"label": "Linear cascade", "value": "linear"},
                             {"label": "Axial flow", "value": "axial"},
-                            {"label": "Radial flow", "value": "radial"}])], className="control"),
+                            {"label": "Radial flow", "value": "radial"}])], className="control",
+                        id="machine-family-control"),
+                    html.Div(nozzle_setup(project), id="nozzle-setup"),
                     html.Label([html.Span("Working fluid"), fluid_dropdown(
                         MACHINE_FLUID_ID, project["machine"]["fluid_name"])],
                         className="control"),
@@ -490,7 +581,9 @@ def create_app(config_file=None, output_dir=None):
                     "aria-orientation": "vertical", "aria-controls": "sidebar"}), html.Main([
                 dcc.Tabs(id="workspace", value="design", children=[
                     dcc.Tab(label="Geometry generation", value="design"),
-                    dcc.Tab(label="Mesh generation", value="mesh")]),
+                    dcc.Tab(label="Mesh generation", value="mesh"),
+                    dcc.Tab(label="Report", value="report", id="report-tab",
+                        style={} if nozzle_mode(project) else {"display": "none"})]),
                 html.Div(id="validation", className="message"),
                 html.Div([html.Div([html.Button(label, id=name, n_clicks=0,
                     disabled=name=="cancel") for name, label in zip(ACTIONS,
@@ -504,6 +597,17 @@ def create_app(config_file=None, output_dir=None):
                 html.Div(id="project-download-message", className="message"),
                 html.Div([dcc.Loading(html.Div([
                     html.Section([
+                        html.Div([
+                        html.Details([html.Summary("Nozzle geometry"),
+                            html.Small(id="nozzle-geometry-summary", className="message"),
+                            html.Div([
+                                html.Div([dcc.Graph(id="nozzle-section", figure=empty("Nozzle cross section"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                                html.Div([dcc.Graph(id="nozzle-solid", figure=empty("Three dimensional nozzle"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                            ], className="split")], open=True, className="plot-group"),
+                        ], id="nozzle-views", style={"display": "none"}),
+                        html.Div([
                         html.Details([html.Summary("Blade-to-blade and meridional channel geometry"), html.Div([
                             html.Div([dcc.Graph(id="design-section", figure=empty("Selected blade row"),
                                 config={"displaylogo": False}, className="engineering-plot"), html.Small(id="design-basis", style={"display": "none"})], className="pane"),
@@ -513,8 +617,40 @@ def create_app(config_file=None, output_dir=None):
                         html.Details([html.Summary("Three dimensional geometry"),
                             *display_panel.view(project, "geometry", viewport("geometry"))],
                             open=True, className="plot-group", id="geometry-details"),
+                        ], id="blade-views"),
                     ], id="design-panel"),
                     html.Section([
+                        html.Details([html.Summary("Nozzle design report"),
+                            html.Small(id="nozzle-summary", className="message"),
+                            html.Div([
+                                html.Div([dcc.Graph(id="nozzle-characteristics", figure=empty("Characteristic net"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                                html.Div([dcc.Graph(id="nozzle-ts", figure=empty("T-s diagram"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                            ], className="split"),
+                            html.Div([
+                                html.Div([dcc.Graph(id="nozzle-axis", figure=empty("Axis properties"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                                html.Div([dcc.Graph(id="nozzle-wall", figure=empty("Wall properties"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                            ], className="split")], open=True, className="plot-group"),
+                    ], id="report-panel", style={"display": "none"}),
+                    html.Section([
+                        html.Div([
+                        html.Details([html.Summary("Nozzle 2D mesh"),
+                            html.Div([dcc.Graph(id="nozzle-mesh-2d", figure=empty("Structured 2D mesh"),
+                                config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                            html.Div(id="nozzle-mesh-2d-info", className="message")],
+                            open=True, className="plot-group"),
+                        html.Details([html.Summary("Nozzle 3D mesh"),
+                            html.Div(html.Div(id="nozzle-mesh-3d", className="vtk-host"), className="vtk-frame"),
+                            html.Div(id="nozzle-mesh-3d-info", className="message")],
+                            open=True, className="plot-group"),
+                        html.Details([html.Summary("Mesh quality report"),
+                            html.Aside(id="nozzle-mesh-report", children="Generate a mesh to see its report.",
+                                className="report")], open=True, className="plot-group mesh-quality"),
+                        ], id="nozzle-mesh-views", style={"display": "none"}),
+                        html.Div([
                         html.Details([html.Summary("Blade-to-blade and meridional channel mesh"), html.Div([
                             html.Div([dcc.Graph(id="reference-plot", figure=plots.section_mesh_placeholder("2D reference mesh"),
                                 config={"displaylogo": False}, className="engineering-plot"), html.Small(id="reference-basis", style={"display": "none"})], className="pane"),
@@ -530,6 +666,7 @@ def create_app(config_file=None, output_dir=None):
                                     clearable=False, searchable=False)], className="report-controls"),
                                 html.Aside(id="report", children="Generate a 3D mesh to see its report.", className="report")],
                                 open=True, className="plot-group mesh-quality", id="mesh-quality-details"),
+                        ], id="blade-mesh-views"),
                     ], id="mesh-panel"),
                 ], id="views"), type="circle", delay_show=300)],
                     className="content-scroll"),
@@ -679,7 +816,8 @@ def create_app(config_file=None, output_dir=None):
     @app.callback(Output("base-project", "data"), Output("settings", "children"),
         Output("selected-row", "options"), Output("selected-row", "value"),
         Output("machine-family", "options"), Output("machine-family", "value"),
-        Output("design-mode", "value"), Output("machine-note", "children"),
+        Output("design-mode", "value"), Output("nozzle-setup", "children"),
+        Output("machine-note", "children"),
         Input("design-mode", "value"), Input("machine-family", "value"),
         State("config", "data"), State("base-project", "data"), State("selected-row", "value"),
         Input("loaded-project", "data"))
@@ -706,7 +844,8 @@ def create_app(config_file=None, output_dir=None):
         selected = selected if selected in identifiers else identifiers[0]
         options = [{"label": label, "value": value, "disabled": mode=="stator_rotor" and value=="linear"}
             for label, value in (("Linear cascade", "linear"), ("Axial flow", "axial"), ("Radial flow", "radial"))]
-        return project, sidebar(project), [{"label": row_label(r), "value": r["id"]} for r in rows], selected, options, family, mode, note
+        return (project, sidebar(project), [{"label": row_label(r), "value": r["id"]} for r in rows],
+                selected, options, family, mode, nozzle_setup(project), note)
 
     @app.callback(Output("config", "data"), Output("validation", "children"),
         Input({"type": "parameter", "row": ALL, "path": ALL}, "value"),
@@ -814,10 +953,139 @@ def create_app(config_file=None, output_dir=None):
         return manual_styles, computed_values, computed_styles, speed_styles, inlet_alerts
 
     @app.callback(Output("sidebar", "className"), Output("design-panel", "style"), Output("mesh-panel", "style"),
-        Input("workspace", "value"))
+        Output("report-panel", "style"), Input("workspace", "value"))
     def workspace(name):
-        return (f"active-{name}",
-            {} if name == "design" else {"display": "none"}, {} if name == "mesh" else {"display": "none"})
+        hidden = {"display": "none"}
+        return (f"active-{name}", {} if name == "design" else hidden, {} if name == "mesh" else hidden,
+                {} if name == "report" else hidden)
+
+    @app.callback(Output("machine-family-control", "style"), Output("interspace-note", "style"),
+        Input("design-mode", "value"))
+    def nozzle_sidebar(mode):
+        hidden = {"display": "none"} if mode == "nozzle" else {}
+        return hidden, hidden
+
+    @app.callback(Output({"type": "nozzle-kind", "row": MATCH, "field": ALL}, "style"),
+        Input({"type": "parameter", "row": MATCH, "path": "method_of_characteristics.delta_flow"}, "value"),
+        State({"type": "nozzle-kind", "row": MATCH, "field": ALL}, "id"))
+    def nozzle_kind_fields(delta, identifiers):
+        kind = "axisymmetric" if delta else "planar"
+        return [{} if identifier["field"].startswith(kind + ":") else {"display": "none"}
+                for identifier in identifiers]
+
+    @app.callback(Output({"type": "outlet-field", "row": MATCH, "condition": "pressure"}, "style"),
+        Output({"type": "outlet-field", "row": MATCH, "condition": "mach"}, "style"),
+        Input({"type": "parameter", "row": MATCH, "path": "method_of_characteristics.outlet_condition"}, "value"))
+    def outlet_fields(condition):
+        hidden = {"display": "none"}
+        return ({}, hidden) if condition != "mach" else (hidden, {})
+
+    @app.callback(Output("nozzle-views", "style"), Output("blade-views", "style"),
+        Output("nozzle-mesh-views", "style"), Output("blade-mesh-views", "style"),
+        Output("report-tab", "style"), Output("workspace", "value", allow_duplicate=True),
+        Input("config", "data"), State("workspace", "value"), prevent_initial_call="initial_duplicate")
+    def nozzle_visibility(state, current):
+        shown = bool(state and state.get("project") and nozzle_mode(state["project"]))
+        nozzle, blade = ({}, {"display": "none"}) if shown else ({"display": "none"}, {})
+        return nozzle, blade, nozzle, blade, nozzle, ("design" if current == "report" and not shown else no_update)
+
+    @app.callback(Output("nozzle-characteristics", "figure"), Output("nozzle-ts", "figure"),
+        Output("nozzle-axis", "figure"), Output("nozzle-wall", "figure"),
+        Output("nozzle-summary", "children"),
+        Input("config", "data"), Input("row-references", "data"))
+    def nozzle_report(state, registry):
+        blank = (empty("Characteristic net"), empty("T-s diagram"),
+                 empty("Axis properties"), empty("Wall properties"))
+        if not state or not state.get("valid") or not nozzle_mode(state["project"]):
+            return (*blank, "")
+        row = project_model.active_rows(state["project"])[0]
+        try:
+            config = flow.resolved_configuration(state["project"], row["id"], registry)
+            data = flow.load_nozzle((registry or {}).get(row["id"], {}).get("nozzle"), config)
+        except (ValueError, OSError, RuntimeError, KeyError):
+            return (*blank, "Compute the nozzle to display its design.")
+        status = "Converged" if data.get("converged") else "Not converged"
+        summary = (f"{status} · exit Mach {data['exit_M']:.4f} (design {data['design_Noz_Mach']:.4f})"
+                   f" · runtime {data['runtime_s']:.2f} s")
+        return (nozzle_plots.plot_characteristics_mesh(data, mirror=True),
+                nozzle_plots.plot_ts_diagram(data), nozzle_plots.plot_axis_properties(data),
+                nozzle_plots.plot_wall_properties(data), summary)
+
+    def nozzle_shape(state, registry):
+        row = project_model.active_rows(state["project"])[0]
+        config = flow.resolved_configuration(state["project"], row["id"], registry)
+        refs = (registry or {}).get(row["id"], {})
+        data = flow.load_nozzle(refs.get("nozzle"), config)
+        parameters = config["method_of_characteristics"]
+        return config, refs, data, nozzle_geometry.contour(data, parameters, config["mesh"]["nozzle"])
+
+    @app.callback(Output("nozzle-section", "figure"), Output("nozzle-solid", "figure"),
+        Output("nozzle-geometry-summary", "children"),
+        Input("config", "data"), Input("row-references", "data"))
+    def nozzle_geometry_views(state, registry):
+        blank = (empty("Nozzle cross section"), empty("Three dimensional nozzle"))
+        if not state or not state.get("valid") or not nozzle_mode(state["project"]):
+            return (*blank, "")
+        try:
+            config, _, data, shape = nozzle_shape(state, registry)
+        except (ValueError, OSError, RuntimeError, KeyError) as exc:
+            return (*blank, str(exc) if "convergent" in str(exc) or "single-valued" in str(exc)
+                    else "Compute the nozzle to display its geometry.")
+        settings = config["mesh"]["nozzle"]
+        status = "Converged" if data.get("converged") else "Not converged"
+        summary = (f"{status} · exit Mach {data['exit_M']:.4f} (design {data['design_Noz_Mach']:.4f})"
+                   f" · exit pressure {data['p_back'] / 1e3:.2f} kPa"
+                   f" · exit/throat {'radius' if shape['axisymmetric'] else 'height'} "
+                   f"{shape['y'][-1] / shape['y'][shape['throat_index']]:.4f}"
+                   f" · divergent length {shape['x'][-1] * 1e3:.2f} mm")
+        return (nozzle_views.section_figure(shape), nozzle_views.solid_figure(shape, settings["planar_depth"]),
+                summary)
+
+    @app.callback(Output("nozzle-mesh-2d", "figure"), Output("nozzle-mesh-2d-info", "children"),
+        Output("nozzle-mesh-3d", "children"), Output("nozzle-mesh-3d-info", "children"),
+        Output("nozzle-mesh-report", "children"),
+        Input("config", "data"), Input("row-references", "data"))
+    def nozzle_mesh_views(state, registry):
+        blank = empty("Structured 2D mesh")
+        if not state or not state.get("valid") or not nozzle_mode(state["project"]):
+            return blank, "", None, "", ""
+        row = project_model.active_rows(state["project"])[0]
+        refs = (registry or {}).get(row["id"], {})
+        try:
+            config = flow.resolved_configuration(state["project"], row["id"], registry)
+            keys = flow.keys(config, refs.get("nozzle"))
+        except (ValueError, OSError, RuntimeError, KeyError) as exc:
+            return blank, str(exc), None, "", ""
+        figure, info2, scene, info3, report = blank, "Generate the 2D mesh.", None, "Generate the 3D mesh.", []
+        axisymmetric = nozzle_geometry.axisymmetric(config["method_of_characteristics"])
+        width = config["mesh"]["visualization"]["section_edge_width"]
+        reference = refs.get("reference")
+        if reference:
+            try:
+                data = nozzle_views.load(reference, "nozzle_mesh_2d.json")
+                folder = flow.directory(reference)
+                figure = nozzle_views.mesh_2d_figure(folder, data["summary"]["axisymmetric"], max(width, 0.6))
+                outdated = [] if flow.current(reference, keys["reference"]) else [html.Div(
+                    "Outdated 2D mesh: regenerate for the current settings.", className="message")]
+                info2 = [*outdated, *nozzle_views.summary_2d(data["summary"], reference)]
+                report += nozzle_views.quality("2D mesh", data["report"])
+            except (OSError, ValueError, KeyError) as exc:
+                info2 = f"2D mesh unavailable: {exc}"
+        volume = refs.get("volume")
+        if volume:
+            try:
+                summary = nozzle_views.load(volume, "nozzle_mesh_3d.json")
+                scene = nozzle_views.mesh_3d_scene(flow.directory(volume))
+                outdated = [] if flow.current(volume, keys["volume"]) else [html.Div(
+                    "Outdated 3D mesh: regenerate for the current settings.", className="message")]
+                info3 = [*outdated, *nozzle_views.summary_3d(summary, volume)]
+                report += nozzle_views.quality("3D mesh", nozzle_views.load(volume, "mesh_report.json"))
+            except (OSError, ValueError, KeyError) as exc:
+                info3 = f"3D mesh unavailable: {exc}"
+        if not report:
+            report = ("Generate a mesh to see its report. The 3D mesh is a "
+                      + ("full revolution." if axisymmetric else "planar slab."))
+        return figure, info2, scene, info3, report
 
     @app.callback(Output("mesh-width", "data"), Input("config", "data"))
     def display_settings(state):
@@ -832,7 +1100,7 @@ def create_app(config_file=None, output_dir=None):
         Input("config", "data"), Input("row-references", "data"),
         Input("plotted-rows", "value"), State("geometry-key", "data"))
     def geometry(state, registry, visible=None, previous_key=None):
-        if not state or not state.get("valid"):
+        if not state or not state.get("valid") or nozzle_mode(state["project"]):
             return None, None, empty("Selected blade row"), empty("Machine geometry"), "", ""
         ready = list(ready_rows(state, registry))
         active = project_model.active_rows(state["project"])
@@ -906,7 +1174,7 @@ def create_app(config_file=None, output_dir=None):
         Input("config", "data"), Input("row-references", "data"),
         Input("plotted-rows", "value"), State("reference-plot", "figure"))
     def mesh_setup(state, registry, visible=None, previous=None):
-        if not state or not state.get("valid"):
+        if not state or not state.get("valid") or nozzle_mode(state["project"]):
             return plots.section_mesh_placeholder("Selected-row 2D mesh"), empty("Span grid projection"), "Select a valid blade row.", ""
         active = project_model.active_rows(state["project"])
         visible = {r["id"] for r in active} if visible is None else set(visible)
@@ -980,6 +1248,8 @@ def create_app(config_file=None, output_dir=None):
     def mesh_view(state, registry, scope="all"):
         if not state or not state.get("valid"):
             return None, "Correct the configuration before inspecting the mesh."
+        if nozzle_mode(state["project"]):
+            return None, ""
         datasets, entries, issues = [], [], []
         selected_report = "Generate a 3D mesh for this row to see its report."
         rows = project_model.active_rows(state["project"])
@@ -1149,6 +1419,8 @@ def create_app(config_file=None, output_dir=None):
 
     @app.callback(Output("nozzle", "children"), Input("config", "data"))
     def design_action_label(state):
+        if state and state.get("project") and nozzle_mode(state["project"]):
+            return "Compute nozzle"
         return "Compute blade design"
 
     @app.callback(Output("interspace-note", "title"), Input("config", "data"))

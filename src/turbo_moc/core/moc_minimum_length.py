@@ -18,7 +18,7 @@ import time
 import json
 import numpy as np
 from jax import numpy as jnp
-from turbo_moc.core.thermo_characteristics import InternalPoint, FluidManager, MassFlowCalc, rotation_around_center, jitted_calculate_static_properties, DistCalc, RotVec, MakeVec, vecDotVec
+from turbo_moc.core.thermo_characteristics import InternalPoint, FluidManager, MassFlowCalc, segment_mass_flow, reflex_length, rotation_around_center, jitted_calculate_static_properties, DistCalc, RotVec, MakeVec, vecDotVec
 from turbo_moc.reporting import StageProgress, format_pressure
 import matplotlib.pyplot as plt
 import jaxprop as jxp
@@ -161,6 +161,7 @@ class MOCSolverMLN:
                 fluid_name=self.fluid_name, backend="HEOS",
                 P0=self.P0, T0=self.T0, Q0=self.Q0
             )
+        self.fluid_manager.delta = float(self.delta_flow)
         self.t0 = time.time()
 
         self.p_calc     = self._init_pt()
@@ -339,6 +340,144 @@ class MOCSolverMLN:
         logger.debug("  MoC initial-value line: %d points after marching.", len(self.IVP))
         stage.finish()
 
+    def _fan_ray(self, front, ang, x_corner, y_corner, record=True):
+        ang_rad = float(np.radians(ang))
+        IVP_New = []
+        segments = []
+        if self.flashing:
+            # 1. Corner point: direct, no search (see run_stage_3_kernel_mln).
+            p_wall_store = InternalPoint(self.fluid_manager)
+            p_wall_store.corner_point_prop(x_corner, y_corner, ang_rad)
+            IVP_New.append(p_wall_store)
+
+            self.pt3_calc.__dict__.update(p_wall_store.__dict__)
+
+            # 2. Interior marching against the rest of the current front.
+            p_result_store = p_wall_store  # default when there are no interior points (ray 1)
+            for j in range(0, len(front) - 1):
+                if j == 0:
+                    self.pt3_calc.__dict__.update(p_wall_store.__dict__)
+
+                self.pt2_calc.__dict__.update(front[j + 1].__dict__)
+                self.point_calc.compute_from_characteristics(self.pt2_calc, self.pt3_calc)
+
+                p_result_store = InternalPoint(self.fluid_manager)
+                p_result_store.__dict__.update(self.point_calc.__dict__)
+                IVP_New.append(p_result_store)
+                self.pt3_calc.__dict__.update(p_result_store.__dict__)
+
+                # Both characteristic feet contributed to this interior point
+                # (paramP=pt2_calc, the C+ foot; paramM=pt3_calc, the C- foot --
+                # for j=0 this is the corner itself). Only the pt2_calc segment
+                # used to be recorded, which left the corner (and every other
+                # C- connection) visually disconnected from the mesh, even
+                # though it was correctly used in the actual compatibility
+                # solve -- drawing both makes the true two-family mesh visible.
+                segments.append(([float(self.pt2_calc.x), float(self.point_calc.x)], [float(self.pt2_calc.y), float(self.point_calc.y)]))
+                segments.append(([float(self.pt3_calc.x), float(self.point_calc.x)], [float(self.pt3_calc.y), float(self.point_calc.y)]))
+
+                if self.show_plot and record:
+                    self.ax1.plot(
+                        [self.pt2_calc.x, self.point_calc.x],
+                        [self.pt2_calc.y, self.point_calc.y],
+                        '-', color='#1f77b4', linewidth=0.6, zorder=2
+                    )
+                    self.ax1.plot(
+                        [self.pt3_calc.x, self.point_calc.x],
+                        [self.pt3_calc.y, self.point_calc.y],
+                        '-', color='#1f77b4', linewidth=0.6, zorder=2
+                    )
+        else:
+            # 1. Setup foot points from current IVP line
+            self.pt3_calc.__dict__.update(front[0].__dict__)
+            self.pt1_calc.__dict__.update(front[1].__dict__)
+
+            # MLN: wall is FIXED at corner (not moving along an arc)
+            self.wall_calc.x = x_corner
+            self.wall_calc.y = y_corner
+
+            # 2. Wall-point intersection loop (same as standard kernel)
+            flag = 0; k = 0
+            while flag != 1:
+                try:
+                    intermediate_pt_state = self.wall_calc.Inv_Wall_pnt(
+                        self.wall_calc, self.pt3_calc, self.pt1_calc, ang)
+                    self.pt_result.__dict__.update(intermediate_pt_state.__dict__)
+                    flag = 1
+                except NameError:
+                    k += 1
+                    self.pt3_calc.__dict__.update(front[0 + k].__dict__)
+                    self.pt1_calc.__dict__.update(front[1 + k].__dict__)
+
+            p_wall_store = InternalPoint(self.fluid_manager)
+            p_wall_store.__dict__.update(self.wall_calc.__dict__)
+            IVP_New.append(p_wall_store)
+
+            self.pt3_calc.__dict__.update(self.pt_result.__dict__)
+
+            # 3. Interior marching (identical to standard kernel)
+            p_result_store = p_wall_store  # default when there are no interior points
+            for j in range(0, int(len(front) - 1) - k):
+                if j == 0:
+                    self.pt3_calc.__dict__.update(p_wall_store.__dict__)
+
+                self.pt2_calc.__dict__.update(front[j + 1 + k].__dict__)
+                self.point_calc.compute_from_characteristics(self.pt2_calc, self.pt3_calc)
+
+                p_result_store = InternalPoint(self.fluid_manager)
+                p_result_store.__dict__.update(self.point_calc.__dict__)
+                IVP_New.append(p_result_store)
+                self.pt3_calc.__dict__.update(p_result_store.__dict__)
+
+                # Both characteristic feet contributed to this interior point
+                # (paramP=pt2_calc, the C+ foot; paramM=pt3_calc, the C- foot --
+                # for j=0 this is the corner itself). Only the pt2_calc segment
+                # used to be recorded, which left the corner (and every other
+                # C- connection) visually disconnected from the mesh, even
+                # though it was correctly used in the actual compatibility
+                # solve -- drawing both makes the true two-family mesh visible.
+                segments.append(([float(self.pt2_calc.x), float(self.point_calc.x)], [float(self.pt2_calc.y), float(self.point_calc.y)]))
+                segments.append(([float(self.pt3_calc.x), float(self.point_calc.x)], [float(self.pt3_calc.y), float(self.point_calc.y)]))
+
+                if self.show_plot and record:
+                    self.ax1.plot(
+                        [self.pt2_calc.x, self.point_calc.x],
+                        [self.pt2_calc.y, self.point_calc.y],
+                        '-', color='#1f77b4', linewidth=0.6, zorder=2
+                    )
+                    self.ax1.plot(
+                        [self.pt3_calc.x, self.point_calc.x],
+                        [self.pt3_calc.y, self.point_calc.y],
+                        '-', color='#1f77b4', linewidth=0.6, zorder=2
+                    )
+
+        # 4. Axis point via image-reflection (identical to standard kernel)
+        p_result_store_last = p_result_store
+        self.pt2_calc.__dict__.update(p_result_store_last.__dict__)
+        self.pt3_calc.__dict__.update(p_result_store_last.__dict__)
+        self.pt3_calc.v = -self.pt3_calc.v
+        self.pt3_calc.y = -self.pt3_calc.y
+
+        self.point_calc.compute_from_characteristics(self.pt3_calc, self.pt2_calc)
+
+        p_result_final = InternalPoint(self.fluid_manager)
+        p_result_final.__dict__.update(self.point_calc.__dict__)
+        IVP_New.append(p_result_final)
+        return IVP_New, segments, p_result_final
+
+    def _fan_bisect(self, front, ang_lo, ang_hi, x_corner, y_corner, ray, segments, axis, n_iter=30):
+        for _ in range(n_iter):
+            if abs(float(axis.p) - self.P_back) <= 1e-6 * self.P_back or ang_hi - ang_lo < 1e-9:
+                break
+            ang_mid = 0.5 * (ang_lo + ang_hi)
+            trial = self._fan_ray(front, ang_mid, x_corner, y_corner, record=False)
+            if float(trial[2].p) <= self.P_back:
+                ang_hi = ang_mid
+                ray, segments, axis = trial
+            else:
+                ang_lo = ang_mid
+        return ray, segments, axis
+
     # ------------------------------------------------------------------
     # STAGE 3 — MLN kernel: centred expansion fan from throat corner
     # ------------------------------------------------------------------
@@ -409,131 +548,19 @@ class MOCSolverMLN:
         # corner's own flow angle is not exactly zero there.
 
         c = 0
+        axisymmetric_target = bool(self.delta_flow) and self.P_back is not None
+        reached = False
+        ang_prev = float(self.tau_mln[0])
         for ang in tau:
             c += 1
-            ang_rad = float(np.radians(ang))
-            IVP_New = []
 
             try:
-                if self.flashing:
-                    # 1. Corner point: direct, no search (see docstring above).
-                    p_wall_store = InternalPoint(self.fluid_manager)
-                    p_wall_store.corner_point_prop(x_corner, y_corner, ang_rad)
-                    IVP_New.append(p_wall_store)
-
-                    self.pt3_calc.__dict__.update(p_wall_store.__dict__)
-
-                    # 2. Interior marching against the rest of the current front.
-                    p_result_store = p_wall_store  # default when there are no interior points (ray 1)
-                    for j in range(0, len(self.IVP) - 1):
-                        if j == 0:
-                            self.pt3_calc.__dict__.update(p_wall_store.__dict__)
-
-                        self.pt2_calc.__dict__.update(self.IVP[j + 1].__dict__)
-                        self.point_calc.compute_from_characteristics(self.pt2_calc, self.pt3_calc)
-
-                        p_result_store = InternalPoint(self.fluid_manager)
-                        p_result_store.__dict__.update(self.point_calc.__dict__)
-                        IVP_New.append(p_result_store)
-                        self.pt3_calc.__dict__.update(p_result_store.__dict__)
-
-                        # Both characteristic feet contributed to this interior point
-                        # (paramP=pt2_calc, the C+ foot; paramM=pt3_calc, the C- foot --
-                        # for j=0 this is the corner itself). Only the pt2_calc segment
-                        # used to be recorded, which left the corner (and every other
-                        # C- connection) visually disconnected from the mesh, even
-                        # though it was correctly used in the actual compatibility
-                        # solve -- drawing both makes the true two-family mesh visible.
-                        self.mesh_data["stage3_mesh"].append(([float(self.pt2_calc.x), float(self.point_calc.x)], [float(self.pt2_calc.y), float(self.point_calc.y)]))
-                        self.mesh_data["stage3_mesh"].append(([float(self.pt3_calc.x), float(self.point_calc.x)], [float(self.pt3_calc.y), float(self.point_calc.y)]))
-
-                        if self.show_plot:
-                            self.ax1.plot(
-                                [self.pt2_calc.x, self.point_calc.x],
-                                [self.pt2_calc.y, self.point_calc.y],
-                                '-', color='#1f77b4', linewidth=0.6, zorder=2
-                            )
-                            self.ax1.plot(
-                                [self.pt3_calc.x, self.point_calc.x],
-                                [self.pt3_calc.y, self.point_calc.y],
-                                '-', color='#1f77b4', linewidth=0.6, zorder=2
-                            )
-                else:
-                    # 1. Setup foot points from current IVP line
-                    self.pt3_calc.__dict__.update(self.IVP[0].__dict__)
-                    self.pt1_calc.__dict__.update(self.IVP[1].__dict__)
-
-                    # MLN: wall is FIXED at corner (not moving along an arc)
-                    self.wall_calc.x = x_corner
-                    self.wall_calc.y = y_corner
-
-                    # 2. Wall-point intersection loop (same as standard kernel)
-                    flag = 0; k = 0
-                    while flag != 1:
-                        try:
-                            intermediate_pt_state = self.wall_calc.Inv_Wall_pnt(
-                                self.wall_calc, self.pt3_calc, self.pt1_calc, ang)
-                            self.pt_result.__dict__.update(intermediate_pt_state.__dict__)
-                            flag = 1
-                        except NameError:
-                            k += 1
-                            self.pt3_calc.__dict__.update(self.IVP[0 + k].__dict__)
-                            self.pt1_calc.__dict__.update(self.IVP[1 + k].__dict__)
-
-                    p_wall_store = InternalPoint(self.fluid_manager)
-                    p_wall_store.__dict__.update(self.wall_calc.__dict__)
-                    IVP_New.append(p_wall_store)
-
-                    self.pt3_calc.__dict__.update(self.pt_result.__dict__)
-
-                    # 3. Interior marching (identical to standard kernel)
-                    p_result_store = p_wall_store  # default when there are no interior points
-                    for j in range(0, int(len(self.IVP) - 1) - k):
-                        if j == 0:
-                            self.pt3_calc.__dict__.update(p_wall_store.__dict__)
-
-                        self.pt2_calc.__dict__.update(self.IVP[j + 1 + k].__dict__)
-                        self.point_calc.compute_from_characteristics(self.pt2_calc, self.pt3_calc)
-
-                        p_result_store = InternalPoint(self.fluid_manager)
-                        p_result_store.__dict__.update(self.point_calc.__dict__)
-                        IVP_New.append(p_result_store)
-                        self.pt3_calc.__dict__.update(p_result_store.__dict__)
-
-                        # Both characteristic feet contributed to this interior point
-                        # (paramP=pt2_calc, the C+ foot; paramM=pt3_calc, the C- foot --
-                        # for j=0 this is the corner itself). Only the pt2_calc segment
-                        # used to be recorded, which left the corner (and every other
-                        # C- connection) visually disconnected from the mesh, even
-                        # though it was correctly used in the actual compatibility
-                        # solve -- drawing both makes the true two-family mesh visible.
-                        self.mesh_data["stage3_mesh"].append(([float(self.pt2_calc.x), float(self.point_calc.x)], [float(self.pt2_calc.y), float(self.point_calc.y)]))
-                        self.mesh_data["stage3_mesh"].append(([float(self.pt3_calc.x), float(self.point_calc.x)], [float(self.pt3_calc.y), float(self.point_calc.y)]))
-
-                        if self.show_plot:
-                            self.ax1.plot(
-                                [self.pt2_calc.x, self.point_calc.x],
-                                [self.pt2_calc.y, self.point_calc.y],
-                                '-', color='#1f77b4', linewidth=0.6, zorder=2
-                            )
-                            self.ax1.plot(
-                                [self.pt3_calc.x, self.point_calc.x],
-                                [self.pt3_calc.y, self.point_calc.y],
-                                '-', color='#1f77b4', linewidth=0.6, zorder=2
-                            )
-
-                # 4. Axis point via image-reflection (identical to standard kernel)
-                p_result_store_last = p_result_store
-                self.pt2_calc.__dict__.update(p_result_store_last.__dict__)
-                self.pt3_calc.__dict__.update(p_result_store_last.__dict__)
-                self.pt3_calc.v = -self.pt3_calc.v
-                self.pt3_calc.y = -self.pt3_calc.y
-
-                self.point_calc.compute_from_characteristics(self.pt3_calc, self.pt2_calc)
-
-                p_result_final = InternalPoint(self.fluid_manager)
-                p_result_final.__dict__.update(self.point_calc.__dict__)
-                IVP_New.append(p_result_final)
+                IVP_New, segments, p_result_final = self._fan_ray(self.IVP, ang, x_corner, y_corner)
+                if axisymmetric_target and float(p_result_final.p) <= self.P_back:
+                    IVP_New, segments, p_result_final = self._fan_bisect(
+                        self.IVP, ang_prev, ang, x_corner, y_corner, IVP_New, segments, p_result_final)
+                    reached = True
+                self.mesh_data["stage3_mesh"].extend(segments)
             except Exception as e:
                 # Near-sonic starts (post-jump Mach only slightly above 1)
                 # make the axis-point compatibility relation (Q = u^2-a^2 -> 0)
@@ -566,6 +593,10 @@ class MOCSolverMLN:
             axis = IVP_New[-1]
             stage.update(c / len(tau), lambda: f"{100 * c / len(tau):.0f}% of the prescribed sweep; "
                                                f"axis Mach {float(axis.M):.4f}")
+            ang_prev = float(ang)
+            if reached:
+                outcome = "reached the target"
+                break
 
         else:
             # Loop completed without a property-solve failure: reached theta*
@@ -643,19 +674,10 @@ class MOCSolverMLN:
         # more costly here, not less.
         mass_cumulative = 0.0
         for i in range(1, len(self.IVP)):
-            p_prev, p_cur = self.IVP[i - 1], self.IVP[i]
-            seg_len = DistCalc(p_prev.x, p_prev.y, p_cur.x, p_cur.y)
-            rot_vec = RotVec(MakeVec(p_prev.x, p_prev.y, p_cur.x, p_cur.y), -90)
-            rho_avg = (p_prev.rho + p_cur.rho) / 2
-            u_avg = (p_prev.u + p_cur.u) / 2
-            v_avg = (p_prev.v + p_cur.v) / 2
-            V_avg = vecDotVec(u_avg, v_avg, rot_vec[0], rot_vec[1])
-            mass_cumulative = mass_cumulative + (rho_avg * seg_len * V_avg)
+            mass_cumulative = mass_cumulative + segment_mass_flow(self.IVP[i - 1], self.IVP[i], self.delta_flow)
 
             Ref_P = (self.IVP[i],)
-            MassIn = mass_cumulative
-            MassOut = MassFlowCalc(Ref_P)
-            l = MassIn / MassOut
+            l = reflex_length(Ref_P[0], mass_cumulative, self.delta_flow)
             self.length.append(l)
 
             p_in = InternalPoint(self.fluid_manager)

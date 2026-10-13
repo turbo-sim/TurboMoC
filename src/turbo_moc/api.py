@@ -18,6 +18,7 @@ import logging
 import time
 
 import numpy as np
+from scipy.optimize import brentq
 import jaxprop as jxp
 
 from turbo_moc.core import thermo_characteristics as _classes
@@ -114,11 +115,12 @@ def design_nozzle(
         Inlet quality for a saturated two-phase state. Leave as NaN when using
         ``T0``.
     p_back : float, optional
-        Back pressure in pascals. This is the recommended design target and is
-        required by the minimum-length solver.
+        Back pressure in pascals. This is the recommended design target and
+        takes precedence over ``Noz_Mach``.
     Noz_Mach : float, optional
-        Direct nozzle Mach-number target. At least one of ``p_back`` and
-        ``Noz_Mach`` is required.
+        Exit Mach-number target, used when ``p_back`` is not given: the back
+        pressure is the first isentrope pressure below the throat with this
+        Mach number. At least one of ``p_back`` and ``Noz_Mach`` is required.
     solver : {"conventional", "mln"}
         Rounded-arc conventional solver or sharp-corner minimum-length solver.
     y_t : float
@@ -128,7 +130,9 @@ def design_nozzle(
     rho_t, rho_d : float
         Geometric radii used by the nozzle construction.
     delta_flow : float
-        Axisymmetric-flow switch or coefficient passed to the solver.
+        0 for a planar nozzle, 1 for an axisymmetric nozzle (y is then the
+        radius and the compatibility relations include the sin(theta)/y source
+        term).
     tau_max, tau_step : float
         Angular extent and increment for the conventional solver.
     n_tau_mln : int
@@ -158,8 +162,6 @@ def design_nozzle(
         raise NozzleDesignError(f"solver must be 'conventional' or 'mln', got {solver!r}")
     if p_back is None and Noz_Mach is None:
         raise NozzleDesignError("At least one of p_back or Noz_Mach is required.")
-    if solver == "mln" and p_back is None:
-        raise NozzleDesignError("solver='mln' requires p_back (used to compute the corner fan's target turning angle).")
 
     t0 = time.perf_counter()
 
@@ -175,12 +177,17 @@ def design_nozzle(
         q0_candidates += [0.005, 0.01, 0.02, 0.05, 0.1]
 
     last_exc = None
+    p_back_input = p_back
     for attempt_i, q0_try in enumerate(q0_candidates):
         callback = _attempt_callback(progress_callback, attempt_i, len(q0_candidates))
         state_0 = _inlet_state(fluid, P0, T0, q0_try)
         T0_resolved = float(state_0.T)
 
         design_Noz_Mach = Noz_Mach
+        p_back = p_back_input
+        if p_back is None:
+            p_back = pressure_for_mach(fluid, state_0, Noz_Mach)
+            logger.info("  MoC: exit Mach %.4f corresponds to %s", Noz_Mach, format_pressure(p_back))
         if p_back is not None:
             state_out = fluid.get_state(jxp.PSmass_INPUTS, p_back, state_0.s)
             v_out = float(np.sqrt(abs(2 * (state_0.h - state_out.h))))
@@ -216,7 +223,10 @@ def design_nozzle(
                 theta_star_deg = float(np.degrees(0.5 * nu_f))
 
                 mln_config = dict(base_config)
-                mln_config["tau_mln"] = np.linspace(0, theta_star_deg, n_tau_mln)
+                if delta_flow:
+                    mln_config["tau_mln"] = np.linspace(0, 2 * theta_star_deg, 2 * n_tau_mln - 1)
+                else:
+                    mln_config["tau_mln"] = np.linspace(0, theta_star_deg, n_tau_mln)
                 mln_config["flashing"] = not use_true_sauer_line
                 s = MOCSolverMLN(mln_config, show_plot=show_plot, fluid_manager=fm)
                 s.run_stage_1_sauer(progress_callback=callback)
@@ -272,6 +282,29 @@ def design_nozzle(
     data["T0_stagnation"] = float(state_0.T)
     _report_result(data, s, converged, exit_M, design_Noz_Mach, p_back, callback)
     return data
+
+
+def pressure_for_mach(fluid, state_0, mach, n_scan=400, p_min_ratio=1e-4):
+    if mach is None or not np.isfinite(mach) or mach <= 1:
+        raise NozzleDesignError(f"The exit Mach number must be larger than 1, got {mach!r}.")
+    P0 = float(state_0.p)
+
+    def mach_at(p):
+        state = fluid.get_state(jxp.PSmass_INPUTS, float(p), state_0.s)
+        return float(np.sqrt(abs(2 * (state_0.h - state.h))) / state.a)
+
+    pressures = np.geomspace(0.999 * P0, p_min_ratio * P0, n_scan)
+    previous = None
+    for p in pressures:
+        value = mach_at(p) - mach
+        if np.isfinite(value) and value >= 0:
+            if previous is None:
+                return float(p)
+            return float(brentq(lambda q: mach_at(q) - mach, p, previous[0], xtol=1e-9 * P0))
+        if np.isfinite(value):
+            previous = (p, value)
+    raise NozzleDesignError(f"Exit Mach {mach:.4f} is not reached on the isentrope above "
+                            f"{format_pressure(p_min_ratio * P0)}.")
 
 
 def _report_result(data, solver, converged, exit_M, design_Noz_Mach, p_back, callback):

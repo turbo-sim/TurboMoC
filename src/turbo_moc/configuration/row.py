@@ -75,8 +75,12 @@ def _validate_shared(config):
         if not np.isfinite(config["passage"][name]) or config["passage"][name] <= 0:
             raise ValueError(f"passage.{name} must be positive.")
     validate_mesh_configuration(config["mesh"])
-    from turbo_moc.configuration.fluid_inputs import validate_inlet_inputs
+    if "nozzle" in config["mesh"]:
+        from turbo_moc.geometry.nozzle import validate_settings
+        validate_settings(config["mesh"]["nozzle"])
+    from turbo_moc.configuration.fluid_inputs import validate_inlet_inputs, validate_outlet_inputs
     validate_inlet_inputs(config["nozzle"])
+    validate_outlet_inputs(config["nozzle"])
     return config
 
 
