@@ -66,6 +66,36 @@ def test_scope_is_separate_from_design_mode_and_uses_row_order(queue):
     assert project == original
 
 
+def test_calculation_checkboxes_select_all_clear_all_and_keep_machine_order(queue):
+    project, _ = queue
+    app = create_app()
+    options = calculations.scope_options(project)
+    scope = ["stator_1", "rotor_1"]
+    for chosen, expected in [
+        (["all", "rotor_1"], ["rotor_1"]),
+        (["all", "rotor_1"], ["stator_1", "rotor_1"]),
+        (["stator_1", "rotor_1"], []),
+        (["rotor_1"], ["rotor_1"]),
+        (["rotor_1", "stator_1"], ["stator_1", "rotor_1"]),
+    ]:
+        response = call(app, "..calculation-scope.options", "calculation-rows.value", {
+            ("base-project", "data"): project,
+            ("calculation-rows", "value"): chosen,
+            ("calculation-scope", "value"): scope,
+            ("calculation-scope", "options"): options})
+        scope = response["calculation-scope"]["value"]
+        assert scope == expected
+        assert response["calculation-rows"]["value"] == (
+            ["all", *expected] if len(expected) == 2 else expected)
+        assert "plotted-rows" not in response and "report-scope" not in response
+
+    disabled = call(app, "..nozzle.disabled", "calculation-scope.value", {
+        ("config", "data"): {"project": project, "valid": True},
+        ("calculation-scope", "value"): [],
+        ("row-references", "data"): {}})
+    assert all(disabled[action]["disabled"] for action in ("nozzle", "reference", "volume"))
+
+
 def test_both_blade_designs_handoff_new_stator_before_coupled_rotor(queue):
     project, launched = queue
     project["rows"][1]["geometry"]["inlet_coupling"]["mode"] = "stator_exit"

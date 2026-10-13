@@ -28,7 +28,6 @@ main {min-width:0;flex:1;padding:12px 16px;display:flex;flex-direction:column;mi
 .active-design .design,.active-mesh .mesh {display:block}
 .project-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:0 12px 10px;margin-bottom:12px}
 .configuration-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:12px;margin-bottom:12px}
-.scope-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:0 12px;margin-bottom:12px}
 .sidebar-box-title {font-size:13px;font-weight:600;color:#233c46;margin:12px 0;
   padding-bottom:8px;border-bottom:1px solid #e4ebee}
 .configuration-settings .sidebar-box-title {margin-top:0}
@@ -66,7 +65,17 @@ button:hover:enabled {background:#e5f0f4;border-color:#648d9f}
 button:disabled {opacity:.4;cursor:default}
 .action-bar {display:flex;align-items:center;gap:16px;padding:10px 0;flex-shrink:0;flex-wrap:wrap}
 #download-project {flex-shrink:0;margin-left:auto}
-.actions {display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.actions {display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.actions > button {white-space:nowrap}
+.calculation-selection {position:relative;flex-shrink:0;font-size:12px;z-index:20}
+.calculation-selection > summary {padding:8px 12px;border:1px solid #9ab2bd;
+  border-radius:5px;background:white;color:#173e50;font-weight:400;white-space:nowrap}
+.calculation-selection > summary:hover {background:#e5f0f4;border-color:#648d9f}
+.calculation-selection > summary:focus-visible {outline:2px solid #376a7d;outline-offset:2px}
+#calculation-rows {position:absolute;top:calc(100% + 5px);left:0;min-width:180px;
+  padding:10px 12px;background:white;border:1px solid #bacbd3;border-radius:6px;
+  box-shadow:0 5px 16px #173e5026}
+#calculation-rows label {display:flex!important;align-items:center;gap:8px;padding:6px 0;cursor:pointer}
 .job-strip {display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:170px;
   margin-left:auto;flex:1;font-size:12px}
 #job-status {min-width:0;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -100,7 +100,7 @@ def actual_blade_count(value, row_id):
 
 
 def natural_blade_box(row_id):
-    return html.Div("Compute blade design to obtain the natural pitch.",
+    return html.Div("Generate geometry to obtain the natural pitch.",
         id={"type": "natural-blade-sizing", "row": row_id}, className="computed-inlet")
 
 
@@ -349,18 +349,24 @@ def viewport(name):
 def row_controls(project, row):
     options = calculations.scope_options(project)
     return html.Div([
-        html.H3("Calculation and display", className="sidebar-box-title"),
-        html.Label([html.Span("Calculate"),
-            dcc.Dropdown(id="calculation-scope", clearable=False, searchable=False,
-                value="all", options=[{"label": "All rows", "value": "all"}, *options])],
-            id="calculation-controls", className="control",
-            title="Selected rows calculate sequentially in machine order. Display selection is independent."),
         # Internal workflow state; report and display configuration have their
         # own independent selectors.
-        html.Div([dcc.Checklist(id="plotted-rows", value=[item["value"] for item in options], options=options),
-            dcc.Dropdown(id="selected-row", clearable=False, value=row["id"], options=options)],
-            style={"display": "none"}),
-    ], id="interspace-note", className="scope-settings")
+        dcc.Dropdown(id="calculation-scope", value=[item["value"] for item in options],
+            options=options, multi=True),
+        dcc.Checklist(id="plotted-rows", value=[item["value"] for item in options], options=options),
+        dcc.Dropdown(id="selected-row", clearable=False, value=row["id"], options=options),
+    ], id="interspace-note", style={"display": "none"})
+
+
+def calculation_controls(project):
+    options = calculations.scope_options(project)
+    return html.Details([
+        html.Summary("Calculate · All rows", id="calculation-selection-label"),
+        dcc.Checklist(id="calculation-rows",
+            options=[{"label": "All rows", "value": "all"}, *options],
+            value=["all", *[item["value"] for item in options]]),
+    ], id="calculation-controls", className="calculation-selection",
+        title="Selected rows calculate sequentially in machine order. Display selection is independent.")
 
 
 @lru_cache(maxsize=8)
@@ -492,10 +498,10 @@ def create_app(config_file=None, output_dir=None):
                     dcc.Tab(label="Geometry generation", value="design"),
                     dcc.Tab(label="Mesh generation", value="mesh")]),
                 html.Div(id="validation", className="message"),
-                html.Div([html.Div([html.Button(label, id=name, n_clicks=0,
+                html.Div([html.Div([calculation_controls(project), *[html.Button(label, id=name, n_clicks=0,
                     disabled=name=="cancel") for name, label in zip(ACTIONS,
-                    ("Compute blade design",
-                     "Generate 2D mesh", "Generate 3D mesh", "Cancel job"))],
+                    ("Generate geometry",
+                     "Generate 2D mesh", "Generate 3D mesh", "Cancel job"))]],
                     className="actions"), html.Div([html.Span(id="spinner"), html.Span("Ready", id="job-status"),
                     html.Progress(id="job-progress", max=1, value=0)], className="job-strip"),
                     html.Button("Export project (.zip)", id="download-project", n_clicks=0,
@@ -618,14 +624,34 @@ def create_app(config_file=None, output_dir=None):
             return property_label(pair, 1), property_label(pair, 2)
 
     @app.callback(Output("calculation-scope", "options"), Output("calculation-scope", "value"),
-        Output("report-scope", "options"), Output("report-scope", "value"),
-        Input("base-project", "data"), State("calculation-scope", "value"), State("report-scope", "value"))
-    def calculation_scope(project, scope, report):
+        Output("calculation-rows", "options"), Output("calculation-rows", "value"),
+        Output("calculation-selection-label", "children"),
+        Input("base-project", "data"), Input("calculation-rows", "value"),
+        State("calculation-scope", "value"), State("calculation-scope", "options"))
+    def calculation_scope(project, chosen, scope, old_options):
+        options = calculations.scope_options(project)
+        available = [item["value"] for item in options]
+        old = [item["value"] for item in old_options or [] if item["value"] != "all"]
+        previous = old if scope == "all" else ([scope] if isinstance(scope, str) else scope or [])
+        if ctx.triggered_id == "base-project" or not ctx.triggered_id:
+            selected = available if scope == "all" or set(previous) == set(old) else [r for r in available if r in previous]
+            if previous and not selected:
+                selected = available
+        else:
+            selected = display_panel.selected_rows(chosen, previous, available)
+        all_selected = selected == available
+        checked = (["all"] if all_selected else []) + selected
+        choices = [{"label": "All rows", "value": "all"}, *options]
+        label = "All rows" if all_selected else ", ".join(
+            item["label"] for item in options if item["value"] in selected) or "Select rows"
+        return options, selected, choices, checked, f"Calculate · {label}"
+
+    @app.callback(Output("report-scope", "options"), Output("report-scope", "value"),
+        Input("base-project", "data"), State("report-scope", "value"))
+    def report_scope(project, report):
         options = calculations.scope_options(project)
         available = {"all", *[item["value"] for item in options]}
-        scope, report = [value if value in available else "all" for value in (scope, report)]
-        return ([{"label": "All rows", "value": "all"}, *options], scope,
-            [{"label": "Total", "value": "all"}, *options], report)
+        return [{"label": "Total", "value": "all"}, *options], report if report in available else "all"
 
     @app.callback(Output("geometry-display-row", "options"), Output("geometry-display-row", "value"),
         Output("mesh-display-row", "options"), Output("mesh-display-row", "value"),
@@ -853,7 +879,7 @@ def create_app(config_file=None, output_dir=None):
         if key == previous_key:
             return (no_update,) * 6
         datasets, views, errors, section_views, basis_notes = [], [], [], [], []
-        basis = "Compute blade designs for the plotted rows to display their geometry."
+        basis = "Generate geometry for the plotted rows to display their geometry."
         for row, config, reference, keys in ready:
             try:
                 design = flow.get_design(config, reference)
@@ -1149,7 +1175,7 @@ def create_app(config_file=None, output_dir=None):
 
     @app.callback(Output("nozzle", "children"), Input("config", "data"))
     def design_action_label(state):
-        return "Compute blade design"
+        return "Generate geometry"
 
     @app.callback(Output("interspace-note", "title"), Input("config", "data"))
     def interspace_note(state):

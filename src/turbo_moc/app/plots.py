@@ -343,7 +343,7 @@ def assembly_meridional_mesh_figure(entries):
 def histogram(name, metric):
     bins = np.asarray(metric["bin_edges"])
     result = go.Figure(go.Bar(x=(bins[:-1] + bins[1:]) / 2,
-        y=metric["counts"], width=0.94 * np.diff(bins),
+        y=metric["counts"], width=np.diff(bins),
         marker=dict(color="#376a7d", line=dict(width=0))))
     result.update_layout(height=245,
         template="plotly_white", font=APP_FONT,
