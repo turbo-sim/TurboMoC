@@ -705,7 +705,187 @@ $$
 
 This integral, rather than only the net change in radius, measures the direct discrepancy from the planar compatibility relation along a particular characteristic. Short passages with small radius and thickness changes may be well approximated by mapped planar sections. Large turning, strong sheet convergence, or wave-cancellation requirements can make even modest geometric differences consequential.
 
-## 12. Verification before using the method for blade design
+### 11.6 Relation to the axisymmetric nozzle MoC
+
+The classical axisymmetric nozzle MoC [5] belongs to the same family. A planar characteristic structure carries a geometric weight in continuity. For an axisymmetric nozzle in its meridional plane $(x,y)$, with $y$ the distance from the axis,
+
+$$
+\partial_x(y\rho u)+\partial_y(y\rho v_y)=0,
+\qquad
+\partial_xv_y-\partial_yu=0.
+\tag{43a}
+$$
+
+The plane is flat, so the metric is Cartesian ($g=0$), and the continuity weight is $y$. Equation (25) applies with $H=\ln y$. Since $D_sH=\sin\alpha/y$, (28) gives
+
+$$
+\frac{d(\alpha-\sigma\nu)}{d\lambda}=-\sigma\frac{\sin\mu\sin\alpha}{y}.
+\tag{43b}
+$$
+
+With $dy=\sin(\alpha+\sigma\mu)\,d\lambda$, this becomes the familiar form, e.g. along $C_-$:
+
+$$
+d(\alpha+\nu)=\frac{1}{\sqrt{M^2-1}-\cot\alpha}\,\frac{dy}{y}.
+$$
+
+The planar case is recovered without the weight. The TurboMoC solvers already implement this axisymmetric source through the `delta_flow` switch ($\delta=0$ planar, $\delta=1$ axisymmetric).
+
+The two models compare as follows:
+
+| | Axisymmetric nozzle | Stream-sheet blade row |
+| --- | --- | --- |
+| Surface | Flat meridional plane ($S_2$-type) | Curved blade-to-blade surface of revolution ($S_1$-type) |
+| Continuity weight | $y$, varying **across** the passage | $rb$, varying **along** the meridional coordinate |
+| Metric | Cartesian: no $G_r$ term | Conformal factor $r$: additional $G_r\sin\alpha$ term (angular momentum) |
+| Planar limit | $y\to\infty$ (thin annulus far from the axis) | $G_r=G_b=0$ (cylinder of constant thickness) |
+
+The stream-sheet formulation is therefore not a planar model with ad hoc corrections. It follows from the same governing equations as the planar and axisymmetric methods, on a different surface and with a different weight and metric. All three share the characteristic directions $\alpha\pm\mu$ and differ only in their source terms.
+
+## 12. Placing a planar design on an axial annulus: three stacking options
+
+### 12.1 Setting
+
+Consider an axial row with cylindrical hub and shroud and constant blade height. Every span station is then a cylinder $r=\text{const}$ with constant sheet thickness, so $G_r=G_b=0$ and the planar MoC is exact on each sheet (§11.1). The planar design is a cascade section with chord $c_d$, pitch $s_d$, throat $o_d$ and metal angles. Its MoC solution is invariant under **uniform** scaling: a similar section with the same pitch-to-chord ratio carries the same Mach field. It is not invariant under a pitch change at fixed chord, or under stretching in one direction only.
+
+With $N$ blades the physical pitch is $s(r)=2\pi r/N$ at every radius. The three options differ only in which section each cylinder carries:
+
+| | A. Pitch-scaled radial stacking | B. Conformal, constant chord | C. Conformal, chord $\propto r$ |
+| --- | --- | --- | --- |
+| Section at radius $r$ | Hub section stretched pitchwise by $f=r/r_h$ | Similar copy, chord $c$ | Similar copy, chord $c\,r/R_{\rm ref}$ |
+| Metal angles | $\tan\alpha(r)=f\tan\alpha_h$ | Exact | Exact |
+| Pitch-to-chord ratio | Pitchwise ratio fixed; section distorted | $\propto r$ | Constant |
+| Designed passage reproduced | At the hub only | At most one radius, if $N$ matches | At every radius, if $N$ matches |
+| Blade stacking | Radial lines ($\theta$ independent of $r$) | Leading edge at $z=0$; similar sections | Same $q$-section on every sheet; trailing edge $z\propto r$ |
+| Endwalls | Cylindrical | Cylindrical | Cylindrical (no flaring) |
+| Implementation | Legacy app (`deprecated/geometry/annular.py`, `flare="pitch_scale"`) | New app as used by default | New app inputs; $N$ matched by hand |
+
+### 12.2 Option A: pitch-scaled radial stacking
+
+The section at radius $r$ keeps its axial coordinate and stretches its pitchwise coordinate:
+
+$$
+x_r=f\,x_h,\qquad z_r=z_h,\qquad \theta=-x_r/r=-x_h/r_h,\qquad f=r/r_h.
+\tag{44}
+$$
+
+The angular pitch is $2\pi/N$ at every radius and the blade is radially stacked. Sizing fixes the hub pitch to the design value, so the hub section is the MoC design. Elsewhere the section is an affine, non-similar copy. Angles change, $\tan\alpha(r)=f\tan\alpha_h$, and widths across the flow scale non-uniformly because the flow turns through the passage.
+
+At high stagger the width across the flow is roughly $s\cos\alpha$. The pitch grows and $\cos\alpha$ falls, and the two nearly cancel. For the default Cyclopentane stator ($\alpha_{\rm out}=65^\circ$), the narrowest blade-to-blade gap changes by only $+0.9\,\%$, $+1.7\,\%$ and $+3.0\,\%$ for $f=1.05$, $1.10$ and $1.20$, while the exit angle becomes $66.1^\circ$, $67.0^\circ$ and $68.8^\circ$. Option A is therefore a reasonable approximation for short blades: nearly the designed passage, at the cost of a few degrees of angle. It is exact only at the hub. The legacy sizing also takes the mass flow from the hub throat over the full height.
+
+### 12.3 Option B: conformal similarity with constant chord
+
+The conformal map $q=(R_{\rm ref}\theta,\,-R_{\rm ref}m')$ scales lengths by $r/R_{\rm ref}$ on each cylinder. With the axial chord $c$ held constant, the conformal chord $c/r$ varies. Every section is a similar copy of the planar blade with the same physical size, while the pitch grows as $2\pi r/N$. The angles are exact, but the pitch-to-chord ratio grows with $r$. The section reproduces the designed passage only where
+
+$$
+\frac{s(r)}{c}=\frac{s_d}{c_d}.
+\tag{45}
+$$
+
+This holds at one radius at most, and only for the matching blade count. The app sets the pitch from $N$ and $R_{\rm ref}$; since the natural-count update (§12.6) it suggests $N$ from the design pitch at midspan and reports the pitch deviation.
+
+For the default stator ($R_{\rm ref}=105$ mm, $c=20$ mm), the matching count is $N=27.4$. With the default $N=31$ the applied pitch is $0.84$, $0.88$ and $0.93$ of the designed pitch at hub, midspan and tip. The narrowest gap is $0.75$, $0.81$ and $0.88$ of the design: about $1.6$ times the pitch change. Even with a matching $N$, a span of $\pm h/(2R_{\rm ref})$ around the reference radius would change the throat by about $\pm 8\,\%$ at hub and tip for this row.
+
+### 12.4 Option C: conformal similarity with chord proportional to radius
+
+Choose the chord so that the conformal chord is constant:
+
+$$
+c(r)=c_{\rm ref}\,\frac{r}{R_{\rm ref}},
+\qquad
+\frac{c_{\rm tip}}{c_{\rm hub}}=\frac{r_{\rm tip}}{r_{\rm hub}}.
+\tag{46}
+$$
+
+Then $m'$-chord and pitch are the same on every sheet. Every cylinder carries the same $q$-section, i.e. an exactly similar copy of the planar design, scaled by $r/R_{\rm ref}$. Angles, pitch-to-chord ratio, throat-to-pitch ratio and area ratio are all those of the MoC design, provided the blade count matches:
+
+$$
+N=\frac{2\pi R_{\rm ref}}{s_d\,c(R_{\rm ref})/c_d}.
+\tag{47}
+$$
+
+In practice, round (47) to an integer and adjust the chord or $R_{\rm ref}$ slightly to make it exact. The throat grows in proportion to $r$, consistent with the annulus. No section scaling or core deformation is required between span stations.
+
+No endwall flaring is needed: hub and shroud remain cylinders and the blade height is unchanged. Only the planform becomes slightly trapezoidal. The leading edge stays at $z=0$ and the trailing edge lies at $z=r\,m'_{\rm TE}$, slightly further downstream toward the tip. For the default row ($r=100$–$110$ mm) the chord grows from $20$ to $22$ mm.
+
+The current app supports this through its `hub_chord`/`tip_chord` inputs. It suggests $N=\lceil N^*\rceil$ (§12.6); exact matching would still require rounding to the nearest count and a small chord adjustment. For the default stator with chord $20\to22$ mm:
+
+| Blade count | Section scale (hub/mid/tip) | Pitch / design | Throat / design |
+| --- | --- | --- | --- |
+| $N=31$ | $1/1/1$ | $0.84$ at every radius | $0.75$ at every radius |
+| $N=26$ | $1/1/1$ | $1.002$ at every radius | $1.004$ at every radius |
+
+### 12.5 Comments
+
+- All three options use the same planar MoC solution. They differ in how its section is stacked along the span, not in the characteristic calculation.
+- Option C is the only one reproducing the designed nozzle on every sheet. It requires a tapered chord and a matched blade count.
+- Option A changes the angles but nearly preserves the passage widths at high stagger. Option B preserves the angles but changes the passage away from one radius, and everywhere if $N$ is not matched.
+- These statements assume cylindrical sheets. For radial or mixed-flow rows $G_r\neq0$ (§11.4), and none of the stacking options reproduces a planar solution exactly. The sourced equations of §6 are then required.
+- None of the options includes spanwise equilibrium. The sheets remain prescribed (§5.2).
+
+### 12.6 Blade count and sizing in the applications
+
+**Legacy app (mass-flow sizing).** The inputs were $\dot m$, $N$ and $r_h$. The planar design was scaled uniformly by
+
+$$
+k=\frac{2\pi r_h/N}{s_d},
+\qquad
+H=\frac{\dot m}{\rho_*a_*\,k\,o_d\,N},
+\tag{48}
+$$
+
+so the hub pitch equalled the scaled design pitch and the blade height $H$ followed from sonic flow through the hub throat (`size_stator_mode_a`). The hub section was therefore the MoC design, and the mass flow was a specified input. The span was then built with Option A, and the throat over the full height was taken equal to the hub throat.
+
+**New app (geometric sizing).** The inputs are the meridional dimensions: hub radius, blade height, hub and tip chord (or inlet and outlet radii for a radial row). Mass flow is not an input. After each successful MoC or vortex solve, `apps/app/blade_counts.py` computes a natural blade count from the solver's own passage:
+
+$$
+k_d=\frac{s_d}{c_d},
+\qquad
+N^*=\frac{2\pi}{k_d\,C'},
+\qquad
+C'=\int_{\rm LE}^{\rm TE}\frac{dm}{r}\Big|_{\eta=0.5}.
+\tag{49}
+$$
+
+Here $s_d$ is the native pitch and $c_d$ the native meridional chord: for the stator, the axial extent of the fitted blade contour; for the rotor, the axial extent of the vortex blade, whose pitch is the vortex method's natural spacing. For an axial row $C'=c_{\rm mid}/R_{\rm ref}$, so (49) is (47) evaluated at midspan. For a radial row with flat endwalls $C'=\lvert\ln(r_{\rm out}/r_{\rm in})\rvert$ is the same at every span. For a linear cascade the app reports the natural pitch $k_d\,c$ instead of a count.
+
+The app then sets the row's $N=\max(2,\lceil N^*\rceil)$ and lets the user override it. It displays $N^*$, the natural pitch and the deviation of the applied pitch. A new successful solve resets the count; geometry edits update the reference without overwriting a manual count. The applied pitch is still $2\pi R_{\rm ref}/N$ (Option B), so the designed passage is reproduced exactly only if $N=N^*$ at the reference radius.
+
+This makes the stator and the rotor each consistent with their own solver passage, which was not ensured before. The two rows may have different counts.
+
+**Remaining deviations.** For the default Cyclopentane stator ($R_{\rm ref}=105$ mm, height $10$ mm), with pitch and throat relative to the natural values at hub, midspan and tip:
+
+| Row | $N^*$ | $N$ | Pitch / natural | Throat / natural |
+| --- | --- | --- | --- | --- |
+| Stator, constant chord $20$ mm | $27.36$ | $28$ | $0.93$, $0.98$, $1.02$ | $0.88$, $0.96$, $1.04$ |
+| Stator, chord $\propto r$ ($20\to22$ mm) | $26.05$ | $27$ | $0.965$ at every span | $0.94$ at every span |
+| Stator, chord $\propto r$, $N=26$ | $26.05$ | $26$ | $1.002$ at every span | $1.004$ at every span |
+| Rotor (vortex), constant chord | $26.94$ | $27$ | $0.998$ at midspan | — |
+
+Two effects remain:
+
+1. **Rounding.** Rounding $N^*$ up always gives a smaller pitch, and the throat narrows by about $1.6$ times the pitch change. The pitch error is at most $1/N$. Rounding to the nearest integer would halve the average error. Adjusting a continuous dimension instead, for example $c_{\rm mid}=2\pi R_{\rm ref}/(k_dN)$, would remove it. Neither is implemented.
+2. **Span.** With a constant chord the count is exact at midspan only, and the throat varies across the span roughly as $(r/R_{\rm ref})^{1.6}$, here $-12\,\%$ to $+4\,\%$. With chord $\propto r$ (Option C), one count applies to the whole span.
+
+**Mass flow is now an output.** The geometry and the planar solution fix the throat, so the stage capacity follows from the chosen dimensions. The app does not compute a throat-based capacity. It only estimates a mass flow for the specific-speed rotor input (`apps/app/rotor_speed.py`), from stator exit continuity over the full annulus without blade blockage: $\dot m\approx\rho_e\,M_ea_e\cos\alpha_e\,\pi(r_t^2-r_h^2)$. A throat-based estimate consistent with (48), $\dot m\approx\rho_*a_*\,N\int o(r)\,dr$, would follow directly from the mapped sections.
+
+### 12.7 Throat half-height and shape parameters
+
+After uniform scaling, only scale-free ratios of the planar design reach the machine: pitch-to-chord, throat-to-pitch and area ratio. The absolute throat half-height $y_t$ therefore cancels. Doubling $y_t$ at fixed shape doubles the design chord and pitch, and the scale factor $k$ (pitch-based or chord-based) halves.
+
+In the solver, however, the kernel-arc radius $\rho_d$ (`rotation_around_center`: centre at $(0,\rho_d+y_t)$) and the Sauer throat curvature $\rho_t$ are absolute lengths, and so is the blade's trailing-edge radius $r_{\rm TE}$ (`r_trailing`). Changing $y_t$ alone therefore changes the shape through $\rho_d/y_t$, $\rho_t/y_t$ and $r_{\rm TE}/y_t$. For the nitrogen test case ($P_0=5$ bar, $T_0=300$ K, $p_{\rm back}=1$ bar, $\alpha_{\rm out}=65^\circ$), with $N^*$ for a $20$ mm chord at $R_{\rm ref}=105$ mm:
+
+| Case | Exit $M$ | Nozzle length $/\,y_t$ | Pitch / chord | Throat / pitch | $N^*$ |
+| --- | --- | --- | --- | --- | --- |
+| $y_t=10$ mm; $\rho_t,\rho_d,r_{\rm TE}=0.2,\,0.1,\,0.5$ | $1.7088$ | $4.75$ | $1.134$ | $0.152$ | $29.1$ |
+| $y_t=20$ mm; same absolute $\rho_t,\rho_d,r_{\rm TE}$ | $1.7087$ | $4.07$ | $1.214$ | $0.155$ | $27.2$ |
+| $y_t=20$ mm; $\rho_t,\rho_d,r_{\rm TE}$ doubled | $1.7088$ | $4.75$ | $1.134$ | $0.152$ | $29.1$ |
+
+The exit Mach number is unchanged in all three cases, since the area ratio is set by the back pressure. The third case is a pure scaling and gives the same machine as the first. The relevant design parameters are $\rho_d/y_t$ (kernel curvature, hence nozzle length and chord), $\rho_t/y_t$ and $r_{\rm TE}/y_t$ (exit blockage in the pitch relation), together with the exit Mach number, the metal angles and `inlet_opening_ratio`.
+
+> **TODO.** Expose $\rho_t$, $\rho_d$ and `r_trailing` as multiples of $y_t$ (e.g. `rho_t_ratio`, `rho_d_ratio`, `r_trailing_ratio`) in `design_nozzle`, `parametrize_stator_blade`, the YAML schema and both apps. $y_t$ then becomes a pure length scale with no effect on the scaled machine, and the inputs read as shape parameters. Keep the absolute inputs readable for existing YAML files by converting them on load.
+
+## 13. Verification before using the method for blade design
 
 1. **Planar recovery:** Set $r,b$ constant and recover the existing planar characteristic states and wall geometry after uniform dimensional scaling.
 2. **Radial meridional flow:** For $\alpha = 0$, no circumferential dependence, and constant $b$, verify $r\rho v=\mathrm{constant}$ and
@@ -732,7 +912,7 @@ This integral, rather than only the net change in radius, measures the direct di
 
 For these notes, the signs in (25) and (30) were checked numerically against the exact swirling radial state (43). With a calorically perfect gas, $\gamma = 1.4$, nondimensional stagnation sound speed $a_0 = 1$, reference speed $v_0 = 1.7$, reference angle $\alpha_0=0.25\,\mathrm{rad}$, and constant thickness, centered differences in $\xi$ with step $10^{-5}$ gave characteristic compatibility residuals below $3\times10^{-11}$ at $\xi = 0.05$. This validates the stated sign convention against that exact benchmark; it is not a convergence test of a complete MoC code.
 
-## 13. Recommended development sequence
+## 14. Recommended development sequence
 
 Implement one characteristic-point engine with configurable geometry, rather than maintaining unrelated planar and curved-sheet solvers:
 
@@ -755,12 +935,26 @@ stack sections and assess three-dimensional consistency
 
 Use the constant-$r,b$ configuration as the planar regression case. Add the radial axisymmetric benchmarks before inverse blade construction. For general mixed-flow design, obtain initial sheet geometry and thickness from throughflow or a preliminary 3D solution, then iterate them when the final flow departs materially from those assumptions.
 
-## 14. References and relation to the derivation
+## 15. References and relation to the derivation
 
 [1] Niemeyer, K. **Method of characteristics**, *Gas Dynamics Notes*. Conventional planar characteristic directions, compatibility equations, and unit processes. https://kyleniemeyer.github.io/gas-dynamics-notes/compressible-flows/method-characteristics/
 
 [2] Wu, C.-H. (1952). **A general theory of three-dimensional flow in subsonic and supersonic turbomachines of axial-, radial-, and mixed-flow types.** NACA TN 2604. General stream-surface framework and the distinction between reduced surface calculations and full three-dimensional flow. https://ntrs.nasa.gov/citations/19930083325
 
 [3] Bölcs, A., and Tsamourtzis, V. (1991). **Quasi-Three-Dimensional Characteristics Method for a Supersonic Compressor Rotor.** ASME Paper 91-GT-081. DOI: 10.1115/91-GT-081. The retrieved abstract describes a characteristic formulation on an axisymmetric stream surface with variable radius and stream-tube thickness. Its complete rotor equations were not used to derive the stationary reduced equations in these notes. https://sonar.ch/global/documents/194127
+
+[4] Tsamourtzis, V., and Bölcs, A. (1996). **Quasi-Three-Dimensional Simplified Method for a Transonic Compressor Rotor.** ASME Paper 96-GT-40. Follow-up to [3]; only the bibliographic record was consulted. https://infoscience.epfl.ch/record/118583
+
+[5] Zucrow, M. J., and Hoffman, J. D. (1977). **Gas Dynamics, Vol. II: Multidimensional Flow.** Wiley. Classical planar and axisymmetric method of characteristics; the axisymmetric compatibility relations contain a geometric source term of the same structure as (28) (§11.6).
+
+[6] Anand, N., Vitale, S., Pini, M., Otero Rodriguez, G. J., and Pecnik, R. (2019). **Design methodology for supersonic radial vanes operating in nonideal flow conditions.** *Journal of Engineering for Gas Turbines and Power* 141(2), 022601. DOI: 10.1115/1.4040182. Nonideal MoC for the diverging section of an ORC radial stator (toluene), followed by a conformal transformation to the radial vane. Open-source implementation: https://github.com/NAnand-TUD/open-moc. https://research.tudelft.nl/files/90254746/gtp_141_02_022601.pdf
+
+[7] de Servi, C. M., Burigana, M., Pini, M., and Colonna, P. (2019). **Design method and performance prediction for radial-inflow turbines of high-temperature mini-organic Rankine cycle power systems.** *Journal of Engineering for Gas Turbines and Power* 141(9), 091021. DOI: 10.1115/1.4043973. Uses the nonideal MoC of [6] for the stator diverging section.
+
+[8] Otero R., G. J., Smit, S. H. H. J., and Pecnik, R. (2021). **Three-dimensional unsteady stator-rotor interactions in high-expansion organic Rankine cycle turbines.** *Energy* 217, 119339. DOI: 10.1016/j.energy.2020.119339. Stator nozzle designed by MoC for near-critical fluids and converted to a radial configuration by a conformal mapping described as preserving area ratio and outflow angle.
+
+[9] Cappiello, A., and Tuccillo, R. (2021). *International Journal of Turbomachinery, Propulsion and Power* 6(3), 38. DOI: 10.3390/ijtpp6030038. Convergent–divergent radial-inflow ORC stators with an MoC nozzle adapted to dense gases; trade-off between stator efficiency and downstream flow uniformity.
+
+**Relation to the ORC literature.** In [6]–[9] the supersonic stator is designed with a planar (nonideal) MoC and then placed on the radial machine by a conformal mapping. As shown in §11.1, §11.4 and §12, this is exact only on cylindrical sheets of constant thickness; on radial sheets the mapped planar walls do not produce the planar Mach field, the discrepancy being the integral (41) of the sources (30). Only abstracts and bibliographic records of [3], [4] and [6]–[9] were consulted for these notes. Their full texts should be checked for corrections partly accounting for this effect, for example the "area-ratio preserving" mapping of [8]. No characteristics method combining the stream-sheet sources with a nonideal or two-phase equation of state for supersonic turbine stators was found in that limited search.
 
 Equations (18)–(33) are derived here from thin-sheet continuity, the stated tangential potential relation, and the common-isentrope thermodynamic reduction. They should be extended from the governing equations, rather than reused unchanged, when relaxing uniform entropy, uniform stagnation enthalpy, stationarity, or the axisymmetric-sheet approximation.
