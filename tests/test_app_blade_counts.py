@@ -7,9 +7,9 @@ import pytest
 import yaml
 from dash import no_update
 
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app import create_app, blade_counts, calculations, workflow as flow
-from turbo_moc.apps.app.application import read_uploaded_project
+from turbo_moc.configuration import project as projects
+from turbo_moc.app import create_app, blade_counts, calculations, workflow as flow
+from turbo_moc.app.application import read_uploaded_project
 
 
 @pytest.mark.parametrize("family", ["axial", "radial", "linear"])

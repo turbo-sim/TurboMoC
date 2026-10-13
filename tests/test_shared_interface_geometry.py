@@ -2,10 +2,10 @@
 import numpy as np
 import pytest
 
-from turbo_moc.configuration_project import default_project, row_configuration
-from turbo_moc.geometry import geometry_3d as geometry
+from turbo_moc.configuration.project import default_project, row_configuration
+from turbo_moc.geometry import blade_row as geometry
 from turbo_moc.geometry.meridional_channel import corresponding_boundary
-from turbo_moc.meshing import meshing_3d as meshing
+from turbo_moc.meshing import mesh_3d as meshing
 
 
 def small_design_config():
@@ -69,7 +69,7 @@ def test_boundary_correspondence_retains_native_spline_parameters():
 
 
 def test_refined_preview_retains_physical_axial_cap():
-    from turbo_moc.apps.app.preview import preview_geometry
+    from turbo_moc.visualization.geometry_preview import preview_geometry
 
     nozzle, config = small_design_config()
     config["assembly"] = {"interfaces": {"outlet": {

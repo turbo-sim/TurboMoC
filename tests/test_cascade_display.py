@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip("dash_vtk")
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app.application import create_app
-from turbo_moc.apps.app import display_panel as display
+from turbo_moc.configuration import project as projects
+from turbo_moc.app.application import create_app
+from turbo_moc.app import display_panel as display
 
 
 @pytest.fixture

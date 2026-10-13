@@ -7,13 +7,13 @@ import gmsh
 import numpy as np
 import pytest
 
-from turbo_moc.configuration import read_configuration
-from turbo_moc.geometry import geometry_3d as geo
+from turbo_moc.configuration.row import read_configuration
+from turbo_moc.geometry import blade_row as geo
 from turbo_moc.geometry.linear_cascade import LinearCascadeDefinition, LinearCascadeMapping
 from turbo_moc.geometry.meridional_channel import validate_machine
-from turbo_moc.meshing import meshing_3d as mesh
+from turbo_moc.meshing import mesh_3d as mesh
 from turbo_moc.meshing.quality import analyze_volume
-from turbo_moc.geometry import parametrize_stator_blade
+from turbo_moc.geometry.stator_blade import parametrize_stator_blade
 from turbo_moc.io.cgns_adf import read_adf
 
 
@@ -175,7 +175,7 @@ def test_annular_reference_export_labels_conformal_basis(linear_case, tmp_path):
 
 @pytest.mark.parametrize("family", ["axial", "radial"])
 def test_annular_assembly_offset_is_axial_only(linear_case, family):
-    from turbo_moc.apps.app import plots
+    from turbo_moc.app import plots
     nozzle, config = linear_case
     config["meridional_channel"] = read_configuration(
         f"examples/apps/cases/{family}_stator.yaml"
@@ -193,7 +193,7 @@ def test_annular_assembly_offset_is_axial_only(linear_case, family):
 
 
 def test_linear_geometry_preview_remains_closed_without_annular_parameters(linear_case):
-    from turbo_moc.apps.app.preview import preview_geometry
+    from turbo_moc.visualization.geometry_preview import preview_geometry
     nozzle, config = linear_case
     design = geo.build_design(nozzle, config)
     preview = preview_geometry(design, span_sections=5, curve_points=60)

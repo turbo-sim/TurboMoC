@@ -3,8 +3,8 @@ from copy import deepcopy
 
 import pytest
 
-from turbo_moc import configuration_project as projects
-from turbo_moc.configuration_rotor import default_axial_interspace_mm, inlet_radius_mm
+from turbo_moc.configuration import project as projects
+from turbo_moc.configuration.rotor import default_axial_interspace_mm, inlet_radius_mm
 
 
 def test_planning_row_migrates_without_changing_geometry_dimensions_or_mesh():

@@ -1,14 +1,9 @@
-"""Checks for turbo_moc.geometry.sizing: pure post-hoc rescaling of a Phase 2
+"""Checks for turbo_moc.legacy.geometry.sizing: pure post-hoc rescaling of a Phase 2
 cascade blade, and the Case A / Case B stator-sizing closed forms."""
 
 import numpy as np
 
-from turbo_moc.geometry import (
-    compute_throat_sonic_state,
-    rescale_stator_blade,
-    size_stator_mode_a,
-    size_stator_mode_b,
-)
+from turbo_moc.legacy.geometry.sizing import compute_throat_sonic_state, rescale_stator_blade, size_stator_mode_a, size_stator_mode_b
 
 FLUID_NAME = "Nitrogen"
 

@@ -5,12 +5,12 @@ import gmsh
 import numpy as np
 import pytest
 
-from turbo_moc.configuration_project import default_project, row_configuration
+from turbo_moc.configuration.project import default_project, row_configuration
 from turbo_moc.geometry import meridional_channel as meridional
 from turbo_moc.io.cgns_adf import read_adf
 from turbo_moc.io.cgns_adf import read_adf_bytes
 from turbo_moc.io.cgns_stage import combine_rows
-from turbo_moc.meshing import meshing_3d as mesh
+from turbo_moc.meshing import mesh_3d as mesh
 
 
 def _tiny_section(mapping):

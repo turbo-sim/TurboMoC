@@ -35,8 +35,8 @@ def components(value):
 
 
 def row_state(config, registry=None, row_id="stator_1"):
-    from turbo_moc import configuration_project as projects
-    from turbo_moc.apps.app import workflow as flow
+    from turbo_moc.configuration import project as projects
+    from turbo_moc.app import workflow as flow
 
     project = projects.normalize_project(config)
     project["rows"][0]["id"] = row_id

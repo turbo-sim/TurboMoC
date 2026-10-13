@@ -24,10 +24,10 @@ def without_barotropy(monkeypatch):
 def mesh_example():
     with pytest.MonkeyPatch.context() as patch:
         patch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
-        runner = importlib.import_module("turbo_moc.meshing.meshing_2d")
-        meshing = importlib.import_module("turbo_moc.meshing.meshing_2d")
-        from turbo_moc.configuration_2d import read_configuration
-        from turbo_moc.geometry import geometry_2d
+        runner = importlib.import_module("turbo_moc.meshing.mesh_2d")
+        meshing = importlib.import_module("turbo_moc.meshing.mesh_2d")
+        from turbo_moc.configuration.planar import read_configuration
+        from turbo_moc.geometry import passage_2d as geometry_2d
         config = read_configuration(Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml")
         # Exercise real blade fitting and automatic passage placement without
         # solving a thermodynamic MoC case. Keep the test mesh and plots small.
@@ -144,7 +144,7 @@ def test_mesh_workflow_exports_a_usable_periodic_mesh(
 
 
 def test_explicit_moc_calls_always_solve_and_do_not_write_files(monkeypatch, tmp_path):
-    from turbo_moc.geometry import moc
+    from turbo_moc.workflows import nozzle as moc
     result = {"converged": True, "wall_final": {"x": [0, 0.05], "y": [0.01, 0.015]}}
     solve = Mock(return_value=result)
     monkeypatch.setattr(moc.turbo_moc, "design_nozzle", solve)
@@ -166,7 +166,7 @@ def test_explicit_moc_calls_always_solve_and_do_not_write_files(monkeypatch, tmp
     {"x": [0], "y": [1]},
 ])
 def test_moc_rejects_unusable_converged_walls(monkeypatch, wall):
-    from turbo_moc.geometry import moc
+    from turbo_moc.workflows import nozzle as moc
     monkeypatch.setattr(moc.turbo_moc, "design_nozzle",
                         Mock(return_value={"converged": True, "wall_final": wall}))
     with pytest.raises(RuntimeError, match="did not converge"):
@@ -193,7 +193,8 @@ def test_planar_workflow_obeys_yaml_controls(
     import yaml
     import jaxprop as jxp
     import matplotlib.pyplot as plt
-    from turbo_moc.geometry import geometry_2d, moc
+    from turbo_moc.geometry import passage_2d as geometry_2d
+    from turbo_moc.workflows import nozzle as moc
 
     runner, _, blade, curves, _ = mesh_example
     source = Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml"
@@ -246,8 +247,8 @@ def test_planar_workflow_obeys_yaml_controls(
 ])
 def test_invalid_workflow_settings_fail_before_moc(monkeypatch, tmp_path, section, key, value):
     import yaml
-    from turbo_moc.geometry import moc
-    from turbo_moc.meshing import meshing_2d
+    from turbo_moc.workflows import nozzle as moc
+    from turbo_moc.meshing import mesh_2d as meshing_2d
 
     source = Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml"
     config = yaml.safe_load(source.read_text())

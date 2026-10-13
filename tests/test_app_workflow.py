@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from turbo_moc.apps.app import workflow as flow
-from turbo_moc import configuration_project as projects
+from turbo_moc.app import workflow as flow
+from turbo_moc.configuration import project as projects
 from app_helpers import call, row_state
 
 CASE_DIR = Path(__file__).resolve().parents[1] / "examples/apps/cases"
@@ -51,7 +51,7 @@ def test_new_moc_job_invalidates_downstream_artifacts_with_unchanged_inputs(smal
 
 def test_each_moc_worker_solves_and_hands_off_only_its_own_result(
         small_design, tmp_path, monkeypatch):
-    from turbo_moc.apps.app import worker
+    from turbo_moc.app import worker
     nozzle, config = small_design
     calls = []
     def solve(parameters, *, progress_callback):
@@ -90,7 +90,7 @@ def test_job_service_requires_current_2d_before_launching_volume(small_design, m
 
 def test_submission_and_polling_keep_separate_outputs(small_design, monkeypatch):
     """A periodic poll response cannot replace/discard a submitted worker handle."""
-    from turbo_moc.apps.app import create_app
+    from turbo_moc.app import create_app
     _, config = small_design
     app = create_app()
     handle = {"session": "a" * 32, "job": "b" * 32, "action": "nozzle",
@@ -119,7 +119,7 @@ def test_submission_and_polling_keep_separate_outputs(small_design, monkeypatch)
 
 
 def test_machine_family_switch_preserves_row_design_and_mesh_inputs():
-    from turbo_moc.apps.app import create_app
+    from turbo_moc.app import create_app
     config = flow.read_configuration(CASES["axial_stator"])
     config["method_of_characteristics"]["n"] = 18
     config["flow_domain"]["outlet_chords"] = 2.7
@@ -143,7 +143,7 @@ def test_machine_family_switch_preserves_row_design_and_mesh_inputs():
 
 @pytest.mark.parametrize("action,destination", [("reference","mesh"), ("volume","mesh")])
 def test_only_successful_meshing_navigates_to_result(action, destination, tmp_path, monkeypatch):
-    from turbo_moc.apps.app import create_app
+    from turbo_moc.app import create_app
     from dash import no_update
     monkeypatch.setattr(flow, "OUTPUT", tmp_path)
     app = create_app()
@@ -170,7 +170,7 @@ def test_only_successful_meshing_navigates_to_result(action, destination, tmp_pa
 
 
 def test_completed_job_is_merged_into_its_row_even_when_that_row_is_inactive(tmp_path, monkeypatch):
-    from turbo_moc.apps.app import create_app
+    from turbo_moc.app import create_app
     from dash import no_update
     monkeypatch.setattr(flow, "OUTPUT", tmp_path)
     project = projects.set_design_mode(projects.default_project(), "rotor")

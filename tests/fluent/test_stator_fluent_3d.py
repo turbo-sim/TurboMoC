@@ -6,11 +6,13 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
+import jaxprop as jxp
 import numpy as np
 import pytest
 import yaml
 
 from turbo_moc.fluent import import_checks, workflow_3d as workflow
+from turbo_moc.configuration.fluid_inputs import pair_properties
 from turbo_moc.geometry.linear_cascade import (
     LinearCascadeDefinition,
     LinearCascadeMapping,
@@ -61,6 +63,35 @@ def test_selects_supported_stationary_stator_rows(raw_workflow, family):
     raw_workflow["design_file"] = str(CASES / f"{family}_stator.yaml")
     _, config = workflow.validate_workflow(raw_workflow, WORKFLOW_FILE)
     assert config["meridional_channel"]["type"] == family
+
+
+@pytest.mark.parametrize("pair", ["PQ_INPUTS", "QT_INPUTS", "HmassP_INPUTS"])
+@pytest.mark.parametrize("expands", [True, False], ids=["expansion", "no-expansion"])
+def test_pair_validation_resolves_pressure_in_jaxprop_input_order(
+    raw_workflow, tmp_path, pair, expands
+):
+    project = yaml.safe_load((CASES / "linear_stator.yaml").read_text(encoding="utf-8"))
+    inlet = jxp.Fluid(project["machine"]["fluid_name"]).get_state(jxp.PQ_INPUTS, 251300., .025)
+    properties = {"P": float(inlet.p), "T": float(inlet.T),
+                  "Q": float(inlet.Q), "Hmass": float(inlet.h)}
+    first, second = pair_properties(pair)
+    inputs = project["rows"][0]["geometry"]["method_of_characteristics"]
+    inputs.update(inlet_property_pair=pair, inlet_property_1=properties[first],
+                  inlet_property_2=properties[second],
+                  p_back=95000. if expands else float(inlet.p) * 1.01)
+    design_file = tmp_path / "paired_inlet.yaml"
+    design_file.write_text(yaml.safe_dump(project), encoding="utf-8")
+    raw_workflow["design_file"] = str(design_file)
+    if not expands:
+        with pytest.raises(ValueError, match="p_back"):
+            workflow.validate_workflow(raw_workflow, WORKFLOW_FILE)
+        return
+    _, config = workflow.validate_workflow(raw_workflow, WORKFLOW_FILE)
+    actual = config["method_of_characteristics"]
+    assert actual["inlet_property_pair"] == pair
+    assert actual["inlet_property_1"] == inputs["inlet_property_1"]
+    assert actual["inlet_property_2"] == inputs["inlet_property_2"]
+    assert not {"P0", "T0", "Q0"} & actual.keys()
 
 
 @pytest.mark.parametrize("missing", ["z-velocity", "hub", "shroud"])

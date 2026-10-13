@@ -6,9 +6,9 @@ import time
 
 import pytest
 
-from turbo_moc.configuration import read_configuration, to_shared
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app import workflow as flow
+from turbo_moc.configuration.row import read_configuration, to_shared
+from turbo_moc.configuration import project as projects
+from turbo_moc.app import workflow as flow
 
 
 def test_legacy_cases_and_project_cases_share_the_same_row_contract():
@@ -169,7 +169,7 @@ def test_job_snapshot_rejects_mismatched_row_configuration(monkeypatch):
 
 
 def test_worker_2d_export_reports_row_and_reads_only_selected_reference(tmp_path, monkeypatch):
-    from turbo_moc.apps.app import worker
+    from turbo_moc.app import worker
     config = read_configuration(CASES["axial_stator"])
     reference = {"session": "a" * 32, "job": "b" * 32, "row_id": "stator_2"}
     request = {"config": config, "references": {"reference": reference},
@@ -306,7 +306,7 @@ FLUENT_CONFIG = Path(__file__).resolve().parents[1] / "examples/fluent_2D/workfl
 
 @pytest.mark.parametrize("action", ["reference", "volume"])
 def test_app_mesh_jobs_generate_cgns_and_remove_native_mesh(action, tmp_path, monkeypatch):
-    from turbo_moc.apps.app import worker
+    from turbo_moc.app import worker
     config = read_configuration(CASES["axial_stator"])
     config["mesh"]["cgns"]["enabled"] = False  # App output remains mandatory.
     reference = {"session": "a" * 32, "job": "b" * 32, "row_id": "stator_1"}

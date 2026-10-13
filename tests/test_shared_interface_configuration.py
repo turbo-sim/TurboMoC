@@ -4,9 +4,9 @@ from copy import deepcopy
 import pytest
 import yaml
 
-from turbo_moc import configuration_project as projects
-from turbo_moc.configuration import read_configuration
-from turbo_moc.apps.app import workflow as flow
+from turbo_moc.configuration import project as projects
+from turbo_moc.configuration.row import read_configuration
+from turbo_moc.app import workflow as flow
 
 
 def test_tapered_axial_interface_is_in_minimum_gap_and_does_not_overwrite_inputs(tmp_path):

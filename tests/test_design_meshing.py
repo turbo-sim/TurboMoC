@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 from scipy.interpolate import BSpline
 
-from turbo_moc.geometry import geometry_3d as geo
-from turbo_moc.apps.app import workflow as flow
-from turbo_moc.meshing import meshing_3d as mesh
+from turbo_moc.geometry import blade_row as geo
+from turbo_moc.app import workflow as flow
+from turbo_moc.meshing import mesh_3d as mesh
 from turbo_moc.meshing.quality import analyze_volume
 
 CASE_DIR = Path(__file__).resolve().parents[1] / "examples/apps/cases"

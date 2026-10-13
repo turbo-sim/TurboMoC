@@ -1,4 +1,4 @@
-"""Checks for the radial-wrap CAD solid (turbo_moc.geometry.blade's
+"""Checks for the radial-wrap CAD solid (turbo_moc.geometry.stator_blade's
 _build_radial_blade_solid / export_radial_blade_step / _stl) and for the
 conformal map's exact inlet/outlet radius identity the Phase 4 radial
 cascade's gap readout relies on."""
@@ -6,16 +6,12 @@ cascade's gap readout relies on."""
 import numpy as np
 import pytest
 
-from turbo_moc.geometry.blade import parametrize_stator_blade
-from turbo_moc.geometry.radial import wrap_blade_radial, wrap_curve_radial, wrap_rotor_blade_radial
+from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+from turbo_moc.legacy.geometry.radial import wrap_blade_radial, wrap_curve_radial, wrap_rotor_blade_radial
 
 cq = pytest.importorskip("cadquery")
 
-from turbo_moc.geometry.blade import (  # noqa: E402  (needs cadquery present)
-    _build_radial_blade_solid,
-    export_radial_blade_step,
-    export_radial_blade_stl,
-)
+from turbo_moc.geometry.stator_blade import _build_radial_blade_solid, export_radial_blade_step, export_radial_blade_stl
 
 DEPTH = 5.0
 

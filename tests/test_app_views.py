@@ -6,9 +6,9 @@ import numpy as np
 import pytest
 from scipy.interpolate import BSpline
 
-from turbo_moc.geometry import geometry_3d as geo
-from turbo_moc.apps.app import workflow as flow
-from turbo_moc import configuration_project as projects
+from turbo_moc.geometry import blade_row as geo
+from turbo_moc.app import workflow as flow
+from turbo_moc.configuration import project as projects
 from app_helpers import row_state
 
 CASE_DIR = Path(__file__).resolve().parents[1] / "examples/apps/cases"
@@ -17,7 +17,7 @@ CASES = {n: CASE_DIR / f"{n}.yaml" for n in ("axial_stator", "radial_stator")}
 
 @pytest.mark.parametrize("family", ["axial", "radial", "curved"])
 def test_preview_blade_is_closed_and_has_smooth_normals(family, small_design):
-    from turbo_moc.apps.app.preview import preview_geometry
+    from turbo_moc.visualization.geometry_preview import preview_geometry
     nozzle, config = small_design
     definition = None
     if family == "radial":
@@ -60,7 +60,7 @@ def test_preview_blade_is_closed_and_has_smooth_normals(family, small_design):
 
 
 def test_meridional_mesh_is_empty_until_reference_is_current(small_design, monkeypatch):
-    from turbo_moc.apps.app import create_app
+    from turbo_moc.app import create_app
     nozzle, config = small_design
     design = geo.build_design(nozzle, config)
     monkeypatch.setattr(flow, "get_design", lambda *args: design)
@@ -80,7 +80,7 @@ def test_meridional_mesh_is_empty_until_reference_is_current(small_design, monke
 
 def test_volume_display_edits_preserve_2d_plots(small_design, monkeypatch):
     from dash import Patch, no_update
-    from turbo_moc.apps.app import application
+    from turbo_moc.app import application
     nozzle, config = small_design
     design = geo.build_design(nozzle, config)
     monkeypatch.setattr(flow, "get_design", lambda *args: design)
@@ -120,7 +120,7 @@ def test_volume_display_edits_preserve_2d_plots(small_design, monkeypatch):
 
 
 def test_row_visibility_filters_geometry_and_shared_mesh_projection(small_design, monkeypatch):
-    from turbo_moc.apps.app import application
+    from turbo_moc.app import application
     nozzle, config = small_design
     design = geo.build_design(nozzle, config)
     design.blade.update(natural_pitch=design.blade["pitch"], metal_angle_out=0.)
@@ -174,7 +174,7 @@ def test_row_visibility_filters_geometry_and_shared_mesh_projection(small_design
 @pytest.mark.parametrize("family,radii", [("axial", None),
     ("radial", (100., 80., 78., 60.)), ("radial", (80., 100., 102., 120.))])
 def test_shared_section_chart_preserves_interspace_and_interface(small_design, family, radii):
-    from turbo_moc.apps.app import plots
+    from turbo_moc.app import plots
     nozzle, base = small_design
     project = projects.set_design_mode(projects.default_project(family), "stator_rotor")
     stator, rotor = project["rows"]

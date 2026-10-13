@@ -1,4 +1,4 @@
-"""Checks for turbo_moc.geometry.radial's conformal-mapping length scale:
+"""Checks for turbo_moc.legacy.geometry.radial's conformal-mapping length scale:
 conformal_length_scale / mapped_throat_width -- the log-spiral map
 preserves angles, not lengths, so a 2D-plane length needs an exact local
 magnification factor to be valid once mapped onto the annulus."""
@@ -6,12 +6,7 @@ magnification factor to be valid once mapped onto the annulus."""
 import numpy as np
 import pytest
 
-from turbo_moc.geometry.radial import (
-    _reference_point_and_scale,
-    apply_conformal_mapping,
-    conformal_length_scale,
-    mapped_throat_width,
-)
+from turbo_moc.legacy.geometry.radial import _reference_point_and_scale, apply_conformal_mapping, conformal_length_scale, mapped_throat_width
 
 
 def test_conformal_length_scale_is_always_positive():
@@ -86,8 +81,8 @@ def test_radial_rotor_inlet_swirl_matches_stator_exit_swirl(stator_r, rotor_r):
     """The rotor's leading edge must face the stator's exit flow: same
     tangential sense at the interface. Regression for the rotor coming out
     with the opposite handedness (concavity against the incoming flow)."""
-    from turbo_moc.geometry.blade import parametrize_stator_blade
-    from turbo_moc.geometry.radial import wrap_blade_radial, wrap_rotor_blade_radial
+    from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+    from turbo_moc.legacy.geometry.radial import wrap_blade_radial, wrap_rotor_blade_radial
 
     wall_x = np.linspace(0.0, 10.0, 50)
     stator = parametrize_stator_blade(wall_x, 1.0 + 0.1 * wall_x, metal_angle_in=0.0,

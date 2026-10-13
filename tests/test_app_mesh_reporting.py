@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from turbo_moc.apps.app import application, mesh_reporting as reporting
-from turbo_moc import configuration_project as projects
+from turbo_moc.app import application, mesh_reporting as reporting
+from turbo_moc.configuration import project as projects
 from app_helpers import call, components
 
 CASES = Path(__file__).resolve().parents[1] / "examples/apps/cases"

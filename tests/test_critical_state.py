@@ -4,7 +4,7 @@ import jaxprop as jxp
 import numpy as np
 import pytest
 
-from turbo_moc.core.classes import jax_solve_critical_state
+from turbo_moc.core.thermo_characteristics import jax_solve_critical_state
 
 
 @pytest.mark.parametrize("fluid_name", ["CO2", "nitrogen"])

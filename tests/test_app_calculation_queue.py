@@ -5,8 +5,8 @@ from uuid import uuid4
 
 import pytest
 
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app import calculations, create_app, rotor_inlet, workflow as flow
+from turbo_moc.configuration import project as projects
+from turbo_moc.app import calculations, create_app, rotor_inlet, workflow as flow
 from app_helpers import call
 
 

@@ -10,6 +10,7 @@ import math
 import pytest
 
 import turbo_moc.api as api
+from turbo_moc.configuration.fluid_inputs import solver_parameters
 from turbo_moc.progress import make_progress_reporter
 from turbo_moc.reporting import (
     LINE_WIDTH,
@@ -67,7 +68,7 @@ def test_logging_context_restores_state_and_never_touches_root(tmp_path):
         log_file = tmp_path / f"run{run}.log"
         with logging_context(log_file, stream=stream):
             get_logger("workflows.gmsh.runner").info("workflow record")
-            logging.getLogger("turbo_moc.solvers.conventional").info("  MoC record")
+            logging.getLogger("turbo_moc.core.moc_conventional").info("  MoC record")
         assert stream.getvalue().splitlines() == ["workflow record", "  MoC record"]
         assert log_file.read_text(encoding="utf-8").splitlines() == ["workflow record", "  MoC record"]
         log_file.unlink()  # the handle was closed (Windows refuses to delete open files)
@@ -88,7 +89,7 @@ def test_workflow_and_meshing_loggers_share_the_handlers():
     stream = io.StringIO()
     with logging_context(stream=stream):
         get_logger("workflows.fluent.runner").info("fluent")
-        logging.getLogger("turbo_moc.meshing.stator_mesh_2d").info("mesh")
+        logging.getLogger("turbo_moc.legacy.meshing.stator_mesh_2d").info("mesh")
     assert stream.getvalue().splitlines() == ["fluent", "mesh"]
 
 
@@ -195,10 +196,12 @@ def _fake_solver(fail_attempts, exit_mach):
 def _design(monkeypatch, solver_class):
     monkeypatch.setattr(api, "ConventionalSolver", solver_class)
     monkeypatch.setattr(api, "get_fluid_manager", lambda *args, **kwargs: object())
+    inputs = solver_parameters(dict(fluid_name="Nitrogen", inlet_property_pair="PQ_INPUTS",
+                                    inlet_property_1=5e5, inlet_property_2=0.0))
     calls, stream = [], io.StringIO()
     with logging_context(stream=stream):
         try:
-            data = api.design_nozzle(fluid_name="Nitrogen", P0=5e5, Q0=0.0, p_back=1e5,
+            data = api.design_nozzle(**inputs, p_back=1e5,
                                      use_true_sauer_line=True, progress_callback=lambda f, l: calls.append((f, l)))
         except api.NozzleDesignError as error:
             data = error
@@ -235,9 +238,11 @@ def test_final_failure_propagates_without_being_logged_by_the_library(monkeypatc
 # ------------------------------------------------------------------ one small real run
 @pytest.mark.parametrize("solver", ["conventional", "mln"])
 def test_real_run_output_is_compact(solver):
+    inputs = solver_parameters(dict(fluid_name="Nitrogen", inlet_property_pair="PT_INPUTS",
+                                    inlet_property_1=5e5, inlet_property_2=300.0))
     stream = io.StringIO()
     with logging_context(stream=stream):
-        data = api.design_nozzle(fluid_name="Nitrogen", P0=5e5, T0=300.0, p_back=1e5, solver=solver, n=7)
+        data = api.design_nozzle(**inputs, p_back=1e5, solver=solver, n=7)
     text = stream.getvalue()
     lines = text.splitlines()
     assert data["converged"] and math.isfinite(data["exit_M"])

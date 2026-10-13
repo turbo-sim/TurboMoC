@@ -11,8 +11,8 @@ import yaml
 
 pytest.importorskip("dash_vtk")
 
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app import create_app, project_export, workflow as flow
+from turbo_moc.configuration import project as projects
+from turbo_moc.app import create_app, project_export, workflow as flow
 from turbo_moc.io.cgns_adf import read_adf_bytes
 from test_cgns_stage import row_file
 

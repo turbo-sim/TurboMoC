@@ -1,10 +1,10 @@
-"""Checks for turbo_moc.coupling.derive_rotor_inlet_from_stator: the
+"""Checks for turbo_moc.core.coupling.derive_rotor_inlet_from_stator: the
 absolute -> relative velocity triangle at the rotor inlet, from a stator
 exit static state plus a chosen blade speed."""
 
 import numpy as np
 
-from turbo_moc.coupling import derive_rotor_inlet_from_stator
+from turbo_moc.core.coupling import derive_rotor_inlet_from_stator
 
 FLUID_NAME = "Nitrogen"
 

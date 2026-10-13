@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from turbo_moc.apps.app import create_app, workflow, worker
-from turbo_moc.apps.app import workflow as flow
+from turbo_moc.app import create_app, workflow, worker
+from turbo_moc.app import workflow as flow
 from app_helpers import components
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +26,8 @@ CASES = {"axial_stator": ROOT / "examples/apps/cases/axial_stator.yaml"}
     ("stator_rotor", "stator_rotor", "axial", ["stator", "rotor"]),
 ])
 def test_sample_projects_build_the_requested_workspaces(filename, mode, family, roles):
-    from turbo_moc.apps.app import create_app
-    from turbo_moc.configuration_project import active_rows
+    from turbo_moc.app import create_app
+    from turbo_moc.configuration.project import active_rows
     cases = ROOT / "examples/apps/cases"
 
     application = create_app(cases / f"{filename}.yaml")
@@ -50,8 +50,8 @@ def test_sample_projects_build_the_requested_workspaces(filename, mode, family, 
 
 
 def test_jobs_use_the_installed_worker_module_and_writable_output(monkeypatch, tmp_path_factory):
-    from turbo_moc.apps.app import workflow
-    from turbo_moc.configuration import read_configuration
+    from turbo_moc.app import workflow
+    from turbo_moc.configuration.row import read_configuration
 
     launches = []
 
@@ -70,7 +70,7 @@ def test_jobs_use_the_installed_worker_module_and_writable_output(monkeypatch, t
     folder = workflow.directory(handle)
     assert folder.is_relative_to(output) and not folder.is_relative_to(PACKAGE)
     command, options = launches[0]
-    assert command[:4] == [sys.executable, "-u", "-m", "turbo_moc.apps.app.worker"]
+    assert command[:4] == [sys.executable, "-u", "-m", "turbo_moc.app.worker"]
     assert Path(command[4]) == folder / "request.json"
     assert options["cwd"] == folder
     request = json.loads((folder / "request.json").read_text(encoding="utf-8"))
@@ -93,9 +93,9 @@ class RejectExamples(importlib.abc.MetaPathFinder):
         if fullname == 'barotropy' or fullname == 'cadquery' or fullname.startswith('ansys.fluent'):
             raise AssertionError('App startup requires an optional dependency: ' + fullname)
 sys.meta_path.insert(0, RejectExamples())
-from turbo_moc.apps.app import create_app, worker, workflow
-from turbo_moc.geometry import geometry_2d, geometry_3d, meridional_channel
-from turbo_moc.meshing import meshing_2d, meshing_3d
+from turbo_moc.app import create_app, worker, workflow
+from turbo_moc.geometry import passage_2d as geometry_2d, blade_row as geometry_3d, meridional_channel
+from turbo_moc.meshing import mesh_2d as meshing_2d, mesh_3d as meshing_3d
 from turbo_moc.fluent import workflow_2d, workflow_3d
 output = Path(sys.argv[1]).resolve()
 assert workflow.OUTPUT == Path.cwd() / 'output'
@@ -118,7 +118,7 @@ print('canonical package boundary verified')
 
 
 def test_progress_poll_survives_a_transient_windows_snapshot_lock(monkeypatch, tmp_path_factory):
-    from turbo_moc.apps.app import workflow
+    from turbo_moc.app import workflow
 
     monkeypatch.setattr(workflow, "OUTPUT", tmp_path_factory.mktemp("poll"))
     monkeypatch.setattr(workflow, "PROCESSES", {})

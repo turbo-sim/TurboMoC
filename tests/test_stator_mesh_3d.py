@@ -11,8 +11,8 @@ from scipy.interpolate import BSpline
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from turbo_moc.geometry import meridional_channel as geo
-from turbo_moc.meshing import meshing_3d as msh
-from turbo_moc.configuration import read_configuration as read_case, to_shared
+from turbo_moc.meshing import mesh_3d as msh
+from turbo_moc.configuration.row import read_configuration as read_case, to_shared
 from pathlib import Path
 GMSH_3D_DIR = Path(__file__).resolve().parents[1] / "examples/apps/cases"
 

@@ -1,10 +1,10 @@
-"""Checks for turbo_moc.meshing.wall_spacing: the y+ -> first-cell estimate
+"""Checks for turbo_moc.legacy.meshing.wall_spacing: the y+ -> first-cell estimate
 on a nozzle expansion and the geometric inflation stack."""
 
 import numpy as np
 import pytest
 
-from turbo_moc.meshing.wall_spacing import estimate_first_layer_height, inflation_stack
+from turbo_moc.legacy.meshing.wall_spacing import estimate_first_layer_height, inflation_stack
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +46,7 @@ def test_fluid_without_viscosity_model_uses_chung():
 
 def test_chung_matches_coolprop_for_a_nonpolar_vapour():
     import CoolProp.CoolProp as CP
-    from turbo_moc.meshing.wall_spacing import chung_dilute_gas_viscosity
+    from turbo_moc.legacy.meshing.wall_spacing import chung_dilute_gas_viscosity
 
     reference = CP.PropsSI("V", "T", 400.0, "P", 1e5, "Cyclopentane")
     assert np.isclose(chung_dilute_gas_viscosity("Cyclopentane", 400.0), reference, rtol=0.03)

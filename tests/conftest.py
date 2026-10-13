@@ -6,7 +6,7 @@ import pytest
 
 @pytest.fixture
 def small_design():
-    from turbo_moc.configuration import read_configuration
+    from turbo_moc.configuration.row import read_configuration
 
     case = Path(__file__).resolve().parents[1] / "examples/apps/cases/axial_stator.yaml"
     config = read_configuration(case)

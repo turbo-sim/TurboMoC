@@ -5,9 +5,9 @@ from math import cos, pi, radians, sqrt
 import jaxprop as jxp
 import pytest
 
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app import create_app
-from turbo_moc.apps.app.rotor_speed import resolve_speed, stator_reference
+from turbo_moc.configuration import project as projects
+from turbo_moc.app import create_app
+from turbo_moc.app.rotor_speed import resolve_speed, stator_reference
 
 
 def test_speed_modes_resolve_to_the_same_rpm_and_blade_speed():

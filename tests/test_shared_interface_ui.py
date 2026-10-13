@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 
 pytest.importorskip("dash_vtk")
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app import application, plots
+from turbo_moc.configuration import project as projects
+from turbo_moc.app import application, plots
 
 
 def paired_project(family="axial"):

@@ -5,8 +5,8 @@ import math
 
 import pytest
 
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app import workflow as flow, rotor_inlet
+from turbo_moc.configuration import project as projects
+from turbo_moc.app import workflow as flow, rotor_inlet
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ def test_machine_fluid_change_invalidates_upstream_and_coupled_rotor(coupled_pro
 
 
 def test_coupled_rotor_remains_visible_after_browser_number_roundtrip(coupled_project):
-    from turbo_moc.apps.app.application import ready_rows
+    from turbo_moc.app.application import ready_rows
 
     project, registry, _ = coupled_project
     config = flow.resolved_configuration(project, "rotor_1", registry)
@@ -123,7 +123,7 @@ def test_manual_inlet_is_independent_and_coupling_requires_active_stator(coupled
 
 
 def test_coupling_preserves_manual_pair_and_uses_upstream_state(coupled_project):
-    from turbo_moc.fluid_inputs import INLET_FIELDS
+    from turbo_moc.configuration.fluid_inputs import INLET_FIELDS
     project, registry, _ = coupled_project
     design = project["rows"][1]["geometry"]["rotor_design"]
     design.update(inlet_property_pair="PT_INPUTS", inlet_property_1=5e5, inlet_property_2=400.)
@@ -178,7 +178,7 @@ def test_property_failure_is_a_readable_inlet_error(coupled_project, monkeypatch
 
 @pytest.mark.parametrize("kind,value", [("blade_velocity_ratio", .4), ("specific", .7)])
 def test_dimensionless_speed_drives_the_coupled_velocity_triangle(coupled_project, monkeypatch, kind, value):
-    from turbo_moc.apps.app.rotor_speed import resolve_speed
+    from turbo_moc.app.rotor_speed import resolve_speed
     project, registry, calls = coupled_project
     coupling = project["rows"][1]["geometry"]["inlet_coupling"]
     coupling["rotational_speed"] = {"type": kind, "value": value}

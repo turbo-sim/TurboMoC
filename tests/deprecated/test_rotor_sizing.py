@@ -1,4 +1,4 @@
-"""Checks for turbo_moc.geometry.sizing's rotor-side functions:
+"""Checks for turbo_moc.legacy.geometry.sizing's rotor-side functions:
 rescale_rotor_blade / size_rotor_from_pitch -- the Phase 5 (3D rotor
 design) analogue of the stator's size_stator_mode_a/b, deriving a scale
 factor from pitch consistency alone against an annulus shared with the
@@ -7,7 +7,7 @@ rotor method)."""
 
 import numpy as np
 
-from turbo_moc.geometry import rescale_rotor_blade, size_rotor_from_pitch
+from turbo_moc.legacy.geometry.sizing import rescale_rotor_blade, size_rotor_from_pitch
 
 
 def _make_rotor_data(pitch=5.0, chord=8.0):

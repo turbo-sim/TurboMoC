@@ -8,21 +8,13 @@ import pytest
 
 gmsh = pytest.importorskip("gmsh")
 
-from turbo_moc.geometry import (  # noqa: E402
-    consistent_radial_wrap,
-    implied_n_blades_radial,
-    parametrize_stator_blade,
-    wrap_blade_radial,
-    wrap_rotor_blade_radial,
-)
-from turbo_moc.meshing.rotor_mesh_2d import mesh_sized_rotor  # noqa: E402
-from turbo_moc.meshing.stator_mesh_2d import mesh_sized_stator  # noqa: E402
-from turbo_moc.meshing.stator_mesh_3d import (  # noqa: E402
-    load_patch_surfaces,
-    mesh_radial_passage,
-    radial_map_reference,
-)
-from turbo_moc.rotor import design_rotor_vortex_blade  # noqa: E402
+from turbo_moc.legacy.geometry.radial import consistent_radial_wrap, implied_n_blades_radial, wrap_blade_radial, wrap_rotor_blade_radial
+from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+from turbo_moc.legacy.meshing.rotor_mesh_2d import mesh_sized_rotor  # noqa: E402
+from turbo_moc.legacy.meshing.stator_mesh_2d import mesh_sized_stator  # noqa: E402
+from turbo_moc.legacy.meshing.stator_mesh_3d import load_patch_surfaces, mesh_radial_passage, radial_map_reference
+from turbo_moc.core.vortex_blade import design_rotor_vortex_blade  # noqa: E402
+from turbo_moc.configuration.fluid_inputs import solver_parameters
 
 DEPTH = 5.0
 SPAN = {"first_height": 0.05, "growth_ratio": 1.3, "num_layers": 3, "transition_ratio": 1.3, "core_size": DEPTH / 4}
@@ -41,7 +33,9 @@ def stator():
 
 @pytest.fixture(scope="module")
 def rotor():
-    return design_rotor_vortex_blade(fluid_name="Novec649", P0_rel=5e5, T0_rel=400.0, M_inlet=1.5,
+    inputs = solver_parameters(dict(fluid_name="Novec649", inlet_property_pair="PT_INPUTS",
+                                    inlet_property_1=5e5, inlet_property_2=400.0), rotor=True)
+    return design_rotor_vortex_blade(**inputs, M_inlet=1.5,
                                      M_outlet=1.5, M_lower=1.05, M_upper=2.0, beta_inlet=65.0,
                                      backend="HEOS", num_points=60)
 

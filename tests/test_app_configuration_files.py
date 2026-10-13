@@ -8,8 +8,8 @@ from app_helpers import call
 
 pytest.importorskip("dash_vtk")
 
-from turbo_moc.apps.app import create_app
-from turbo_moc import configuration_project as projects
+from turbo_moc.app import create_app
+from turbo_moc.configuration import project as projects
 
 
 def upload(project):

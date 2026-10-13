@@ -40,7 +40,7 @@ def test_example_runs(script):
 def test_workflow_runners_resolve_local_files_from_another_directory(tmp_path, monkeypatch):
     import runpy
     import yaml
-    from turbo_moc.meshing import meshing_2d, meshing_3d
+    from turbo_moc.meshing import mesh_2d as meshing_2d, mesh_3d as meshing_3d
     from turbo_moc.fluent import workflow_2d, workflow_3d
     monkeypatch.chdir(tmp_path)
     for family, module, runner in (

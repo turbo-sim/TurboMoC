@@ -23,7 +23,7 @@ def test_barotropic_fit_preserves_moc_inlet_and_has_positive_properties(
 ):
     model = importlib.import_module("turbo_moc.fluent.barotropic_model")
     workflow, config = workflow_module.read_workflow(FLUENT_CONFIG)
-    inputs = {**config["nozzle"], "Q0": 0.0}
+    inputs = {**config["nozzle"], "inlet_property_2": 0.0}
     # Preserve the quality actually used by MoC, rather than its original input.
     fluid, inlet, quality = model.resolve_inlet_state(
         jxp, inputs, {"meta": {"Q0": 0.025}}
@@ -60,6 +60,27 @@ def test_barotropic_inlet_uses_resolved_moc_state_for_pair_configuration(quality
         assert float(state.T) == pytest.approx(400.)
     else:
         assert float(state.Q) == pytest.approx(quality)
+
+
+@pytest.mark.parametrize("fluid_name,pair,first,second,meta,expected_quality", [
+    ("Water", "PQ_INPUTS", 1e5, .025, {}, .025),
+    ("Water", "PQ_INPUTS", 1e5, 0., {"Q0": .025}, .025),
+    ("Air", "PT_INPUTS", 5e5, 400., {}, None),
+], ids=["configured-pq", "nudged-pq", "configured-pt"])
+def test_barotropic_inlet_resolves_pair_when_moc_metadata_is_incomplete(
+    fluid_name, pair, first, second, meta, expected_quality
+):
+    from turbo_moc.fluent.barotropic_model import resolve_inlet_state
+    inputs = dict(fluid_name=fluid_name, inlet_property_pair=pair,
+                  inlet_property_1=first, inlet_property_2=second)
+    _, state, quality = resolve_inlet_state(jxp, inputs, {"meta": meta})
+    assert float(state.p) == pytest.approx(first)
+    if quality is None:
+        assert expected_quality is None
+        assert float(state.T) == pytest.approx(second)
+    else:
+        assert quality == pytest.approx(expected_quality)
+        assert float(state.Q) == pytest.approx(expected_quality)
 
 
 @pytest.mark.parametrize(

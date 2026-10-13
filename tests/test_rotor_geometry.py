@@ -5,13 +5,14 @@ import gmsh
 import numpy as np
 import pytest
 
-from turbo_moc.configuration_project import default_project, row_configuration
-from turbo_moc.geometry.geometry_3d import design_data, load_design
-from turbo_moc.geometry.rotor_geometry import _bezier_reference, build_rotor_design
-from turbo_moc.geometry import geometry_2d as planar
+from turbo_moc.configuration.project import default_project, row_configuration
+from turbo_moc.configuration.fluid_inputs import solver_parameters
+from turbo_moc.geometry.blade_row import design_data, load_design
+from turbo_moc.geometry.rotor_blade import _bezier_reference, build_rotor_design
+from turbo_moc.geometry import passage_2d as planar
 from turbo_moc.geometry.meridional_channel import corresponding_boundary
-from turbo_moc.meshing import meshing_3d
-from turbo_moc.rotor import design_rotor_vortex_blade
+from turbo_moc.meshing import mesh_3d as meshing_3d
+from turbo_moc.core.vortex_blade import design_rotor_vortex_blade
 
 
 @pytest.mark.parametrize("angles", [(60., -60.), (0., 0.), (-60., 60.), (5., -5.)])
@@ -50,8 +51,10 @@ def test_periodic_transfer_preserves_exact_cad_nodes_between_plot_samples():
 
 @pytest.fixture(scope="module")
 def vortex_result():
+    inputs = solver_parameters(dict(fluid_name="Nitrogen", inlet_property_pair="PT_INPUTS",
+                                    inlet_property_1=5e5, inlet_property_2=400.), rotor=True)
     return design_rotor_vortex_blade(
-        fluid_name="Nitrogen", P0_rel=5e5, T0_rel=400.,
+        **inputs,
         M_inlet=1.5, M_outlet=1.5, M_lower=1.05, M_upper=2.,
         beta_inlet=65., num_points=30,
     )

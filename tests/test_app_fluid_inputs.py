@@ -10,10 +10,10 @@ import pytest
 import yaml
 
 from app_helpers import call
-from turbo_moc import configuration_project as projects
-from turbo_moc.apps.app import create_app, workflow as flow
-from turbo_moc.apps.app.application import MACHINE_FLUID_ID
-from turbo_moc.fluid_inputs import INLET_FIELDS, inlet_values, solver_parameters
+from turbo_moc.configuration import project as projects
+from turbo_moc.app import create_app, workflow as flow
+from turbo_moc.app.application import MACHINE_FLUID_ID
+from turbo_moc.configuration.fluid_inputs import INLET_FIELDS, inlet_values, solver_parameters
 
 
 def parameter(row, section, name):
@@ -216,7 +216,7 @@ def test_selected_pair_resolves_the_same_real_state(fluid, base_pair, first, sec
     state = jxp.Fluid(fluid).get_state(jxp.INPUT_PAIRS[base_pair], first, second)
     symbols = {"P": state.p, "T": state.T, "Q": state.Q, "Hmass": state.h,
                "Dmass": state.rho, "Smass": state.s}
-    from turbo_moc.fluid_inputs import pair_properties
+    from turbo_moc.configuration.fluid_inputs import pair_properties
     prop1, prop2 = pair_properties(pair)
     inputs = dict(fluid_name=fluid, inlet_property_pair=pair,
                   inlet_property_1=float(symbols[prop1]), inlet_property_2=float(symbols[prop2]))
@@ -230,6 +230,24 @@ def test_selected_pair_resolves_the_same_real_state(fluid, base_pair, first, sec
             assert resolved[quality] == pytest.approx(float(state.Q), abs=1e-7)
         else:
             assert math.isnan(resolved[quality])
+    assert inputs == original
+
+
+@pytest.mark.parametrize("fluid,pair,pressure,second", [
+    ("Cyclopentane", "PQ_INPUTS", 251300., .025),
+    ("Nitrogen", "PT_INPUTS", 2e6, 105.59852459158473),
+])
+def test_primitive_pq_and_pt_inputs_preserve_exact_values(fluid, pair, pressure, second):
+    inputs = dict(fluid_name=fluid, inlet_property_pair=pair,
+                  inlet_property_1=pressure, inlet_property_2=second)
+    original = deepcopy(inputs)
+    for rotor in (False, True):
+        resolved = solver_parameters(inputs, rotor=rotor)
+        pressure_name = "P0_rel" if rotor else "P0"
+        second_name = ("Q0_rel" if rotor else "Q0") if pair == "PQ_INPUTS" else (
+            "T0_rel" if rotor else "T0")
+        assert resolved[pressure_name] == pressure
+        assert resolved[second_name] == second
     assert inputs == original
 
 
@@ -250,7 +268,7 @@ def test_invalid_pair_values_block_the_app_before_jobs(changes, match):
 
 def test_new_inlet_values_reach_the_moc_solver(monkeypatch):
     import turbo_moc
-    from turbo_moc.geometry.moc import solve_nozzle
+    from turbo_moc.workflows.nozzle import solve_nozzle
     received = []
     def solve(**parameters):
         received.append(parameters)
@@ -265,8 +283,8 @@ def test_new_inlet_values_reach_the_moc_solver(monkeypatch):
 
 
 def test_manual_pair_reaches_the_rotor_worker(tmp_path, monkeypatch):
-    from turbo_moc.apps.app import worker
-    from turbo_moc import rotor as rotor_api
+    from turbo_moc.app import worker
+    from turbo_moc.core import vortex_blade as rotor_api
     project = projects.set_design_mode(projects.default_project(), "rotor")
     project["machine"]["fluid_name"] = "Air"
     design = projects.get_row(project, "rotor_1")["geometry"]["rotor_design"]

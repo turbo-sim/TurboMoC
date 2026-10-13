@@ -6,9 +6,9 @@ from copy import deepcopy
 import pytest
 
 pytest.importorskip("dash_vtk")
-from turbo_moc.apps.app import workflow as app
-from turbo_moc import configuration as config_module
-from turbo_moc import configuration_project as projects
+from turbo_moc.app import workflow as app
+from turbo_moc.configuration import row as config_module
+from turbo_moc.configuration import project as projects
 
 
 def components(node):
@@ -40,7 +40,7 @@ def test_browser_numbers_allow_fractional_geometry_but_require_integer_counts():
 
 
 def test_axial_interspace_updates_pending_meridional_channel_without_a_moc_result():
-    from turbo_moc.apps.app.application import create_app
+    from turbo_moc.app.application import create_app
     project = projects.set_design_mode(projects.default_project(), "stator_rotor")
     rotor = projects.get_row(project, "rotor_1")
     rotor["geometry"]["axial_interspace_mm"] = 3.0
@@ -65,7 +65,7 @@ def test_axial_interspace_updates_pending_meridional_channel_without_a_moc_resul
 
 
 def test_fractional_volume_width_reaches_shader_store_without_changing_mesh_identity():
-    from turbo_moc.apps.app.application import create_app
+    from turbo_moc.app.application import create_app
     project = projects.default_project()
     config = projects.row_configuration(project, "stator_1")
     before = app.keys(config)
@@ -83,7 +83,7 @@ def test_fractional_volume_width_reaches_shader_store_without_changing_mesh_iden
 
 
 def test_row_selection_uses_only_that_rows_selected_moc_result():
-    from turbo_moc.apps.app.application import create_app
+    from turbo_moc.app.application import create_app
     project = projects.default_project()
     second = deepcopy(project["rows"][0])
     second["id"] = "stator_2"
@@ -112,7 +112,7 @@ def test_row_selection_uses_only_that_rows_selected_moc_result():
 
 
 def test_rotor_selection_enables_manual_design_and_requires_current_stator_when_coupled():
-    from turbo_moc.apps.app.application import create_app
+    from turbo_moc.app.application import create_app
     project = projects.set_design_mode(projects.default_project(), "stator_rotor")
     application = create_app(CASE_DIR / "stator_rotor.yaml")
     layout = application.server.test_client().get("/_dash-layout").get_json()
@@ -142,7 +142,7 @@ def test_rotor_selection_enables_manual_design_and_requires_current_stator_when_
 
 
 def test_coupled_rotor_inputs_are_read_only_and_manual_values_survive_toggle(monkeypatch):
-    from turbo_moc.apps.app.application import create_app, ROTOR_INLET_FIELDS
+    from turbo_moc.app.application import create_app, ROTOR_INLET_FIELDS
     application = create_app()
     callback = lambda prefix: next(value["callback"].__wrapped__
         for key, value in application.callback_map.items() if key.startswith(prefix))
@@ -189,7 +189,7 @@ def test_coupled_rotor_inputs_are_read_only_and_manual_values_survive_toggle(mon
 
 @pytest.mark.parametrize("exception", [ValueError, OSError, RuntimeError])
 def test_pending_or_failed_coupling_clears_calculated_inlet_cells(monkeypatch, exception):
-    from turbo_moc.apps.app.application import create_app
+    from turbo_moc.app.application import create_app
     application = create_app()
     callback = lambda prefix: next(value["callback"].__wrapped__
         for key, value in application.callback_map.items() if key.startswith(prefix))
@@ -208,7 +208,7 @@ def test_pending_or_failed_coupling_clears_calculated_inlet_cells(monkeypatch, e
 
 
 def test_structure_can_leave_a_paired_project_for_a_linear_stator_without_losing_rotor_settings():
-    from turbo_moc.apps.app.application import create_app
+    from turbo_moc.app.application import create_app
     project = projects.set_design_mode(projects.default_project(), "stator_rotor")
     projects.get_row(project, "rotor_1")["geometry"]["parametrization_type"] = "vortex"
     application = create_app()
@@ -223,7 +223,7 @@ def test_structure_can_leave_a_paired_project_for_a_linear_stator_without_losing
 
 
 def test_invalid_input_then_mode_switch_keeps_the_last_valid_row_settings():
-    from turbo_moc.apps.app.application import create_app
+    from turbo_moc.app.application import create_app
     application = create_app()
     edit_key = next(key for key in application.callback_map if key.startswith("..config.data"))
     structure_key = next(key for key in application.callback_map if key.startswith("..base-project.data"))
