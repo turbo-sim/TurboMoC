@@ -12,6 +12,8 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   turbo_moc.configuration.automation
+   turbo_moc.configuration.flow_domain
    turbo_moc.configuration.fluid_inputs
    turbo_moc.configuration.planar
    turbo_moc.configuration.project

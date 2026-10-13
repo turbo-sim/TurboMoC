@@ -16,6 +16,7 @@ Submodules
    turbo_moc.app.blade_counts
    turbo_moc.app.calculations
    turbo_moc.app.display_panel
+   turbo_moc.app.inspection_panel
    turbo_moc.app.mesh_reporting
    turbo_moc.app.plots
    turbo_moc.app.project_export

@@ -57,7 +57,8 @@ def _triangulate(loops):
             vtk_to_numpy(output.GetPolys().GetConnectivityArray()).reshape(-1, 3))
 
 
-def _display_surface(design, parameters, triangles, subdivisions, *, boundary_name=None):
+def _display_surface(design, parameters, triangles, subdivisions, *, boundary_name=None,
+                     blade_span_padding=0.):
     """Refine in (q_x, q_y, η), then map and compute smooth physical normals.
 
     Refining after mapping would interpolate chords through curved stream sheets.
@@ -104,7 +105,18 @@ def _display_surface(design, parameters, triangles, subdivisions, *, boundary_na
     xyz = np.empty_like(stations)
     for eta in np.unique(stations[:, 2]):
         mask = stations[:, 2] == eta
-        xyz[mask] = design.meridional_channel.map_points(stations[mask, :2], float(eta))
+        q = stations[mask, :2]
+        xyz[mask] = design.meridional_channel.map_points(q, float(eta))
+        if blade_span_padding:
+            # Give the closed blade preview a tiny overhang at both endwalls.
+            # Use the local span direction so axial, radial, curved and linear
+            # channels all work. Apply before normals, and identically to cap
+            # and side vertices, keeping the display shell watertight. The
+            # design, section curves and CFD mesh coordinates are untouched.
+            low, high = max(0., float(eta) - .001), min(1., float(eta) + .001)
+            span = (design.meridional_channel.map_points(q, high)
+                    - design.meridional_channel.map_points(q, low)) / (high - low)
+            xyz[mask] += blade_span_padding * (2 * eta - 1) * span
     output.GetPoints().SetData(numpy_to_vtk(xyz, deep=True))
     output.Modified()
 
@@ -133,6 +145,8 @@ def preview_geometry(design, *, span_sections=9, curve_points=180, subdivisions=
     The default refinement gives 17 span stations and 360 contour segments.
     It is a rendering approximation, unrelated to the numerical mesh controls.
     Both blade ends are capped so hiding hub/shroud never reveals a hollow blade.
+    A display-only overhang of 0.5% of local span at each end avoids coincident
+    endwall/cap rendering; it does not represent physical blade clearance.
     """
     def sample(points, count, closed=False):
         return planar.resample_curve(points, count + int(closed))[:count]
@@ -168,7 +182,9 @@ def preview_geometry(design, *, span_sections=9, curve_points=180, subdivisions=
                 cap_cells = cap_cells[:, ::-1] if value == 0 else cap_cells
                 triangles = np.vstack((triangles, cap_cells + len(parameters)))
                 parameters = np.vstack((parameters, cap))
-        surfaces[name] = _display_surface(design, parameters, triangles, subdivisions, boundary_name=name)
+        surfaces[name] = _display_surface(
+            design, parameters, triangles, subdivisions, boundary_name=name,
+            blade_span_padding=.005 if name == "blade" else 0.)
     # Both span supports follow their mapped periodic edges. In an annular row
     # these are revolution sectors; in a linear cascade they are planar strips.
     # These are continuous display surfaces, with no blade-shaped cutouts. This

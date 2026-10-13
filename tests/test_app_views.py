@@ -238,3 +238,25 @@ def test_shared_section_chart_preserves_interspace_and_interface(small_design, f
     for together, alone in zip(both.data[5:], only_rotor.data):
         np.testing.assert_allclose(together.x, alone.x)
         np.testing.assert_allclose(together.y, alone.y)
+
+
+@pytest.mark.parametrize("family", ["axial", "radial", "linear"])
+def test_geometry_preview_caps_clear_endwalls_without_changing_design(family, small_design):
+    from turbo_moc.visualization.geometry_preview import preview_geometry
+    nozzle, config = small_design
+    config["meridional_channel"] = projects.row_configuration(
+        projects.default_project(family), "stator_1")["meridional_channel"]
+    design = geo.build_design(nozzle, config)
+    before = geo.design_data(design)
+    surfaces = preview_geometry(design, span_sections=3, curve_points=60)["surfaces"]
+    assert geo.design_data(design) == before
+    points = {name: np.asarray(surfaces[name]["points"]).reshape(-1, 3)
+              for name in ("blade", "hub", "shroud")}
+    coordinate = (lambda xyz: np.linalg.norm(xyz[:, :2], axis=1)) if family == "axial" else (lambda xyz: xyz[:, 2])
+    low = coordinate(points["hub"]).mean()
+    high = coordinate(points["shroud"]).mean()
+    blade = coordinate(points["blade"])
+    # Blade colour clears the continuous supports from either side, using a
+    # small visual overhang rather than changing the endwalls or CFD geometry.
+    assert low - .01 * (high - low) < blade.min() < low
+    assert high < blade.max() < high + .01 * (high - low)
