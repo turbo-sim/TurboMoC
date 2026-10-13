@@ -36,19 +36,30 @@ def section_figure(shape):
     return result
 
 
-def solid_figure(shape, depth):
-    result = go.Figure()
-    for surface in geometry.surfaces(shape, depth):
-        result.add_trace(go.Surface(x=surface["x"] * MM, y=surface["y"] * MM, z=surface["z"] * MM,
-                                    colorscale=[[0, "#9fb7c2"], [1, "#9fb7c2"]], showscale=False, opacity=0.85,
-                                    lighting=dict(ambient=0.55, diffuse=0.7, specular=0.2),
-                                    name=surface["name"], hoverinfo="skip"))
-    result.update_layout(template="plotly_white", margin=dict(l=0, r=0, t=36, b=0), font=plots.APP_FONT,
-                         uirevision="nozzle-solid", showlegend=False,
-                         title=dict(text="Full revolution" if shape["axisymmetric"]
-                                    else f"Planar slab · depth {depth * MM:.3g} mm", font=dict(size=13)),
-                         scene=dict(aspectmode="data", xaxis_title="x [mm]", yaxis_title="y [mm]",
-                                    zaxis_title="z [mm]", camera=dict(eye=dict(x=-1.2, y=-1.6, z=1.0))))
+def meridional_figure(shape, depth):
+    x = shape["x"] * MM
+    if shape["axisymmetric"]:
+        result = plots.figure("Meridional geometry", "z [mm]", "r [mm]")
+        hub, shroud = np.zeros_like(x), shape["y"] * MM
+        names = ("Axis", "Wall")
+    else:
+        result = plots.figure("Streamwise/span geometry", "Streamwise distance [mm]", "Span height [mm]")
+        hub, shroud = np.zeros_like(x), np.full_like(x, depth * MM)
+        names = ("Span start", "Span end")
+    result.add_trace(go.Scatter(x=np.concatenate([x, x[::-1]]), y=np.concatenate([hub, shroud[::-1]]),
+                                fill="toself", fillcolor="rgba(140, 180, 200, 0.18)", mode="none",
+                                hoverinfo="skip", showlegend=False))
+    for values, name in zip((hub, shroud), names):
+        result.add_trace(go.Scatter(x=x, y=values, mode="lines", name=name,
+                                    line=dict(color=plots.EDGE, width=1, dash="dashdot" if name == "Axis" else None)))
+    for index, name in ((0, "inlet"), (len(x) - 1, "outlet")):
+        result.add_trace(go.Scatter(x=[x[index], x[index]], y=[hub[index], shroud[index]], mode="lines",
+                                    name=f"{name} flow domain", line=dict(color="#72858e", width=1.2, dash="dash")))
+    throat = shape["throat_index"]
+    result.add_trace(go.Scatter(x=[x[throat], x[throat]], y=[hub[throat], shroud[throat]], mode="lines",
+                                name="Throat", line=dict(color="#8a9aa1", width=1, dash="dot")))
+    result.update_layout(showlegend=True, legend=dict(orientation="h", y=1.1, x=0))
+    result.update_yaxes(range=[0, 1.05 * float(shroud.max())], autorange=False, minallowed=0, constrain="domain")
     return result
 
 

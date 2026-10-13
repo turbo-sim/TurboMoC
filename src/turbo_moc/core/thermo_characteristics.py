@@ -845,8 +845,10 @@ class InternalPoint:
         x3, y3 = locate(x3, y3, theta3_f, mu_3)
 
         if self.delta:
-            S_P = self._source(theta_P, mu_P, paramP.y)
-            S_M = self._source(theta_M, mu_M, paramM.y)
+            step = max(float(np.hypot(x3 - float(paramP.x), y3 - float(paramP.y))),
+                       float(np.hypot(x3 - float(paramM.x), y3 - float(paramM.y))))
+            S_P = self._source(theta_P, mu_P, paramP.y) if abs(float(paramP.y)) > 0.5 * step else None
+            S_M = self._source(theta_M, mu_M, paramM.y) if abs(float(paramM.y)) > 0.5 * step else None
             S_P, S_M = (S_M if S_P is None else S_P), (S_P if S_M is None else S_M)
             for _ in range(20):
                 d_P = float(np.hypot(x3 - float(paramP.x), y3 - float(paramP.y)))

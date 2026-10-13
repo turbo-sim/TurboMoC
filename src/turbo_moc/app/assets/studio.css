@@ -25,7 +25,7 @@ main {min-width:0;flex:1;padding:12px 16px;display:flex;flex-direction:column;mi
 .content-scroll {flex:1;min-height:0;overflow:auto;padding-right:3px;scrollbar-gutter:stable}
 .settings {display:none;background:white;border:1px solid #dfe7eb;border-radius:7px;
   margin-bottom:11px;padding:10px 12px}
-.active-design .design,.active-report .design,.active-mesh .mesh {display:block}
+.active-design .design,.active-mesh .mesh {display:block}
 .project-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:0 12px 10px;margin-bottom:12px}
 .configuration-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:12px;margin-bottom:12px}
 .scope-settings {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:0 12px;margin-bottom:12px}

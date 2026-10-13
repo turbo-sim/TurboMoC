@@ -581,9 +581,7 @@ def create_app(config_file=None, output_dir=None):
                     "aria-orientation": "vertical", "aria-controls": "sidebar"}), html.Main([
                 dcc.Tabs(id="workspace", value="design", children=[
                     dcc.Tab(label="Geometry generation", value="design"),
-                    dcc.Tab(label="Mesh generation", value="mesh"),
-                    dcc.Tab(label="Report", value="report", id="report-tab",
-                        style={} if nozzle_mode(project) else {"display": "none"})]),
+                    dcc.Tab(label="Mesh generation", value="mesh")]),
                 html.Div(id="validation", className="message"),
                 html.Div([html.Div([html.Button(label, id=name, n_clicks=0,
                     disabled=name=="cancel") for name, label in zip(ACTIONS,
@@ -603,9 +601,23 @@ def create_app(config_file=None, output_dir=None):
                             html.Div([
                                 html.Div([dcc.Graph(id="nozzle-section", figure=empty("Nozzle cross section"),
                                     config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                                html.Div([dcc.Graph(id="nozzle-solid", figure=empty("Three dimensional nozzle"),
+                                html.Div([dcc.Graph(id="nozzle-meridional", figure=empty("Meridional geometry"),
                                     config={"displaylogo": False}, className="engineering-plot")], className="pane"),
                             ], className="split")], open=True, className="plot-group"),
+                        html.Details([html.Summary("Axis and wall distributions"),
+                            html.Small(id="nozzle-summary", className="message"),
+                            html.Div([
+                                html.Div([dcc.Graph(id="nozzle-characteristics", figure=empty("Characteristic net"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                                html.Div([dcc.Graph(id="nozzle-ts", figure=empty("T-s diagram"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                            ], className="split"),
+                            html.Div([
+                                html.Div([dcc.Graph(id="nozzle-axis", figure=empty("Axis properties"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                                html.Div([dcc.Graph(id="nozzle-wall", figure=empty("Wall properties"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                            ], className="split")], open=False, className="plot-group"),
                         ], id="nozzle-views", style={"display": "none"}),
                         html.Div([
                         html.Details([html.Summary("Blade-to-blade and meridional channel geometry"), html.Div([
@@ -619,22 +631,6 @@ def create_app(config_file=None, output_dir=None):
                             open=True, className="plot-group", id="geometry-details"),
                         ], id="blade-views"),
                     ], id="design-panel"),
-                    html.Section([
-                        html.Details([html.Summary("Nozzle design report"),
-                            html.Small(id="nozzle-summary", className="message"),
-                            html.Div([
-                                html.Div([dcc.Graph(id="nozzle-characteristics", figure=empty("Characteristic net"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                                html.Div([dcc.Graph(id="nozzle-ts", figure=empty("T-s diagram"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                            ], className="split"),
-                            html.Div([
-                                html.Div([dcc.Graph(id="nozzle-axis", figure=empty("Axis properties"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                                html.Div([dcc.Graph(id="nozzle-wall", figure=empty("Wall properties"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                            ], className="split")], open=True, className="plot-group"),
-                    ], id="report-panel", style={"display": "none"}),
                     html.Section([
                         html.Div([
                         html.Details([html.Summary("Nozzle 2D mesh"),
@@ -953,11 +949,10 @@ def create_app(config_file=None, output_dir=None):
         return manual_styles, computed_values, computed_styles, speed_styles, inlet_alerts
 
     @app.callback(Output("sidebar", "className"), Output("design-panel", "style"), Output("mesh-panel", "style"),
-        Output("report-panel", "style"), Input("workspace", "value"))
+        Input("workspace", "value"))
     def workspace(name):
-        hidden = {"display": "none"}
-        return (f"active-{name}", {} if name == "design" else hidden, {} if name == "mesh" else hidden,
-                {} if name == "report" else hidden)
+        return (f"active-{name}",
+            {} if name == "design" else {"display": "none"}, {} if name == "mesh" else {"display": "none"})
 
     @app.callback(Output("machine-family-control", "style"), Output("interspace-note", "style"),
         Input("design-mode", "value"))
@@ -982,12 +977,11 @@ def create_app(config_file=None, output_dir=None):
 
     @app.callback(Output("nozzle-views", "style"), Output("blade-views", "style"),
         Output("nozzle-mesh-views", "style"), Output("blade-mesh-views", "style"),
-        Output("report-tab", "style"), Output("workspace", "value", allow_duplicate=True),
-        Input("config", "data"), State("workspace", "value"), prevent_initial_call="initial_duplicate")
-    def nozzle_visibility(state, current):
+        Input("config", "data"))
+    def nozzle_visibility(state):
         shown = bool(state and state.get("project") and nozzle_mode(state["project"]))
         nozzle, blade = ({}, {"display": "none"}) if shown else ({"display": "none"}, {})
-        return nozzle, blade, nozzle, blade, nozzle, ("design" if current == "report" and not shown else no_update)
+        return nozzle, blade, nozzle, blade
 
     @app.callback(Output("nozzle-characteristics", "figure"), Output("nozzle-ts", "figure"),
         Output("nozzle-axis", "figure"), Output("nozzle-wall", "figure"),
@@ -1019,11 +1013,11 @@ def create_app(config_file=None, output_dir=None):
         parameters = config["method_of_characteristics"]
         return config, refs, data, nozzle_geometry.contour(data, parameters, config["mesh"]["nozzle"])
 
-    @app.callback(Output("nozzle-section", "figure"), Output("nozzle-solid", "figure"),
+    @app.callback(Output("nozzle-section", "figure"), Output("nozzle-meridional", "figure"),
         Output("nozzle-geometry-summary", "children"),
         Input("config", "data"), Input("row-references", "data"))
     def nozzle_geometry_views(state, registry):
-        blank = (empty("Nozzle cross section"), empty("Three dimensional nozzle"))
+        blank = (empty("Nozzle cross section"), empty("Meridional geometry"))
         if not state or not state.get("valid") or not nozzle_mode(state["project"]):
             return (*blank, "")
         try:
@@ -1038,7 +1032,7 @@ def create_app(config_file=None, output_dir=None):
                    f" · exit/throat {'radius' if shape['axisymmetric'] else 'height'} "
                    f"{shape['y'][-1] / shape['y'][shape['throat_index']]:.4f}"
                    f" · divergent length {shape['x'][-1] * 1e3:.2f} mm")
-        return (nozzle_views.section_figure(shape), nozzle_views.solid_figure(shape, settings["planar_depth"]),
+        return (nozzle_views.section_figure(shape), nozzle_views.meridional_figure(shape, settings["planar_depth"]),
                 summary)
 
     @app.callback(Output("nozzle-mesh-2d", "figure"), Output("nozzle-mesh-2d-info", "children"),

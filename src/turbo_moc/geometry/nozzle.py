@@ -60,16 +60,3 @@ def contour(result, parameters, settings):
     y = np.concatenate([inlet["y"], y])
     return {"x": x, "y": y, "throat_index": len(inlet["x"]), "axisymmetric": axisymmetric(parameters)}
 
-
-def surfaces(shape, depth, n_theta=72):
-    x, y = shape["x"], shape["y"]
-    if shape["axisymmetric"]:
-        theta = np.linspace(0, 2 * np.pi, n_theta + 1)
-        return [{"name": "wall", "x": np.repeat(x[None, :], len(theta), 0),
-                 "y": np.outer(np.cos(theta), y), "z": np.outer(np.sin(theta), y)}]
-    z = np.array([0.0, depth]) - 0.5 * depth
-    sides = [{"name": name, "x": np.repeat(x[None, :], 2, 0), "y": np.repeat(sign * y[None, :], 2, 0),
-              "z": np.repeat(z[:, None], len(x), 1)} for name, sign in (("upper wall", 1), ("lower wall", -1))]
-    plates = [{"name": "side plate", "x": np.repeat(x[None, :], 2, 0), "y": np.vstack([y, -y]),
-               "z": np.full((2, len(x)), value)} for value in z]
-    return sides + plates
