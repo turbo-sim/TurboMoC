@@ -554,6 +554,26 @@ def report_panel(summary, report):
     return result
 
 
+def bladegen_card(title, status, report, reference):
+    base = f"/artifacts/{reference['session']}/{reference['job']}/"
+    checks = report["checks"]
+    rows = [("Span sections", checks["span_sections"]),
+            ("Points per section", ", ".join(map(str, checks["points_per_section"]))),
+            ("One LE and TE marker per section", "yes" if checks["one_le_and_te_per_section"] else "no"),
+            ("Profiles inside the meridional channel", "yes" if checks["profiles_inside_meridional_channel"] else "no"),
+            ("Shortest profile segment [mm]", f"{checks['minimum_segment_mm']:.3g}"),
+            ("Hub / shroud curve points", f"{checks['hub_points']} / {checks['shroud_points']}")]
+    return html.Section([
+        html.Div([html.Div([html.H4(title), html.Small(f"BladeGen · {report['units']} · {report['frame']} frame · "
+                                                      f"axis {report['axis']}")]),
+                  html.Span(status.title(), className=f"status-badge {status}")], className="stats-card-header"),
+        html.Table([html.Tbody([html.Tr([html.Td(name), html.Td(str(value))]) for name, value in rows])],
+                   className="stats-table"),
+        html.Div([html.A(name, href=base + name, className="download-link") for name in report["files"].values()],
+                 className="cad-links"),
+    ], className="stats-card")
+
+
 def cad_card(title, status, report, reference):
     base = f"/artifacts/{reference['session']}/{reference['job']}/"
     rows = [html.Tr([html.Td(name.replace("_", " ").capitalize()), html.Td(item["solids"]),
@@ -590,7 +610,7 @@ def create_app(config_file=None, output_dir=None):
     def download(session, job, filename):
         folder = flow.directory({"session": session, "job": job})
         if Path(filename).name != filename or Path(filename).suffix.lower() not in (
-            ".json", ".yaml", ".cgns", ".log", ".step", ".png"):
+            ".json", ".yaml", ".cgns", ".log", ".step", ".png", ".inf", ".curve"):
             abort(404)
         if Path(filename).suffix.lower() == ".cgns":
             status_file = folder / "status.json"
@@ -701,6 +721,13 @@ def create_app(config_file=None, output_dir=None):
                                 className="cad-actions"),
                             html.Div(id="cad-view", className="design-statistics")],
                             open=False, className="plot-group"),
+                        html.Details([html.Summary("BladeGen export (TurboGrid)"),
+                            html.Div([html.Button("Generate BladeGen files", id="bladegen", n_clicks=0, disabled=True),
+                                html.Small("BladeGen .inf with profile, hub and shroud curves for TurboGrid, per stator "
+                                           "and rotor row. Millimetres, X is the machine axis. Annular rows only.")],
+                                className="cad-actions"),
+                            html.Div(id="bladegen-view", className="design-statistics")],
+                            open=False, className="plot-group", id="bladegen-details"),
                     ], id="design-panel"),
                     html.Section([
                         html.Div([
@@ -1192,6 +1219,34 @@ def create_app(config_file=None, output_dir=None):
                                   status, report, reference))
         return cards or html.Small("Generate CAD to export STEP files.", className="message")
 
+    @app.callback(Output("bladegen-view", "children"), Output("bladegen-details", "style"),
+        Input("config", "data"), Input("row-references", "data"))
+    def bladegen_view(state, registry):
+        if not state or not state.get("valid"):
+            return "", no_update
+        if nozzle_mode(state["project"]):
+            return "", {"display": "none"}
+        if state["project"]["machine"]["geometry_type"] == "linear":
+            return html.Small("BladeGen describes annular rows; linear cascades are not supported.",
+                              className="message"), {}
+        cards = []
+        for row in project_model.active_rows(state["project"]):
+            refs = (registry or {}).get(row["id"], {})
+            reference = refs.get("bladegen")
+            if not reference:
+                continue
+            try:
+                config = flow.resolved_configuration(state["project"], row["id"], registry)
+                status = ("current" if flow.current(reference, flow.keys(config, refs.get("nozzle"))["bladegen"])
+                          else "outdated")
+                report = json.loads((flow.directory(reference) / "bladegen_report.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError, KeyError, RuntimeError) as exc:
+                cards.append(html.Div(f"{row_label(row)}: BladeGen export unavailable ({exc}).", className="message"))
+                continue
+            cards.append(bladegen_card(row_label(row), status, report, reference))
+        return (cards or html.Small("Generate the BladeGen files to export them for TurboGrid.",
+                                    className="message")), {}
+
     @app.callback(Output("mesh-width", "data"), Input("config", "data"))
     def display_settings(state):
         if not state or not state.get("valid"):
@@ -1408,7 +1463,7 @@ def create_app(config_file=None, output_dir=None):
         return {"key": key, "rows": datasets}, selected_report
 
     @app.callback(Output("job", "data"), Output("job-error", "children"),
-        *[Input(action, "n_clicks") for action in ACTIONS], Input("cad", "n_clicks"),
+        *[Input(action, "n_clicks") for action in ACTIONS], Input("cad", "n_clicks"), Input("bladegen", "n_clicks"),
         State("config", "data"), State("session", "data"), State("job", "data"),
         State("job-completion", "data"), State("row-references", "data"),
         State("calculation-scope", "value"), prevent_initial_call=True,
@@ -1454,7 +1509,7 @@ def create_app(config_file=None, output_dir=None):
             refs.setdefault(row_id, {})[handle["action"]] = result["reference"]
             if row_id in {
                     r["id"] for r in project_model.active_rows(project)}:
-                destination = "design" if handle["action"] in ("nozzle", "cad") else "mesh"
+                destination = "design" if handle["action"] in ("nozzle", "cad", "bladegen") else "mesh"
                 if visible is None or row_id in visible:
                     selected = row_id
             try:
@@ -1487,6 +1542,7 @@ def create_app(config_file=None, output_dir=None):
         return message or ""
 
     @app.callback(*[Output(action, "disabled") for action in ACTIONS], Output("cad", "disabled"),
+        Output("bladegen", "disabled"),
         Output("volume-status", "children"), Output("calculation-controls", "title"),
         Input("config", "data"), Input("row-references", "data"), Input("job", "data"),
         Input("job-completion", "data"), Input("launch-busy", "data"),
@@ -1494,7 +1550,7 @@ def create_app(config_file=None, output_dir=None):
     def readiness(state, registry, handle, completed, launching, scope=None):
         busy = bool(launching or (handle and completed != handle["job"]))
         available, reasons = [], []
-        for action in ("nozzle", "reference", "volume", "cad"):
+        for action in ("nozzle", "reference", "volume", "cad", "bladegen"):
             try:
                 if not state or not state.get("valid"):
                     raise ValueError("Correct the invalid settings before calculating.")
@@ -1504,7 +1560,10 @@ def create_app(config_file=None, output_dir=None):
             except (ValueError, OSError, RuntimeError, KeyError) as exc:
                 available.append(False)
                 reasons.append(str(exc))
-        disabled = (*(busy or not value for value in available[:3]), not busy, busy or not available[3])
+        annular = bool(state and state.get("project") and not nozzle_mode(state["project"])
+                       and state["project"]["machine"]["geometry_type"] != "linear")
+        disabled = (*(busy or not value for value in available[:3]), not busy, busy or not available[3],
+                    busy or not available[4] or not annular)
         message = ""
         if state and state.get("valid"):
             outdated = [row_label(row) for row in project_model.active_rows(state["project"])

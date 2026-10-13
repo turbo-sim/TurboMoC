@@ -231,7 +231,7 @@ def _render(shape, path, title, tolerance):
     plt.close(figure)
 
 
-def export_row(design, settings, output_dir, *, row_id="row", transform=None, progress=None):
+def export_row(design, settings, output_dir, *, row_id="row", role="stator", transform=None, progress=None):
     import cadquery as cq
 
     def emit(message, fraction):

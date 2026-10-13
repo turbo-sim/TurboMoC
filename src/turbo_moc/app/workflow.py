@@ -79,7 +79,7 @@ def keys(config, nozzle_reference=None):
     # stage contains its vortex solution, not a fictitious nozzle computation.
     cad = digest([geometry, config["mesh"].get("cad"), config["mesh"].get("nozzle")])
     return {"nozzle": digest([SOURCE_REVISION, "rotor" if rotor else "stator", solver_inputs]), "geometry": geometry,
-            "reference": reference, "volume": volume, "cad": cad}
+            "reference": reference, "volume": volume, "cad": cad, "bladegen": geometry}
 
 
 def resolved_configuration(project, row_id, registry):

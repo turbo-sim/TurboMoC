@@ -140,31 +140,39 @@ def _logs(meshes):
     return "\n".join(chunks)
 
 
-def cad_entries(project, registry):
-    """Current, completed CAD exports as (archive name, file) pairs, plus README lines."""
+def _export_entries(project, registry, stage, folder_name, report_name, description):
     entries, readme = [], []
     for row in projects.active_rows(project):
         references = (registry or {}).get(row["id"], {})
-        reference = references.get("cad")
+        reference = references.get(stage)
         if not reference:
             continue
         try:
             config = flow.resolved_configuration(project, row["id"], registry)
-            if not flow.current(reference, flow.keys(config, references.get("nozzle"))["cad"]):
-                readme.append(f"{row['id']}: CAD export out of date; not included.")
+            if not flow.current(reference, flow.keys(config, references.get("nozzle"))[stage]):
+                readme.append(f"{row['id']}: {description} out of date; not included.")
                 continue
             folder = flow.directory(reference)
             if flow.read_json(folder / "status.json").get("state") != "complete":
                 continue
-            report = flow.read_json(folder / "cad_report.json")
+            report = flow.read_json(folder / report_name)
         except (OSError, ValueError, KeyError, RuntimeError):
             continue
-        names = [*report["files"].values(), "cad_report.json",
-                 *sorted(item.name for item in folder.glob("*.png"))]
-        entries += [(f"cad/{row['id']}/{name}", folder / name) for name in names if (folder / name).is_file()]
-        readme.append(f"cad/{row['id']}/ ({report['units']}, {report['frame']} frame): "
-                      + ", ".join(report["files"].values()) + "; cad_report.json with validation and printability notes.")
+        names = [*report["files"].values(), report_name, *sorted(item.name for item in folder.glob("*.png"))]
+        entries += [(f"{folder_name}/{row['id']}/{name}", folder / name) for name in names if (folder / name).is_file()]
+        readme.append(f"{folder_name}/{row['id']}/ ({report['units']}, {report['frame']} frame): "
+                      + ", ".join(report["files"].values()) + f"; {report_name}.")
     return entries, readme
+
+
+def cad_entries(project, registry):
+    """Current, completed CAD and BladeGen exports as (archive name, file) pairs, plus README lines."""
+    cad, cad_readme = _export_entries(project, registry, "cad", "cad", "cad_report.json", "CAD export")
+    bladegen, bladegen_readme = _export_entries(project, registry, "bladegen", "bladegen",
+                                                "bladegen_report.json", "BladeGen export")
+    readme = cad_readme + [line.replace("bladegen_report.json.", "bladegen_report.json (BladeGen files for TurboGrid).")
+                           for line in bladegen_readme]
+    return cad + bladegen, readme
 
 
 def build_archive(project, registry):
@@ -258,7 +266,7 @@ def build_archive(project, registry):
         readme.extend(["", "UNAVAILABLE MESHES", *omitted])
     cad, cad_readme = cad_entries(project, registry)
     if cad_readme:
-        readme.extend(["", "CAD (STEP)", *cad_readme,
+        readme.extend(["", "CAD AND BLADEGEN EXPORTS", *cad_readme,
                        "Rows of a stage are written in the shared machine frame, so they open in place together."])
     stream = BytesIO()
     with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
@@ -380,7 +388,7 @@ def nozzle_archive(project, registry):
     for name, source in cad:
         files[name] = source.read_bytes()
     if cad_readme:
-        readme.extend(["", "CAD (STEP)", *cad_readme])
+        readme.extend(["", "CAD AND BLADEGEN EXPORTS", *cad_readme])
     readme.extend(["", "COORDINATES",
                    f"x is the axial distance from the throat. The 2D mesh is a half-domain bounded by the {lower}; "
                    f"the 3D mesh is {solid}"])

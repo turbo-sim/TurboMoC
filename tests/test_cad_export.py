@@ -40,3 +40,25 @@ def test_nozzle_exports_fluid_and_body(small_design, tmp_path, delta):
 def test_invalid_cad_settings(name, value):
     with pytest.raises(ValueError, match=name):
         cad_export.validate_settings(dict(cad_export.CAD_DEFAULTS, **{name: value}))
+
+
+def test_bladegen_files_for_turbogrid(small_design, tmp_path):
+    from turbo_moc.geometry.bladegen_export import export_bladegen, read_profile
+    wall, config = small_design
+    result = export_bladegen(build_design(wall, config), tmp_path, row_id="stator_1", span_sections=5)
+    checks = result["checks"]
+    assert checks["span_sections"] == 5 and checks["one_le_and_te_per_section"]
+    assert checks["profiles_inside_meridional_channel"] and checks["minimum_segment_mm"] > 1e-6
+    inf = (tmp_path / result["files"]["inf"]).read_text(encoding="utf-8")
+    assert "Number of Blade Sets: 12" in inf and "Geometry Units: MM" in inf
+    assert f"Profile Data File: {result['files']['profile']}" in inf
+    sections = read_profile(tmp_path / result["files"]["profile"])
+    assert all(section["le"] == [0] for section in sections)
+
+
+def test_bladegen_rejects_linear_cascades(tmp_path):
+    from types import SimpleNamespace
+    from turbo_moc.geometry.bladegen_export import export_bladegen
+    design = SimpleNamespace(meridional_channel=SimpleNamespace(is_linear=True))
+    with pytest.raises(ValueError, match="annular"):
+        export_bladegen(design, tmp_path, row_id="row")
