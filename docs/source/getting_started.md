@@ -14,15 +14,16 @@ stator and rotor blades.
 
 ## Installation instructions
 
-TurboMoC requires Python 3.11, 3.12, or 3.13. Install it with pip in your Python
-environment:
+TurboMoC requires Python 3.11, 3.12, or 3.13. To add it to an existing
+[Poetry](https://python-poetry.org/docs/#installation) project:
 
 ```bash
-python -m pip install --upgrade "turbo_moc[cad]"
+poetry add "turbo_moc[cad]"
 ```
 
-This also installs CadQuery for STEP geometry export and upgrades an existing
-TurboMoC installation.
+The `cad` extra installs CadQuery for STEP/STL geometry export. The app,
+Gmsh, and the 3D viewer are installed by default. The commands in this guide
+use `poetry run` to run tools in the project's environment.
 
 ### Install from source with Poetry
 
@@ -42,16 +43,20 @@ For development tools and documentation builds, see the
 ### Verify the installation
 
 ```bash
-python -c "import turbo_moc; print(turbo_moc.__version__)"
+poetry run python -c "import turbo_moc; print(turbo_moc.__version__)"
 ```
-
-For a Poetry source installation, prefix this command with `poetry run`.
 
 ## Design a nozzle
 
 The public `design_nozzle` function accepts ordinary Python values and returns a flat dictionary suitable for serialization and plotting.
 
 The conditions below are representative of a transcritical CO₂ heat pump: the nozzle expands CO₂ from a gas-cooler outlet at 35 °C and 1.2 times the critical pressure (about 88.5 bar) to the saturation pressure at an evaporation temperature of 5 °C (about 39.7 bar).
+
+Save the example as `quick_start.py` and run it from your project directory:
+
+```bash
+poetry run python quick_start.py
+```
 
 ```python
 import jaxprop as jxp
@@ -83,13 +88,12 @@ plt.show()
 ## Launch the interactive app
 
 ```bash
-turbo_moc-app
+poetry run turbo_moc-app
 ```
 
-For a Poetry source installation, use `poetry run turbo_moc-app`.
 Open the local URL printed in the terminal in a browser.
 
-The current app defaults to port 8052. Use `turbo_moc-app-legacy` for the
+The current app defaults to port 8052. Use `poetry run turbo_moc-app-legacy` for the
 preserved app on port 8050. After updating a Poetry checkout, refresh the
 launcher commands with `poetry install --only-root`.
 

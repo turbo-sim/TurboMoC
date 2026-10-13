@@ -472,7 +472,6 @@ The latest default CLI run completed a fresh MoC solve and generated 25,519
 all-quad cells, with minimum scaled Jacobian 0.023 and 193 periodic pairs,
 CGNS output, PNG/SVG mesh views and an HTML report. A real Fluent prepare-only
 run also generated the mesh and barotropic model without launching Fluent.
-See the [refactor summary](../../refactor.md) for restructuring verification.
 
 Run just the fast mesh and Fluent automation checks:
 

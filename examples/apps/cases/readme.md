@@ -72,5 +72,6 @@ pressure/temperature inputs are migrated when loaded. If active manual rows
 specify different fluids, set `machine.fluid_name` explicitly to resolve the
 conflict. A coupled rotor inherits the upstream stator's fluid.
 
-Run `python examples/apps/run_app.py` for the axial stator example. To select
-another case, use `turbo_moc-app --config examples/apps/cases/<case>.yaml`.
+From the repository root, run `poetry run python examples/apps/run_app.py` for the
+axial stator example. To select another case, use
+`poetry run turbo_moc-app --config examples/apps/cases/<case>.yaml`.

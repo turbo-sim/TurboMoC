@@ -2,7 +2,7 @@
 
 
 ## 0. Quick thoughts
-- [ ] Ensure that the fluent automation workflow is an strict superset of the geometry/meshing workflow, such that the yaml file of the geometry/meshing could be embedded into a broaded CFD simulation/optimization framework.
+- [x] Ensure that the fluent automation workflow is an strict superset of the geometry/meshing workflow, such that the yaml file of the geometry/meshing could be embedded into a broaded CFD simulation/optimization framework.
 - [ ] Decide whether to expose structured topology and guarded repair in the canonical workflow; retain existing legacy behavior meanwhile.
 - [ ] Create Fluent workflow for stator+rotor 3D cases.
 
@@ -62,7 +62,7 @@
 
 - [ ] **F01 — Separate advanced numerical settings.** Move less frequently changed MoC controls, such as numerical point counts, into an advanced app section. **Decision:** assess a corresponding nested YAML dictionary while preserving defaults and compatibility with existing cases.
 - [ ] **F02 — Use descriptive configuration names.** Prepare a naming table for stator MoC and rotor vortex settings, replacing terse mathematical abbreviations with clear English names. Distinguish readable UI labels, such as “Exit Mach number” and “Backpressure,” from machine-readable YAML keys, such as `exit_mach_number` and `backpressure`. Include units, frame conventions, and a migration strategy for existing keys.
-- [ ] **F03 — Audit YAML consistency across entry points.** Compare app-loaded cases with automated 2D workflow configurations. Identify differences in keys, nesting, defaults, units, validation, and solver behavior, distinguishing intentional workflow-specific settings from accidental incompatibilities.
+- [x] **F03 — Audit YAML consistency across entry points.** Compare app-loaded cases with automated 2D workflow configurations. Identify differences in keys, nesting, defaults, units, validation, and solver behavior, distinguishing intentional workflow-specific settings from accidental incompatibilities.
 
 ## 7. Codebase maintenance
 

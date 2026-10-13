@@ -9,8 +9,9 @@ inspect the characteristic mesh and flow properties, and export the two walls.
 | Input | Value | Meaning |
 | --- | --- | --- |
 | `fluid_name` | `"nitrogen"` | Fluid used by the thermodynamic model. |
-| `P0` | `20e5` Pa | Stagnation pressure of 20 bar. |
-| `T0` | $T_\mathrm{sat}(20\,\mathrm{bar})-10$ K | Liquid inlet with 10 K subcooling. |
+| `inlet_property_pair` | `"PT_INPUTS"` | Pressure and temperature define the inlet state. |
+| `inlet_property_1` | `20e5` Pa | Stagnation pressure of 20 bar. |
+| `inlet_property_2` | $T_\mathrm{sat}(20\,\mathrm{bar})-10$ K | Liquid inlet with 10 K subcooling. |
 | `p_back` | `2e5` Pa | Target back pressure of 2 bar. |
 | `solver` | `"conventional"` | Nozzle solver with a rounded expansion section. |
 
@@ -48,7 +49,7 @@ Nozzle wall contour mirrored about the centerline; both axes are in meters.
 
 The wall opens downstream from the throat. The lower half is obtained by
 reflecting the computed upper wall about `y = 0`. Markers identify the initial
-initial front and points in the rounded expansion section.
+front and points in the rounded expansion section.
 
 ```{figure} assets/nozzle_design/characteristics_mesh.svg
 :alt: Characteristic mesh in the upper half of the nozzle.
@@ -100,6 +101,6 @@ Both CSV headers are `x_m,y_m`; any upstream convergent section drawn by the
 plotter is outside these exported `wall_final` coordinates. Rerunning the
 script replaces the files in this directory.
 
-Try changing `Q0` to another value between zero and one or changing
+Try changing the inlet subcooling in the `temperature` assignment or changing
 `p_back`, then compare the contour and property plots. Continue with the
 [stator tutorial](stator_design.md) to turn the nozzle wall into a blade.

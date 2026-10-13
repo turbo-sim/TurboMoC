@@ -5,12 +5,10 @@
 TurboMoC designs supersonic nozzles with the method of characteristics (MoC)
 using real-fluid thermodynamics, including two-phase flashing and condensing
 expansions under the Homogeneous Equilibrium Model (HEM). Its current design
-app turns a MoC stator profile into a linear cascade or an axial/radial row,
-then generates independent section and volume meshes with quality reports
-and CGNS export. The Python library and preserved preceding app also provide
-vortex rotor design, sizing, CAD and stage-assembly tools. These legacy tools
-have not yet been integrated into the row-based interface; its rotor controls
-remain explicit planning placeholders.
+app designs stator and vortex rotor profiles for linear cascades and axial/radial
+machines, then generates section and volume meshes with quality reports and
+CGNS export. The Python library and preserved preceding app also provide
+sizing, CAD and stage-assembly tools.
 
 📦 **PyPI package**: [https://pypi.org/project/turbo_moc/](https://pypi.org/project/turbo_moc/)
 
@@ -91,21 +89,15 @@ TurboMoC requires Python 3.11, 3.12, or 3.13.
 
 ### Install from PyPI
 
-Install with pip in your Python environment:
-
-```bash
-python -m pip install --upgrade "turbo_moc[cad]"
-```
-
-The `cad` extra installs CadQuery (STEP/STL export) and the app's 3D viewer. Gmsh is always
-installed.
-
-To install TurboMoC from PyPI into an existing [Poetry](https://python-poetry.org/docs/cli/#add)
-project, use `poetry add` with bracket notation for optional extras:
+To install TurboMoC from PyPI into an existing
+[Poetry](https://python-poetry.org/docs/cli/#add) project, use:
 
 ```bash
 poetry add "turbo_moc[cad]"
 ```
+
+The `cad` extra installs CadQuery for STEP/STL export. Gmsh and the app's 3D
+viewer are installed by default.
 
 Include the `fluent` extra to install optional PyFluent support alongside CAD:
 
@@ -136,23 +128,20 @@ The `fluent` extra installs the Python interface; Fluent must be installed and
 licensed separately. See the [Fluent workflow README](examples/fluent_2D/readme.md)
 for the companion barotropy installation and example configuration.
 
-Use `poetry run python` to run Python scripts in the Poetry environment.
-
-Gmsh, PyVista and Dash VTK are installed by default for the geometry/meshing app:
-
-```bash
-poetry install
-# Alternatively:
-python -m pip install -e .
-```
-
-Package promotion described here applies to this checkout; publishing a new
-PyPI release is a separate step. CAD and Fluent dependencies remain optional.
+The commands below use `poetry run` to run tools in the Poetry environment.
+Use `poetry install` without extras if you do not need CAD or Fluent support.
 
 
 ## Quick start
 
-Save the following as `quick_start.py` and run `python quick_start.py` (or `poetry run python quick_start.py` for a source installation). It designs a CO₂ expansion nozzle, prints the convergence status and exit Mach number, and displays the characteristics mesh with Matplotlib.
+Save the following as `quick_start.py` and run it with:
+
+```bash
+poetry run python quick_start.py
+```
+
+It designs a CO₂ expansion nozzle, prints the convergence status and exit Mach
+number, and displays the characteristics mesh with Matplotlib.
 
 The conditions are representative of a transcritical CO₂ heat pump: the nozzle
 expands CO₂ from a gas-cooler outlet at 35 °C and 1.2 times the critical pressure
@@ -193,11 +182,11 @@ for nozzle, stator, and rotor design, including plots and coordinate exports.
 Launch the app:
 
 ```bash
-turbo_moc-app
+poetry run turbo_moc-app
 ```
 
-For a Poetry installation, prefix the commands with `poetry run`. Open the local
-URL printed in the terminal (port 8052 by default). Example app YAML files are available in `examples/apps/cases/`.
+Open the local URL printed in the terminal (port 8052 by default). Example app
+YAML files are available in `examples/apps/cases/`.
 
 Follow the illustrated [app user guide](docs/source/app_user_guide.md) for the
 stator–rotor workflow, mesh inspection, quality reports, and project export.

@@ -7,30 +7,30 @@ Each workflow folder contains a README, a runner and its own YAML file:
 - `fluent_2D/`: `run_fluent_case.py`, `workflow_fluent_stator_2D.yaml`.
 - `fluent_3D/`: `run_fluent_case.py`, `workflow_fluent_stator_3D.yaml`.
 
-[App launchers](apps/readme.md) live in `apps/`; their sample machine-project
-YAML files live exclusively in `apps/cases/`. MoC design demonstrations remain
-under `moc_design/`. Numerical implementations live in `src/turbo_moc`.
+MoC design demonstrations live under `moc_design/`. Follow the
+[design tutorials](../docs/source/examples/index.md) to configure a nozzle,
+stator or rotor, interpret its figures and use the exported coordinates.
 
-Run any example script by its absolute path from any working directory.
-The runners use `pathlib.Path(__file__).resolve().parent` to locate files
-beside the script. `Path` handles Windows, macOS and Linux path separators;
-these paths do not depend on the terminal's working directory.
-No command-line arguments are required: edit its YAML or the `CONFIG_FILE`
-assignment to choose another case. Each workflow writes to `output/` beside
-its runner. The current app passes `apps/output/` explicitly to
-`create_app(..., output_dir=OUTPUT_DIR)`; no output environment variable is needed.
-Fluent `design_file`
-and `output_dir` resolve relative to its YAML; the supplied output is `output`.
-The standalone design demonstrations retain `examples/output/<design>/`.
+Run the following commands from the repository root after `poetry install`.
+The Gmsh and Fluent runners locate their YAML files beside the script and need
+no command-line arguments. Edit the adjacent YAML or the runner's `CONFIG_FILE`
+to choose another case. Follow each workflow's README for additional
+dependencies and, for Fluent, installation and licensing requirements.
 
 ```powershell
-python examples/gmsh_2D/run_mesh_generation.py
-python examples/gmsh_3D/run_mesh_generation.py
-python examples/fluent_2D/run_fluent_case.py
-python examples/fluent_3D/run_fluent_case.py
-python examples/apps/run_app.py
-python examples/apps/run_app_legacy.py
+poetry run python examples/moc_design/nozzle_design.py
+poetry run python examples/moc_design/stator_design.py
+poetry run python examples/moc_design/rotor_design.py
+poetry run python examples/gmsh_2D/run_mesh_generation.py
+poetry run python examples/gmsh_3D/run_mesh_generation.py
+poetry run python examples/fluent_2D/run_fluent_case.py
+poetry run python examples/fluent_3D/run_fluent_case.py
 ```
+
+Each Gmsh workflow writes to `output/` beside its runner. Fluent paths, including
+`output_dir` and the optional `design_file`, resolve relative to its YAML; the
+supplied output directory is also `output/`. The design demonstrations write to
+`examples/output/<design>/`.
 
 The [Fluent 3D workflow](fluent_3D/readme.md) prepares and solves one stationary
 stator passage with rotational periodicity for axial/radial rows or translational
@@ -39,8 +39,6 @@ barotropic model as Fluent 2D, adds hub/shroud walls and reports internal-sectio
 pressure/Mach contours. Set `prepare_only: true` in its YAML to generate the mesh
 and model without launching Fluent.
 
-[Theory](../docs/internal_information/theory_guide.md) and
-[refactor summary](../refactor.md) explain the algorithms
-and source ownership. The preserved app and its workflow-specific code remain
-under `turbo_moc.legacy`, sharing the scientific implementations in `turbo_moc.core`. Workflows use the shared `turbo_moc.reporting`
-module directly.
+The [theory guide](../docs/source/theory/index.md) explains the design methods.
+See [workflow configuration](workflow_configuration.md) to reuse machine and row
+settings across Gmsh and Fluent examples.

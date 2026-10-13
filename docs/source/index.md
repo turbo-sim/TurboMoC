@@ -35,14 +35,7 @@ Follow an illustrated walkthrough to design a stator and rotor, inspect their me
 :link: examples/index
 :link-type: doc
 
-Guided applications of the solvers, geometry tools, plots, and interactive app.
-:::
-
-:::{grid-item-card} Logging and progress
-:link: logging
-:link-type: doc
-
-Console and log-file output, message levels, progress callbacks and timing.
+Design nozzles, stators, and rotors with Python scripts, interpret the plots, and export coordinates.
 :::
 
 :::{grid-item-card} Theory
@@ -69,6 +62,7 @@ Install the package for development, build the documentation, and release new ve
 :::{grid-item-card} API reference
 :link: api_reference
 :link-type: doc
+:columns: 12
 
 Inspect the modules, classes, and functions provided by the Python package.
 :::
@@ -82,7 +76,6 @@ Inspect the modules, classes, and functions provided by the Python package.
 getting_started
 App user guide <app_user_guide>
 examples/index
-logging
 theory/index
 references/bibliography
 developer_guide

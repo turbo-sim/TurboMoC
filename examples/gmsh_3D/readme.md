@@ -6,8 +6,10 @@ Edit `workflow_gmsh_stator_3D.yaml` and run `run_mesh_generation.py` without
 arguments. The runner resolves its YAML relative to itself and writes to its
 adjacent `output/` folder, regardless of the working directory.
 
+From the repository root after `poetry install`:
+
 ```powershell
-python examples/gmsh_3D/run_mesh_generation.py
+poetry run python examples/gmsh_3D/run_mesh_generation.py
 ```
 
 The example calculates a fresh MoC wall, defines a conformal blade section,
@@ -20,8 +22,7 @@ output and optional row ID, without assuming an examples-directory layout.
 
 [Theory](../../docs/internal_information/theory_guide.md),
 [deformation mathematics](../../docs/internal_information/3D_mesh_deformation.md) and
-[roadmap](../../docs/internal_information/roadmap.md) explain the pipeline. App runners and
-sample app cases are separate under [apps/](../apps/readme.md).
+[roadmap](../../docs/internal_information/roadmap.md) explain the pipeline.
 
 ## Workflow display and reporting
 

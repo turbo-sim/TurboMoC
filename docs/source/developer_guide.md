@@ -16,8 +16,9 @@ poetry install --with dev --extras cad
 Poetry installs the package in editable mode, so changes to the source under
 `src/turbo_moc/` are available without reinstalling. The `dev` dependency group
 includes documentation, testing, and release tools. The `cad` extra provides
-CadQuery for STEP export. The main implementation areas are `core`, `solvers`,
-`geometry`, `rotor`, plotting, and the Dash application.
+CadQuery for STEP export. Scientific solvers live in `core`; geometry,
+meshing, visualization, Fluent workflows, configuration, and the Dash app have
+separate subpackages under `src/turbo_moc/`. Preserved workflows live in `legacy`.
 
 JAX is used by the core solver and comes through the `jaxprop` dependency;
 this package does not have a separate `jax` extra.
@@ -38,9 +39,7 @@ for changes at `http://127.0.0.1:8000`. For a single build:
 poetry run python docs/build_docs.py --no-autobuild
 ```
 
-The HTML entry point is `docs/_build/html/index.html`. The same commands work
-with a virtual environment's Python instead of `poetry run python` when the
-development dependencies are already installed.
+The HTML entry point is `docs/_build/html/index.html`.
 
 `docs/build_docs.py` is the shared build entry point. Package settings live in
 `docs/conf.py`; all Markdown and reStructuredText documentation lives under
@@ -56,9 +55,9 @@ poetry run python docs/build_docs.py --build-bib
 
 ## Running the tests
 
-The repository has a deliberately small smoke-test suite. It checks that the
-installed package exposes its basic public interface and executes the Python
-design scripts under `examples/moc_design/` and launchers under `examples/apps/`.
+The smoke-test runner checks that the installed package exposes its basic
+public interface and executes the Python design scripts under
+`examples/moc_design/` and launchers under `examples/apps/`.
 
 Run the package and design/app example smoke checks from the repository root:
 
@@ -97,7 +96,7 @@ the barotropic fit.
 
 The example checks set `TURBO_MOC_EXAMPLE_SMOKE_TEST=1` and use Matplotlib's
 non-interactive backend. The nozzle and rotor calculations still run and their
-figures are still constructed, but the checks do not start the Dash server,
+figures are still constructed, but the checks do not start the Dash server or
 open plot windows. The design examples still export coordinates and figures
 to their own ignored `examples/output/` directories.
 
@@ -120,11 +119,12 @@ creates a commit, and creates the corresponding release tag automatically.
 GitHub Actions then:
 
 - `deploy_docs.yaml` builds the documentation for pull requests and deploys
-  it to GitHub Pages.
-- `test_and_deploy_app.yaml` runs the smoke tests on Ubuntu and Windows for
-  pull requests and pushes to `main`.
+  it to GitHub Pages on updates to `main`.
+- `publish_to_pipy.yml` runs the default test suite on Ubuntu and Windows for
+  pull requests to `main` and version tags, then publishes tagged releases to
+  PyPI after those checks pass.
 
-PyPI publication is not currently automated.
+The app-specific `test_and_deploy_app.yaml` workflow is currently disabled.
 
 ## Deploying the web application
 
