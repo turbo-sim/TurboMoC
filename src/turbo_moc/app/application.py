@@ -25,6 +25,7 @@ from turbo_moc.configuration.fluid_inputs import INLET_FIELDS, OUTLET_FIELDS, PR
 from turbo_moc.visualization.geometry_preview import preview_geometry
 from turbo_moc.visualization import plotly as nozzle_plots
 from turbo_moc.geometry import nozzle as nozzle_geometry
+from turbo_moc.visualization import style as view_style
 
 ACTIONS = ("nozzle", "reference", "volume", "cancel")
 MACHINE_FLUID_ID = {"type": "parameter", "row": "", "path": "fluid_name"}
@@ -1231,7 +1232,8 @@ def create_app(config_file=None, output_dir=None):
                 design = flow.get_design(config, reference)
                 dataset = deepcopy(cached_preview(keys["geometry"], design))
                 dataset.update(id=row["id"], role=row["role"], label=row_label(row), placement=placements[row["id"]],
-                    geometry_type=config["meridional_channel"]["type"])
+                    geometry_type=config["meridional_channel"]["type"],
+                    home=view_style.camera(config["meridional_channel"]["type"]))
                 datasets.append(dataset)
                 if row["id"] in visible:
                     views.append((row_label(row), design, placements[row["id"]]))
@@ -1375,6 +1377,8 @@ def create_app(config_file=None, output_dir=None):
                 dataset = {"id": row["id"], "role": row["role"], "label": row_label(row), "surfaces": surfaces,
                     "is_linear": linear, "placement": placement,
                     "geometry_type": display_panel.geometry_family(definition, state["project"]["machine"]["geometry_type"]),
+                    "home": view_style.camera(display_panel.geometry_family(
+                        definition, state["project"]["machine"]["geometry_type"])),
                     "job": reference["job"], "session": reference["session"],
                     "span_stations": summary.get("span_stations", [])}
                 if linear:

@@ -9,6 +9,7 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       // Row visibility must not change the shared camera convention.
       const row = (data.rows || [data])[0] || {};
       const family = row.geometry_type || (row.is_linear ? "linear" : "axial");
+      if (row.home) return {family, direction: row.home.direction, up: row.home.up};
       if (family === "radial") return {family, direction: [0,0,1], up: [0,1,0]};
       if (family === "linear") return {family, direction: [1,1,1], up: [0,0,1]};
       return {family, direction: [-1,.12,.20], up: [0,1,0]};
