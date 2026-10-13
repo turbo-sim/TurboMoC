@@ -25,10 +25,10 @@
 
 ## 1. App design controls and diagnostics
 
-- [ ] **A01 — Add a nozzle design mode.** Expose standalone nozzle design in the app's design-mode selector, with appropriate inputs, geometry and flow diagnostics, and saved-case support.
+- [x] **A01 — Add a nozzle design mode.** Expose standalone nozzle design in the app's design-mode selector, with appropriate inputs, geometry and flow diagnostics, and saved-case support.
 - [ ] **A02 — Enable stator control-point editing.** Allow users to move the stator's control points and inspect the resulting blade geometry. Define which points are editable and how edits preserve geometric constraints and invalidate dependent results.
 - [ ] **A03 — Evaluate a pinned reference design.** **Decision:** determine whether retaining a previous geometry as a reference overlay materially helps design comparison. If useful, define what is pinned, how it is displayed, and when it is cleared.
-- [ ] **A04 — Restore symmetric and asymmetric blading options.** Identify the intended blade families and the previous behavior, then expose the relevant symmetry choice in the current workflow.
+- [x] **A04 — Restore symmetric and asymmetric blading options.** Identify the intended blade families and the previous behavior, then expose the relevant symmetry choice in the current workflow.
 - [ ] **A05 — Add a collapsible design-statistics panel.** Place a summary at the bottom of the geometry page with performance estimates from the stator MoC and rotor vortex methods. Include a table of velocity vectors and thermodynamic properties at each flow station; evaluate velocity-triangle plots and other useful distributions. Show units, reference frames, assumptions, and whether results are current.
 
 ## 2. Blade parametrization and meridional geometry

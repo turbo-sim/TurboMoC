@@ -17,7 +17,7 @@ from .meridional_channel import (
 from . import meridional_channel as meridional_geometry
 from .linear_cascade import LinearCascadeMapping, LinearCascadeDefinition, build_linear_section
 from .flow_interfaces import apply_interfaces
-from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+from turbo_moc.geometry.stator_blade import parametrize_stator
 from turbo_moc.configuration.row import to_shared
 
 
@@ -90,7 +90,7 @@ def build_design(nozzle, config, *, definition=None, template=None):
         raise ValueError("A converged MoC nozzle solution is required.")
     wall = nozzle["wall_final"]
     if template is None:
-        template = parametrize_stator_blade(wall["x"], wall["y"], **config["blade_geometry"])
+        template = parametrize_stator(wall["x"], wall["y"], **config["blade_geometry"])
     if config["meridional_channel"]["type"] == "linear" and definition is None:
         meridional_channel, blade, curves = build_linear_section(nozzle, to_shared(config), template)
     else:

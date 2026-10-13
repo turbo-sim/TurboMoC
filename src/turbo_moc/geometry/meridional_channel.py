@@ -13,7 +13,7 @@ from scipy.integrate import quad, solve_ivp
 from scipy.interpolate import BSpline
 
 from turbo_moc.geometry import passage_2d as planar
-from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+from turbo_moc.geometry.stator_blade import parametrize_stator
 
 # =============================================================================
 # 1. Thin input adapters: axial/radial dimensions -> common geometry definition
@@ -395,7 +395,7 @@ def build_section(nozzle, config, meridional_channel, eta=0.5, *, template=None)
         raise ValueError("A converged MoC nozzle solution is required.")
     wall = nozzle["wall_final"]
     raw = (
-        parametrize_stator_blade(wall["x"], wall["y"], **config["blade"])
+        parametrize_stator(wall["x"], wall["y"], **config["blade"])
         if template is None
         else deepcopy(template)
     )

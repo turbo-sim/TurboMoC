@@ -75,6 +75,9 @@ def _validate_shared(config):
         if not np.isfinite(config["passage"][name]) or config["passage"][name] <= 0:
             raise ValueError(f"passage.{name} must be positive.")
     validate_mesh_configuration(config["mesh"])
+    from turbo_moc.geometry.stator_blade import STATOR_PARAMETRIZATIONS
+    if config["blade"].get("parametrization", "full") not in STATOR_PARAMETRIZATIONS:
+        raise ValueError(f"blade_geometry.parametrization must be one of {tuple(STATOR_PARAMETRIZATIONS)}.")
     if "nozzle" in config["mesh"]:
         from turbo_moc.geometry.nozzle import validate_settings
         validate_settings(config["mesh"]["nozzle"])
@@ -107,6 +110,9 @@ def normalize(config):
                 raise ValueError(f"Use either {old} or {new}, not both.")
             result[new] = result.pop(old)
     result["flow_domain"] = normalize_domain(result["flow_domain"])
+    if isinstance(result.get("blade_geometry"), dict):
+        result["blade_geometry"] = {"parametrization": result["blade_geometry"].get("parametrization", "full"),
+                                    **result["blade_geometry"]}
     if isinstance(result["mesh"].get("numerics"), dict):
         result["mesh"]["numerics"].setdefault("recombine_minimum_quality", 0.1)
     view = result["mesh"].setdefault("visualization", {})

@@ -200,6 +200,11 @@ def controls(value, prefix, row_id, *, hidden_paths=()):
         identifier = {"type": "parameter", "row": row_id, "path": path}
         if name == "fluid_name":
             widget = fluid_dropdown(identifier, item)
+        elif path == "blade_geometry.parametrization":
+            widget = dcc.Dropdown(id=identifier, options=[
+                {"label": "Symmetric (mirrored nozzle wall)", "value": "full"},
+                {"label": "Asymmetric (circular-arc pressure side)", "value": "semi"}],
+                value=item, clearable=False, searchable=False)
         elif name == "extension_type" and prefix.startswith("flow_domain."):
             widget = dcc.Dropdown(id=identifier, options=[
                 {"label": "Smooth B-spline", "value": "bspline"},
@@ -229,7 +234,10 @@ def controls(value, prefix, row_id, *, hidden_paths=()):
             title = ("Minimum Gmsh quality for recombined quadrilaterals (0–1; default 0.1). "
                      "Higher values can retain more triangles. This is not a maximum skewness "
                      "limit; inspect the final 2D and 3D mesh quality.")
-        label = name.replace("_", " ")
+        label = "Blade parametrization" if path == "blade_geometry.parametrization" else name.replace("_", " ")
+        if path == "blade_geometry.parametrization":
+            title = ("Symmetric: the pressure side mirrors the MoC nozzle wall. "
+                     "Asymmetric: only the suction side follows the MoC wall; the pressure side is one circular arc.")
         if prefix.startswith("flow_domain"):
             label = {"extension_length": "Extension length [chords]",
                      "domain_shift_value": "Domain shift value [pitch]",

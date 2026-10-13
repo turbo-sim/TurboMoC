@@ -159,10 +159,10 @@ def get_stator_template(config, nozzle_reference, nozzle=None):
         template = cache.get(("template", template_key))
         if template is not None:
             return geo.decode(template)
-        from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+        from turbo_moc.geometry.stator_blade import parametrize_stator
         nozzle = load_nozzle(nozzle_reference, config) if nozzle is None else nozzle
         wall = nozzle["wall_final"]
-        template = parametrize_stator_blade(wall["x"], wall["y"], **config["blade_geometry"])
+        template = parametrize_stator(wall["x"], wall["y"], **config["blade_geometry"])
         cache.set(("template", template_key), geo.encode(template))
         return template
     finally:

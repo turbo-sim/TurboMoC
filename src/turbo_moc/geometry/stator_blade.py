@@ -23,7 +23,7 @@ from turbo_moc.legacy.geometry.annular import wrap_blade_annular
 from turbo_moc.geometry.splines import BSplineTool
 
 __all__ = [
-    "parametrize_stator_blade", "parametrize_stator_blade_semi",
+    "parametrize_stator_blade", "parametrize_stator_blade_semi", "parametrize_stator", "STATOR_PARAMETRIZATIONS",
     "export_blade_step", "export_flared_blade_step", "export_annular_blade_step",
     "export_annular_blade_stl",
     "move_control_point_along_normal",
@@ -403,9 +403,9 @@ def parametrize_stator_blade_semi(
       leading and trailing edge), not a mirrored-wall-plus-Hermite-spline
       bridge -- so pitch/inlet_opening/the arc's own geometry set the
       passage shape directly, rather than the wall's own divergence.
-    - Control points: a plain (non-fixed-endpoint) least-squares B-spline
-      fit (BSplineTool.backward), not backward_fixed -- the fitted curve
-      is not forced through the exact suction/pressure start/end points.
+    - Control points: an endpoint-fixed least-squares B-spline fit
+      (BSplineTool.backward_fixed), as in parametrize_stator_blade(), so the
+      fitted curve closes exactly on the trailing-edge arc for meshing.
 
     Same "plain args in, flat JSON-safe dict out" pattern, same units
     convention (wall_x/wall_y in METERS, everything in the returned dict
@@ -513,10 +513,10 @@ def parametrize_stator_blade_semi(
     _, unique_indices = np.unique(raw_pts, axis=0, return_index=True)
     cleaned_pts = raw_pts[np.sort(unique_indices)]
 
-    # --- Fit a plain (non-fixed-endpoint) cubic B-spline through the contour.
+    # --- Fit an endpoint-fixed cubic B-spline through the contour.
     spline3 = BSplineTool(degree=3)
     baseline_equi = spline3.reparameterize_equidistant(cleaned_pts, num_points=num_baseline_points)
-    control_points, knots = spline3.backward(baseline_equi, n_cp)
+    control_points, knots = spline3.backward_fixed(baseline_equi, n_cp)
     blade_curve = spline3.forward(control_points, knots, num_points=num_curve_points)
 
     if mirror:
@@ -990,3 +990,12 @@ def export_radial_blade_stl(blade_data, r1, r2, depth, stl_path,
     _, solid = _build_radial_blade_solid(cq, blade_data, r1, r2, depth, source=source,
                                           theta0=theta0, z_offset=z_offset)
     cq.exporters.export(solid, str(stl_path))
+
+
+STATOR_PARAMETRIZATIONS = {"full": parametrize_stator_blade, "semi": parametrize_stator_blade_semi}
+
+
+def parametrize_stator(wall_x, wall_y, parametrization="full", **kwargs):
+    if parametrization not in STATOR_PARAMETRIZATIONS:
+        raise ValueError(f"Stator parametrization must be one of {tuple(STATOR_PARAMETRIZATIONS)}.")
+    return STATOR_PARAMETRIZATIONS[parametrization](wall_x, wall_y, **kwargs)

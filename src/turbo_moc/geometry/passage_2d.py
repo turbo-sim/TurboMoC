@@ -15,7 +15,7 @@ import numpy as np
 from scipy.interpolate import BSpline, make_interp_spline
 from scipy.optimize import minimize_scalar
 
-from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+from turbo_moc.geometry.stator_blade import parametrize_stator
 from ..visualization.geometry_mpl import draw_domain, plot_construction, plot_flow_domain
 
 
@@ -406,7 +406,7 @@ def build_geometry(nozzle, config):
     wall = nozzle["wall_final"]
     if not nozzle["converged"] or len(wall["x"]) < 2:
         raise RuntimeError("The nozzle design did not converge to a usable wall.")
-    blade = parametrize_stator_blade(wall["x"], wall["y"], **config["blade"])
+    blade = parametrize_stator(wall["x"], wall["y"], **config["blade"])
     passage = config["passage"]
     flow_domain = generate_flow_domain(
         blade, wall, inlet_chords=passage["inlet_chords"],
