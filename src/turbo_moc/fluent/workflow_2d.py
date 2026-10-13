@@ -35,10 +35,11 @@ from .common import (
     validate_solver_options,
     workflow_output,
 )
-from turbo_moc.geometry import geometry_2d as geo
-from turbo_moc.geometry.moc import solve_nozzle
-from turbo_moc.meshing.meshing_2d import create_mesh
-from turbo_moc.configuration_2d import read_configuration, validate_geometry_figure
+from turbo_moc.geometry import passage_2d as geo
+from turbo_moc.workflows.nozzle import solve_nozzle
+from turbo_moc.meshing.mesh_2d import create_mesh
+from turbo_moc.configuration.planar import read_configuration, validate_geometry_figure
+from turbo_moc.configuration.fluid_inputs import solver_parameters
 from turbo_moc.reporting import (
     display_path,
     get_logger,
@@ -95,7 +96,7 @@ def validate_workflow(workflow, config_file):
         raise ValueError(
             "The Fluent stator workflow requires planar MoC flow (delta_flow: 0)."
         )
-    p0 = positive(nozzle["P0"], "nozzle.P0")
+    p0 = positive(solver_parameters(nozzle)["P0"], "nozzle.P0")
     p_back = positive(nozzle.get("p_back", np.nan), "nozzle.p_back")
     if p_back >= p0:
         raise ValueError("The stator expansion requires nozzle.p_back < nozzle.P0.")

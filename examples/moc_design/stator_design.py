@@ -10,9 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import turbo_moc
+from turbo_moc.configuration.fluid_inputs import solver_parameters
 from turbo_moc.reporting import logging_context
 
-from turbo_moc.geometry import parametrize_stator_blade
+from turbo_moc.geometry.stator_blade import parametrize_stator_blade
 
 # 1. Cyclopentane stator design conditions from Cioffi et al. (2026),
 #    Table 3. This uses the current package geometry, not an exact reproduction
@@ -20,9 +21,12 @@ from turbo_moc.geometry import parametrize_stator_blade
 # Show the solver's progress on the console (INFO; use level="DEBUG" for details).
 with logging_context():
     data = turbo_moc.design_nozzle(
-        fluid_name="Cyclopentane",
-        P0=2.513e5,  # Stagnation pressure [Pa].
-        Q0=0.025,  # Two-phase inlet: 2.5% vapor by mass.
+        **solver_parameters(dict(
+            fluid_name="Cyclopentane",
+            inlet_property_pair="PQ_INPUTS",
+            inlet_property_1=2.513e5,  # Stagnation pressure [Pa].
+            inlet_property_2=0.025,  # Two-phase inlet: 2.5% vapor by mass.
+        )),
         p_back=0.95e5,  # Design exit pressure [Pa].
         solver="conventional",
         use_true_sauer_line=True,  # Smooth sonic transition within the mixture.

@@ -16,12 +16,13 @@ from . import common
 from .barotropic_model import generate_barotropic_model, positive
 from .graphics_3d import prepare_contour_graphics, export_contours
 from .import_checks import validate_import
-from ..configuration import read_configuration, to_shared
-from ..configuration_2d import validate_geometry_figure
-from ..configuration_project import get_row, load_project
-from ..geometry import geometry_3d as geo
-from ..geometry.moc import solve_nozzle
-from ..meshing import meshing_3d as mesh3
+from turbo_moc.configuration.row import read_configuration, to_shared
+from turbo_moc.configuration.planar import validate_geometry_figure
+from turbo_moc.configuration.project import get_row, load_project
+from turbo_moc.configuration.fluid_inputs import solver_parameters
+from turbo_moc.geometry import blade_row as geo
+from turbo_moc.workflows.nozzle import solve_nozzle
+from turbo_moc.meshing import mesh_3d as mesh3
 from ..reporting import (
     get_logger,
     logging_context,
@@ -98,7 +99,7 @@ def validate_workflow(workflow, config_file):
         raise ValueError(
             "The stator template requires planar MoC flow (delta_flow: 0)."
         )
-    p0 = positive(nozzle["P0"], "method_of_characteristics.P0")
+    p0 = positive(solver_parameters(nozzle)["P0"], "method_of_characteristics.P0")
     if positive(nozzle.get("p_back", np.nan), "method_of_characteristics.p_back") >= p0:
         raise ValueError("The stator expansion requires p_back < P0.")
     cgns = config["mesh"]["cgns"]

@@ -24,11 +24,11 @@ CURVE_SAMPLES = 600
 import matplotlib
 import numpy as np
 
-from turbo_moc import configuration_project as projects
-from turbo_moc.fluid_inputs import solver_parameters
-from turbo_moc.geometry import geometry_2d as planar
-from turbo_moc.geometry.rotor_geometry import build_rotor_design
-from turbo_moc.rotor import design_rotor_vortex_blade
+from turbo_moc.configuration import project as projects
+from turbo_moc.configuration.fluid_inputs import solver_parameters
+from turbo_moc.geometry import passage_2d as planar
+from turbo_moc.geometry.rotor_blade import build_rotor_design
+from turbo_moc.core.vortex_blade import design_rotor_vortex_blade
 
 
 SEGMENTS = ("Pressure wall", "TE fillet", "TE stub", "Suction wall", "LE stub", "LE fillet")

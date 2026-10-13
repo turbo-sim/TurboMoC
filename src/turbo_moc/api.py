@@ -8,7 +8,7 @@ UI layer can sit on top of this exactly like turbodash's app.py sits on top
 of core.py's compute_stage_meanline() -- call design_nozzle() inside a
 callback, fan its returned dict out into plot/table builders.
 
-This module owns no state itself: FluidManager caching (turbo_moc.core.classes.
+This module owns no state itself: FluidManager caching (turbo_moc.core.thermo_characteristics.
 get_fluid_manager) already lives one level down and is reused as-is, so
 repeated calls at the same operating point (the common case while a UI
 sweeps geometry) stay cheap.
@@ -20,11 +20,11 @@ import time
 import numpy as np
 import jaxprop as jxp
 
-from turbo_moc.core import classes as _classes
-from turbo_moc.core.classes import get_fluid_manager
+from turbo_moc.core import thermo_characteristics as _classes
+from turbo_moc.core.thermo_characteristics import get_fluid_manager
 from turbo_moc.reporting import format_pressure, summary
-from turbo_moc.solvers.conventional import MOCSolver as ConventionalSolver
-from turbo_moc.solvers.mln import MOCSolverMLN
+from turbo_moc.core.moc_conventional import MOCSolver as ConventionalSolver
+from turbo_moc.core.moc_minimum_length import MOCSolverMLN
 
 __all__ = ["design_nozzle", "list_supported_fluids", "NozzleDesignError"]
 

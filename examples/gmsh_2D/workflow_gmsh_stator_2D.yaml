@@ -15,8 +15,9 @@ workflow:
 
 nozzle:
   fluid_name: Cyclopentane
-  P0: 251300.0                 # Stagnation pressure [Pa]
-  Q0: 0.025                   # Inlet vapour mass fraction [-]
+  inlet_property_pair: PQ_INPUTS
+  inlet_property_1: 251300.0  # Stagnation pressure [Pa]
+  inlet_property_2: 0.025     # Inlet vapour mass fraction [-]
   p_back: 95000.0             # Exit pressure [Pa]
   solver: conventional
   use_true_sauer_line: true

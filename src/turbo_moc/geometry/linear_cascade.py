@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from . import geometry_2d as planar
+from turbo_moc.geometry import passage_2d as planar
 from .meridional_channel import scale_blade, scale_flow_domain, validate_machine
 
 

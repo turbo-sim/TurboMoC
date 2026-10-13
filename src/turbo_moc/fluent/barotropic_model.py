@@ -6,6 +6,7 @@ import numpy as np
 from numpy.polynomial import Polynomial
 
 from turbo_moc.reporting import display_path, get_logger, summary
+from turbo_moc.configuration.fluid_inputs import solver_parameters
 
 logger = get_logger("fluent.barotropy")
 
@@ -39,8 +40,15 @@ def resolve_inlet_state(barotropy, nozzle_parameters, nozzle):
         backend=nozzle_parameters.get("backend", "HEOS"),
     )
     actual = nozzle.get("meta", {})
-    p0 = float(actual.get("P0", nozzle_parameters.get("P0", np.nan)))
-    q0 = actual.get("Q0", nozzle_parameters.get("Q0"))
+    # MoC metadata is authoritative, including any quality nudge. Resolve the
+    # editable input pair only when it must supply missing stagnation values.
+    parameters = nozzle_parameters
+    actual_quality = actual.get("Q0")
+    actual_two_phase = actual_quality is not None and np.isfinite(actual_quality)
+    if not {"P0", "Q0"}.issubset(actual) or (not actual_two_phase and "T0" not in actual):
+        parameters = solver_parameters(nozzle_parameters)
+    p0 = float(actual.get("P0", parameters.get("P0", np.nan)))
+    q0 = actual.get("Q0", parameters.get("Q0"))
     if q0 is not None and np.isfinite(q0):
         if not 0 <= q0 <= 1:
             raise ValueError("The MoC inlet quality must be in [0, 1].")
@@ -49,7 +57,7 @@ def resolve_inlet_state(barotropy, nozzle_parameters, nozzle):
         state = fluid.get_state(
             barotropy.PT_INPUTS,
             p0,
-            positive(actual.get("T0", nozzle_parameters.get("T0", np.nan)), "nozzle.T0"),
+            positive(actual.get("T0", parameters.get("T0", np.nan)), "nozzle.T0"),
         )
         q0 = None
     return fluid, state, q0

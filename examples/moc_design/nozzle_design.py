@@ -11,18 +11,22 @@ import numpy as np
 from CoolProp.CoolProp import PropsSI
 
 import turbo_moc
+from turbo_moc.configuration.fluid_inputs import solver_parameters
 from turbo_moc.reporting import logging_context
 
 # 1. Nitrogen flashing case from Cioffi et al. (NICFD 2026), Fig. 2:
 #    20 bar stagnation pressure and 10 K inlet subcooling, expanding to 2 bar.
-P0 = 20e5
-T0 = PropsSI("T", "P", P0, "Q", 0, "Nitrogen") - 10.0
+pressure = 20e5
+temperature = PropsSI("T", "P", pressure, "Q", 0, "Nitrogen") - 10.0
 # Show the solver's progress on the console (INFO; use level="DEBUG" for details).
 with logging_context():
     data = turbo_moc.design_nozzle(
-        fluid_name="nitrogen",
-        P0=P0,  # Stagnation pressure [Pa].
-        T0=T0,  # Subcooled-liquid inlet temperature [K]; quality is not specified.
+        **solver_parameters(dict(
+            fluid_name="nitrogen",
+            inlet_property_pair="PT_INPUTS",
+            inlet_property_1=pressure,  # Stagnation pressure [Pa].
+            inlet_property_2=temperature,  # Subcooled-liquid inlet temperature [K].
+        )),
         p_back=2e5,  # Back pressure [Pa].
         solver="conventional",
     )

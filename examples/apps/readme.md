@@ -51,14 +51,15 @@ sizing, CAD and rotor tools. Both launchers accept
 `TURBO_MOC_EXAMPLE_SMOKE_TEST=1` for initialization without a server.
 
 Installed package commands remain available separately: `turbo_moc-app`
-(or `python -m turbo_moc.apps.app`) and `turbo_moc-app-legacy` for the preceding app.
+(or `python -m turbo_moc.app`) and `turbo_moc-app-legacy` for the preceding app
+(`python -m turbo_moc.legacy.app`).
 The installed current command still accepts explicit configuration, port and
 output arguments; these are not required by the example launchers.
 Run `poetry install --only-root` after updating a Poetry checkout to refresh
 the installed commands. Prefix either command with `poetry run` in that environment.
 
-See the [app guide](../../src/turbo_moc/apps/app/readme.md) and
-[feature comparison](../../docs/internal_information/merging_summary.md).
+See the [app guide](../../src/turbo_moc/app/readme.md) and
+[development checklist](../../docs/internal_information/app_development_checklist.md).
 
 Mesh generation automatically includes Fluent-compatible CGNS conversion.
 Use **Export project (.zip)** beside the generation controls to download:
@@ -91,5 +92,5 @@ minimum gap from the farthest upstream trailing edge to the rotor leading-edge
 plane; radial spacing follows the supplied row inlet/outlet radii. Each row's
 mesh remains an independent zone inside `stage.cgns`, with separate interface
 faces. Set up their interface coupling and the rotor reference frame in the
-CFD solver. See the [app guide](../../src/turbo_moc/apps/app/readme.md)
+CFD solver. See the [app guide](../../src/turbo_moc/app/readme.md)
 for input units, coupling assumptions and supported rotor settings.

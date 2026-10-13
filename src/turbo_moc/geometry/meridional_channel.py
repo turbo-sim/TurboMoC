@@ -12,8 +12,8 @@ import numpy as np
 from scipy.integrate import quad, solve_ivp
 from scipy.interpolate import BSpline
 
-from . import geometry_2d as planar
-from turbo_moc.geometry import parametrize_stator_blade
+from turbo_moc.geometry import passage_2d as planar
+from turbo_moc.geometry.stator_blade import parametrize_stator_blade
 
 # =============================================================================
 # 1. Thin input adapters: axial/radial dimensions -> common geometry definition

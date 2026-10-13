@@ -17,8 +17,9 @@ rows:
   geometry:
     method_of_characteristics:
       fluid_name: Cyclopentane
-      P0: 251300.0
-      Q0: 0.025
+      inlet_property_pair: PQ_INPUTS
+      inlet_property_1: 251300.0
+      inlet_property_2: 0.025
       p_back: 95000.0
       solver: conventional
       use_true_sauer_line: true

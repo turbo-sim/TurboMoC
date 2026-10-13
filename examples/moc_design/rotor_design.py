@@ -8,24 +8,25 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import jaxprop as jxp
 
 import turbo_moc
+from turbo_moc.configuration.fluid_inputs import solver_parameters
 
-from turbo_moc.rotor import design_rotor_vortex_blade
+from turbo_moc.core.vortex_blade import design_rotor_vortex_blade
 
 # 1. Resolve the saturated inlet state in the rotor-relative frame.
 pressure = 20e5
 quality = 0.5
-temperature = float(jxp.Fluid("nitrogen").get_state(jxp.PQ_INPUTS, pressure, quality).T)
 
 # 2. Set the inlet/outlet Mach numbers and the two constant-Mach wall arcs.
 # The solver derives the outlet angle; r_star sets the physical length scale.
 data = design_rotor_vortex_blade(
-    fluid_name="nitrogen",
-    P0_rel=pressure,  # Relative stagnation pressure [Pa].
-    T0_rel=temperature,  # Saturation temperature [K]; required by the rotor API.
-    Q0_rel=quality,  # Relative stagnation vapor mass fraction.
+    **solver_parameters(dict(
+        fluid_name="nitrogen",
+        inlet_property_pair="PQ_INPUTS",
+        inlet_property_1=pressure,  # Relative stagnation pressure [Pa].
+        inlet_property_2=quality,  # Relative stagnation vapor mass fraction.
+    ), rotor=True),
     M_inlet=1.6,
     M_outlet=1.2,
     M_lower=1.1,

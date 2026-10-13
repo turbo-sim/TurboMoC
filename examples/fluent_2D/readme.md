@@ -261,10 +261,10 @@ counts include only the current run.
 | `run_fluent_case.py` | Thin script using its adjacent YAML and output folder |
 | `../../src/turbo_moc/fluent/workflow_2d.py` | YAML loading, shared mesh orchestration, Fluent configuration, staged solve, periodic instancing and both PNGs |
 | `../../src/turbo_moc/fluent/barotropic_model.py` | Inlet resolution, model generation, piecewise fits, validation and safe expression export |
-| `../../src/turbo_moc/geometry/moc.py` | Fresh MoC solve and converged-wall validation |
-| `../../src/turbo_moc/geometry/geometry_2d.py` | Planar blade construction and periodic passage definition |
-| `../../src/turbo_moc/meshing/meshing_2d.py` | Gmsh mesh generation, mesh checks, CGNS export and quality reports |
-| `../../src/turbo_moc/configuration_2d.py` | Shared planar design/mesh YAML reader and validation |
+| `../../src/turbo_moc/workflows/nozzle.py` | Fresh MoC solve and converged-wall validation |
+| `../../src/turbo_moc/geometry/passage_2d.py` | Planar blade construction and periodic passage definition |
+| `../../src/turbo_moc/meshing/mesh_2d.py` | Gmsh mesh generation, mesh checks, CGNS export and quality reports |
+| `../../src/turbo_moc/configuration/planar.py` | Shared planar design/mesh YAML reader and validation |
 | `workflow_fluent_stator_2D.yaml` | Workflow, thermodynamic range, solver, iteration and image settings |
 | `../../src/turbo_moc/reporting.py` | Shared console/file reporting, numbered sections, summaries and failure tracebacks |
 

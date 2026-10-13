@@ -33,8 +33,8 @@ cad = ["cadquery"]
 fluent = ["ansys-fluent-core[reader]>=0.38,<0.43"]
 
 [project.scripts]
-turbo_moc-app-legacy = "turbo_moc.app:main"
-turbo_moc-app = "turbo_moc.apps.app:main"
+turbo_moc-app-legacy = "turbo_moc.legacy.app:main"
+turbo_moc-app = "turbo_moc.app:main"
 
 [tool.poetry.group.dev.dependencies]
 bibtexparser = ">=1.4,<2"
@@ -55,7 +55,7 @@ bump-my-version = "^1.5.1"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"turbo_moc.apps.app" = ["assets/*.js", "assets/*.css", "assets/*.svg"]
+"turbo_moc.app" = ["assets/*.js", "assets/*.css", "assets/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

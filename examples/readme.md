@@ -39,7 +39,8 @@ barotropic model as Fluent 2D, adds hub/shroud walls and reports internal-sectio
 pressure/Mach contours. Set `prepare_only: true` in its YAML to generate the mesh
 and model without launching Fluent.
 
-[Theory and migration notes](../z_information/readme.md) explain the algorithms
-and source ownership. The preserved app and numerical implementations remain
-under `turbo_moc.deprecated`. Workflows use the shared `turbo_moc.reporting`
+[Theory](../docs/internal_information/theory_guide.md) and
+[refactor summary](../refactor.md) explain the algorithms
+and source ownership. The preserved app and its workflow-specific code remain
+under `turbo_moc.legacy`, sharing the scientific implementations in `turbo_moc.core`. Workflows use the shared `turbo_moc.reporting`
 module directly.

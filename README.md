@@ -60,7 +60,7 @@ remain explicit planning placeholders.
   periodicity, quality and CGNS connectivity are audited before publication.
 - The preserved legacy workflow retains structured O-H topology, sizing from
   target $y^+$, stator/rotor axial/radial meshes and original guarded cell
-  repairs. Those capabilities remain available under `turbo_moc.deprecated`;
+  repairs. Those capabilities remain available under `turbo_moc.legacy`;
   they are not silently activated in the canonical pipeline.
 
 ![Unstructured 2D passage mesh and the inflation layers at the trailing edge](docs/images/readme_mesh_2d.png)
@@ -79,9 +79,10 @@ remain explicit planning placeholders.
   [Gmsh 3D](examples/gmsh_3D/readme.md) and
   [Fluent 2D automation](examples/fluent_2D/readme.md).
 
-The [merging summary](z_information/merging_summary.md) records the canonical/deprecated
-module map, complete interface feature matrix and remaining integration work.
-The [teaching guide](z_information/theory_guide.md) derives the coordinate
+The [package refactor](refactor.md) describes the current module layout and import changes.
+The [app development checklist](docs/internal_information/app_development_checklist.md)
+records retained capabilities and remaining integration work.
+The [teaching guide](docs/internal_information/theory_guide.md) derives the coordinate
 mapping, mesh deformation, connectivity and CGNS export.
 
 ## Installation instructions

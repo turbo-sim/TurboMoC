@@ -9,7 +9,7 @@ CONFIG_FILE = HERE / "cases" / "axial_stator.yaml"
 OUTPUT_DIR = HERE / "output"
 
 if __name__ == "__main__":
-    from turbo_moc.apps.app import create_app
+    from turbo_moc.app import create_app
     app = create_app(CONFIG_FILE, output_dir=OUTPUT_DIR)
     if os.environ.get("TURBO_MOC_EXAMPLE_SMOKE_TEST") == "1":
         if app.server.test_client().get("/_dash-layout").status_code != 200:

@@ -16,9 +16,9 @@ before exporting MSH and CGNS. Console progress is also saved in
 is specified by the YAML. The numerical callable accepts explicit configuration,
 output and optional row ID, without assuming an examples-directory layout.
 
-[Theory](../../z_information/theory_guide.md),
-[deformation mathematics](../../z_information/deformation_note.md) and
-[roadmap](../../z_information/roadmap.md) explain the pipeline. App runners and
+[Theory](../../docs/internal_information/theory_guide.md),
+[deformation mathematics](../../docs/internal_information/3D_mesh_deformation.md) and
+[roadmap](../../docs/internal_information/roadmap.md) explain the pipeline. App runners and
 sample app cases are separate under [apps/](../apps/readme.md).
 
 ## Workflow display and reporting

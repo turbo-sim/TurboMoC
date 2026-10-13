@@ -8,7 +8,7 @@ plane or radial cylinder at every span station, including tapered blades.
 import numpy as np
 from scipy.optimize import brentq
 
-from . import geometry_2d as planar
+from turbo_moc.geometry import passage_2d as planar
 
 
 def interface_prime(mapping, interface, placement, eta):

@@ -59,7 +59,7 @@ All execution controls are in the YAML; the runner needs no arguments:
 `mesh.show_gui: true` is sufficient to open Gmsh; there is no second runner flag.
 Set it to `false` for unattended runs. It has no effect in geometry-only mode.
 
-Programmatic runs use `turbo_moc.meshing.meshing_2d.main`, with explicit
+Programmatic runs use `turbo_moc.meshing.mesh_2d.main`, with explicit
 output paths and YAML-controlled figure/viewer options. Shared implementations live in
 `src/turbo_moc/`; the launcher contains no numerical code.
 
@@ -105,7 +105,7 @@ log. There are no timing decorators, elapsed-time measurements or viewer timings
 
 ## Nozzle and blade geometry
 
-The shared [MoC entry point](../../src/turbo_moc/geometry/moc.py), `solve_nozzle`, calls
+The shared [MoC entry point](../../src/turbo_moc/workflows/nozzle.py), `solve_nozzle`, calls
 `turbo_moc.design_nozzle` afresh on every workflow run and validates its final
 wall before blade construction. The default configuration uses the conventional
 planar solver for Cyclopentane. No persistent MoC solution, dependency-signature
@@ -133,7 +133,7 @@ not a mean-thickness camberline of the final fitted blade.
 
 ## Smooth flow domain and placement
 
-`../../src/turbo_moc/geometry/geometry_2d.py` constructs a reference with four joined sections:
+`../../src/turbo_moc/geometry/passage_2d.py` constructs a reference with four joined sections:
 
 1. A clamped cubic B-spline blends axial inlet flow to the inlet metal angle.
 2. A convergent reference integrates a linear inlet-to-throat metal-angle law.
@@ -337,7 +337,7 @@ are `blade`, `inlet`, `outlet`, `periodic_left`, `periodic_right`, and `fluid`.
 
 ## Mesh statistics and quality report
 
-After meshing, `meshing_2d.compute_mesh_report(surface, boundaries, inflation=...)`
+After meshing, `mesh_2d.compute_mesh_report(surface, boundaries, inflation=...)`
 collects the active Gmsh mesh and computes geometric statistics in Python.
 `write_mesh_report(report, output_dir)` writes an offline HTML report, JSON
 summary, CSV cell data, and a histogram PNG. Reporting runs before Gmsh closes.
@@ -393,7 +393,7 @@ because it requires the flow solution and wall shear stress.
 | `worst_cells` | Cells listed for each worst-quality ranking; default 10 |
 | `inflation_tolerance` | Relative tolerance for matching reconstructed layer heights; default 0.35 |
 
-For numerical workflows, `meshing_2d.analyze_mesh` accepts NumPy coordinates,
+For numerical workflows, `mesh_2d.analyze_mesh` accepts NumPy coordinates,
 zero-based triangle/quad connectivity, element tags, boundary edges, and optional
 periodic node mapping without requiring an active Gmsh model. `cell_data` contains the
 per-cell arrays; JSON contains summary data and CSV contains the detailed arrays.
@@ -405,7 +405,7 @@ millimetres to metres for CGNS only. `boundary_types` assigns the desired CGNS
 boundary types; it does not set pressures, temperatures, materials, or turbulence
 models in the CFD solver.
 
-`meshing_2d.export_fluent_cgns` constructs one unstructured CGNS zone with
+`mesh_2d.export_fluent_cgns` constructs one unstructured CGNS zone with
 cell and physical dimensions both equal to 2. It includes first-order
 triangles/quadrilaterals, named boundary edges, parent-cell information, and
 reciprocal periodic node connectivity. The NumPy-based writer in
@@ -434,26 +434,29 @@ establish licensed Fluent import acceptance for every release.
 | File | Responsibility |
 | --- | --- |
 | `run_mesh_generation.py` | Thin command-line launcher |
-| `../../src/turbo_moc/meshing/meshing_2d.py` | Gmsh CAD, sizing, inflation, periodicity, CGNS, figures, quality reports and callable `main` |
-| `../../src/turbo_moc/configuration_2d.py` | YAML loading and validation |
-| `../../src/turbo_moc/geometry/moc.py` | Fresh MoC solving, progress forwarding and final-wall validation |
+| `../../src/turbo_moc/meshing/mesh_2d.py` | Gmsh CAD, sizing, inflation, periodicity, CGNS, quality reports and callable `main` |
+| `../../src/turbo_moc/configuration/planar.py` | YAML loading and validation |
+| `../../src/turbo_moc/workflows/nozzle.py` | Fresh MoC solving, progress forwarding and final-wall validation |
 | `workflow_gmsh_stator_2D.yaml` | Nozzle, blade, passage and mesh settings |
-| `../../src/turbo_moc/geometry/geometry_2d.py` | Blade/passage construction, splines, placement, clearance and geometry views |
+| `../../src/turbo_moc/geometry/passage_2d.py` | Blade/passage construction, splines, placement and clearance |
+| `../../src/turbo_moc/visualization/geometry_mpl.py` | Blade and passage construction figures |
+| `../../src/turbo_moc/visualization/mesh_mpl.py` | Mesh display controls and PNG/SVG figures |
 | `../../src/turbo_moc/reporting.py` | Shared console/file handlers and workflow summaries |
 
 The numerical modules have section comments for navigation. Geometry proceeds
-from validation and curve construction to clearance, blade assembly and plots.
+from validation and curve construction to clearance and blade assembly;
+plotting functions live under `turbo_moc.visualization`.
 Meshing proceeds from CAD and sizing through export/reporting to `create_mesh`
 and the callable case `main`. Configuration validation is imported inside
 `main`, so validation can use numerical functions without a module cycle.
 Only entry points configure logging handlers.
 
-For reuse, import `build_geometry` and `plot_construction` from
-`example_meshing.src.geometry.geometry_2d`; import `create_mesh`,
+For reuse, import `build_geometry` from `turbo_moc.geometry.passage_2d` and
+`plot_construction` from `turbo_moc.visualization.geometry_mpl`; import `create_mesh`,
 `analyze_mesh`, `compute_mesh_report` or `main` from
-`example_meshing.src.meshing.meshing_2d`. The MoC solver entry point is
-`example_meshing.src.geometry.moc.solve_nozzle`, and the planar reader remains
-`example_meshing.src.configuration_2d.read_configuration`. Fluent imports
+`turbo_moc.meshing.mesh_2d`. The MoC solver entry point is
+`turbo_moc.workflows.nozzle.solve_nozzle`, and the planar reader remains
+`turbo_moc.configuration.planar.read_configuration`. Fluent imports
 these owners directly.
 
 The targeted tests exercise real small meshes, inflation, automatic placement,
@@ -466,7 +469,7 @@ The latest default CLI run completed a fresh MoC solve and generated 25,519
 all-quad cells, with minimum scaled Jacobian 0.023 and 193 periodic pairs,
 CGNS output, PNG/SVG mesh views and an HTML report. A real Fluent prepare-only
 run also generated the mesh and barotropic model without launching Fluent.
-See the [migration record](../../z_information/migration.md) for the complete verification scope.
+See the [refactor summary](../../refactor.md) for restructuring verification.
 
 Run just the fast mesh and Fluent automation checks:
 
