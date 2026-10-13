@@ -24,6 +24,13 @@ stator and rotor geometry tools.
 Install the package, design a nozzle, inspect the result, and launch the app.
 :::
 
+:::{grid-item-card} App user guide
+:link: app_user_guide
+:link-type: doc
+
+Follow an illustrated walkthrough to design a stator and rotor, inspect their meshes, and export a project.
+:::
+
 :::{grid-item-card} Examples
 :link: examples/index
 :link-type: doc
@@ -73,6 +80,7 @@ Inspect the modules, classes, and functions provided by the Python package.
 :maxdepth: 2
 
 getting_started
+App user guide <app_user_guide>
 examples/index
 logging
 theory/index

@@ -1,6 +1,28 @@
 # Organized development TODOs and exploration prompts
 
 
+## 0. Quick thoughts
+- [ ] Ensure that the fluent automation workflow is an strict superset of the geometry/meshing workflow, such that the yaml file of the geometry/meshing could be embedded into a broaded CFD simulation/optimization framework.
+- [ ] Decide whether to expose structured topology and guarded repair in the canonical workflow; retain existing legacy behavior meanwhile.
+- [ ] Create Fluent workflow for stator+rotor 3D cases.
+
+
+## pACKAGE Refactoring suggestions from chatGPT
+
+- Split `core/thermo_characteristics.py` into fluid-state management and MoC
+  characteristic equations, retaining one shared fluid-manager cache.
+- Separate CAD exporters from stator parametrization. This would remove the
+  remaining shared-geometry dependency on legacy wrapping.
+- Consider separating meridional wall definitions, coordinate mapping, and
+  section construction when their interfaces are established.
+- Separate mesh generation, spanwise deformation, volume assembly, and CGNS
+  export from the large mesh modules in independently verified steps.
+- Audit duplicate legacy/current geometry and mesh helpers before consolidating
+  them. Identical source can still depend on different module globals.
+- Consolidate visualization styling only after comparing actual images and
+  interactive behavior. Keep app callbacks and live Fluent operations with their
+  respective applications.
+
 ## 1. App design controls and diagnostics
 
 - [ ] **A01 — Add a nozzle design mode.** Expose standalone nozzle design in the app's design-mode selector, with appropriate inputs, geometry and flow diagnostics, and saved-case support.
@@ -55,8 +77,8 @@ For each task, copy the shared instructions below followed by the matching featu
 ### Shared instructions for every exploration
 
 ```text
-Work in the method_of_characteristics repository and follow its applicable
-AGENTS.md instructions. Explore the feature described below before changing
+Work in the method_of_characteristics repository.
+Explore the feature described below before changing
 production behavior. Inspect the relevant implementation, existing tests,
 example cases, and internal documentation. Verify what is already supported
 in the current app, scripted workflows, and deprecated code; documentation

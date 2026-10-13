@@ -93,5 +93,8 @@ The current app defaults to port 8052. Use `turbo_moc-app-legacy` for the
 preserved app on port 8050. After updating a Poetry checkout, refresh the
 launcher commands with `poetry install --only-root`.
 
+Follow the illustrated [app user guide](app_user_guide.md) to load an example,
+design a stator and rotor, generate their meshes, and export the project.
+
 Continue to the [theory](theory/index.md), [examples](examples/index.md),
 or [API reference](api_reference.md).

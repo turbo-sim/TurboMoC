@@ -6,7 +6,7 @@ TurboMoC reports through Python's standard `logging` module, under one
 | Logger | Source |
 | --- | --- |
 | `turbo_moc.api` | `design_nozzle`: inputs, retries, result summary |
-| `turbo_moc.solvers.conventional`, `turbo_moc.solvers.mln` | Solver stages and progress |
+| `turbo_moc.core.moc_conventional`, `turbo_moc.core.moc_minimum_length` | Solver stages and progress |
 | `turbo_moc.meshing.*` | Gmsh meshing helpers |
 | `turbo_moc.workflows.gmsh.*`, `turbo_moc.workflows.fluent.*` | Example workflows |
 

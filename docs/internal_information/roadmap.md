@@ -1,24 +1,5 @@
 # TurboMoC development roadmap
 
-Updated 11 October 2026. This is the active implementation blueprint for [the consolidated meshing workflows](readme.md) and [TurboMoC](../examples/gmsh_3D/readme.md). It covers shared geometry/meshing services, the app, Gmsh 2D/3D and the existing Fluent 2D workflow. The migration record distinguishes earlier design and profiling observations from the current implementation.
-
-The consolidated implementation incorporates the agreed V2 workflow, subsequent layout refinements and the accepted row-based architecture. The latest decision replaces the previous three-step tab structure with Geometry generation and Mesh generation workspaces, while preserving separate numerical stages. The main app emphasizes simple boundary viewing and reporting; advanced inspection remains a backend capability. The [theory guide](theory_guide.md) now explains the coordinate mapping, mesh deformation, volume topology and export, with [reproducible mesh figures](figures/readme.md).
-
-The canonical implementation is now under `src/turbo_moc/`, with the current app under `apps/app/`. `examples/` contains launchers and editable cases; `z_information/` retains theory and teaching figures; obsolete compatibility adapters have been removed. The [merging summary](merging_summary.md) records the full module map and legacy/current feature matrix. Historical snapshots were retired after the requested feature audit; two optional Matplotlib exporters were retained under `turbo_moc.deprecated.meshing.preview`. The [migration record](migration.md) tracks that comparison separately. Fluent 3D remains a placeholder, with future solver automation explicitly outside the completed implementation.
-
-## Recorded decisions
-
-| ID | Decision | Current behavior |
-| --- | --- | --- |
-| D1 | Originally three workspaces; superseded by A2 below. | Geometry generation and Mesh generation, with contextual row controls and separate 2D/3D generation actions. |
-| D2 | One reference template, allowing annular span scaling/taper. | Fit and place once; annular sections follow the meridional mapping, while linear sections retain one physical shape. |
-| D3 | Local desktop browser first. | Dash on loopback port 8052; numerical jobs in dedicated local processes. |
-| D4 | Conformal targets plus physical size estimates for annular rows. | Section controls remain in q-space. Linear q-space lengths are physical lengths; annular captions report sampled mapped-height and span-spacing ranges. |
-| D5 | Require an up-to-date reference mesh before volume generation. | Both the UI and job service enforce this. The sweep reads the persisted topology/definition. |
-| D6 | Originally boundaries, slice and worst-cell inspection; simplified by the latest UI decision. | Main viewer exposes boundary surfaces, edges and blade-count sliders. Slice/worst-cell extraction remains tested in the backend; it is no longer an app control. |
-| A1 | Retain true 2D export and 3D extrusion for linear cascades. | Independent 2D/3D products; one span element remains an optional 3D setting. Annular 2D exports are labeled conformal references. |
-| A2 | Two persistent Geometry generation/Mesh generation workspaces, with settings grouped by row. | Shared diagrams for checked rows; independent calculation scope and inspected-row quality report; one anchored terminal. |
-| A3 | Ordered rows with stable IDs and stator/rotor roles. | Each row owns geometry and mesh inputs; MoC stators and vortex rotors share the canonical mapping and mesh stages. |
 
 ## Row-based architecture and current scope
 

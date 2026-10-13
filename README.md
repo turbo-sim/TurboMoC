@@ -199,3 +199,6 @@ turbo_moc-app
 For a Poetry installation, prefix the commands with `poetry run`. Open the local
 URL printed in the terminal (port 8052 by default). Example app YAML files are available in `examples/apps/cases/`.
 
+Follow the illustrated [app user guide](docs/source/app_user_guide.md) for the
+stator–rotor workflow, mesh inspection, quality reports, and project export.
+
