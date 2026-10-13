@@ -219,4 +219,9 @@ a {color:#376a7d}
 .stats-notes.warning {color:#9c3b2e}
 .stats-subheader {margin-top:12px}
 @media (max-width: 1100px) {.stats-columns {grid-template-columns:minmax(0,1fr)}}
+.cad-actions {display:flex;align-items:center;gap:12px;margin:6px 0 10px}
+.cad-actions small {color:#6b7f87}
+.cad-links {display:flex;flex-wrap:wrap;gap:8px 16px;margin:8px 0;font-size:12px}
+.cad-previews {display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.cad-preview {width:100%;border:1px solid #e4ebee;border-radius:5px;background:white}
 

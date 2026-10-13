@@ -81,6 +81,9 @@ def _validate_shared(config):
     if "nozzle" in config["mesh"]:
         from turbo_moc.geometry.nozzle import validate_settings
         validate_settings(config["mesh"]["nozzle"])
+    if "cad" in config["mesh"]:
+        from turbo_moc.geometry.cad_export import validate_settings as validate_cad
+        validate_cad(config["mesh"]["cad"])
     from turbo_moc.configuration.fluid_inputs import validate_inlet_inputs, validate_outlet_inputs
     validate_inlet_inputs(config["nozzle"])
     validate_outlet_inputs(config["nozzle"])

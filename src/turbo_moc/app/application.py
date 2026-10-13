@@ -156,6 +156,26 @@ def nozzle_mesh_sidebar(row, settings):
     ], open=True, className="settings mesh row-settings", **{"data-row": identifier})
 
 
+def cad_controls(row, family):
+    identifier, settings = row["id"], row["mesh"]["cad"]
+    fields = [number_field(identifier, "mesh.cad.span_sections", "Span sections", settings["span_sections"]),
+              number_field(identifier, "mesh.cad.disk_thickness", "Disk thickness [mm]", settings["disk_thickness"]),
+              number_field(identifier, "mesh.cad.axial_margin", "Disk margin [chord fraction]", settings["axial_margin"]),
+              number_field(identifier, "mesh.cad.root_overlap", "Blade root overlap [span fraction]",
+                           settings["root_overlap"])]
+    if family == "linear":
+        fields.append(number_field(identifier, "mesh.cad.linear_blades", "Blades on the base plate",
+                                   settings["linear_blades"]))
+    else:
+        fields.append(html.Label([html.Span("Fluid domain"), dcc.Dropdown(
+            id={"type": "parameter", "row": identifier, "path": "mesh.cad.fluid_annulus"},
+            options=[{"label": "One periodic passage", "value": False}, {"label": "Full annulus", "value": True}],
+            value=settings["fluid_annulus"], clearable=False, searchable=False)], className="control"))
+    return group("CAD export", [*fields, html.Small(
+        "The disk is offset from the hub surface by its thickness and extends past the blade by the margin; "
+        "blade roots are embedded in the disk by the overlap so the fused solid is one body.")])
+
+
 def row_label(row):
     # A single stage needs concise labels; stable IDs still identify saved jobs
     # and allow independently named rows when multistage support is introduced.
@@ -387,7 +407,9 @@ def sidebar(project):
                 number_field(row["id"], "mesh.nozzle.convergent_length", "Convergent length [m]",
                              settings["convergent_length"]),
                 number_field(row["id"], "mesh.nozzle.planar_depth", "Slab depth [m]",
-                             settings["planar_depth"], "planar")])],
+                             settings["planar_depth"], "planar"),
+                number_field(row["id"], "mesh.nozzle.wall_thickness", "Wall thickness, CAD body [m]",
+                             settings["wall_thickness"])])],
             open=True, className="settings design row-settings", **{"data-row": row["id"]}),
             nozzle_mesh_sidebar(row, settings)]
     for row in project_model.active_rows(project):
@@ -427,6 +449,7 @@ def sidebar(project):
         if visible:
             title = "Assembly placement" if len(project_model.active_rows(project)) > 1 else "Assembly placement · display only"
             fields.append(group(title, controls(visible, "placement", identifier)))
+        fields.append(cad_controls(row, family))
         result.append(html.Details([html.Summary(row_label(row)), *fields],
             open=False, className="settings design row-settings", **{"data-row": identifier}))
         config = project_model.row_configuration(project, identifier)
@@ -530,6 +553,30 @@ def report_panel(summary, report):
     return result
 
 
+def cad_card(title, status, report, reference):
+    base = f"/artifacts/{reference['session']}/{reference['job']}/"
+    rows = [html.Tr([html.Td(name.replace("_", " ").capitalize()), html.Td(item["solids"]),
+                     html.Td("yes" if item["valid"] else "no"), html.Td("yes" if item["watertight"] else "no"),
+                     html.Td(f"{item['volume_mm3']:.6g}")]) for name, item in report["shapes"].items()]
+    checks = [html.Li(f"{name.replace('_', ' ')}: {value:.5f}") for name, value in report["volume_checks"].items()
+              if not name.endswith("mm3")]
+    links = [html.A(path, href=base + path, className="download-link") for path in report["files"].values()]
+    previews = [html.Img(src=base + name.replace(".step", ".png"), className="cad-preview")
+                for key, name in report["files"].items() if key != "assembly_parts"]
+    return html.Section([
+        html.Div([html.Div([html.H4(title), html.Small(f"STEP · {report['units']} · {report['frame']}")]),
+                  html.Span(status.title(), className=f"status-badge {status}")], className="stats-card-header"),
+        html.Table([html.Thead(html.Tr([html.Th(text) for text in ("Shape", "Solids", "Valid", "Watertight",
+                                                                   "Volume [mm³]")])), html.Tbody(rows)],
+                   className="stats-table stations"),
+        html.Ul(checks, className="stats-notes"),
+        html.Div(links, className="cad-links"),
+        html.Div(previews, className="cad-previews"),
+        html.Details([html.Summary("Printability notes"),
+                      html.Ul([html.Li(text) for text in report["printability"]], className="stats-notes")]),
+    ], className="stats-card")
+
+
 def create_app(config_file=None, output_dir=None):
     app = Dash(__name__, assets_folder=str(flow.APP_DIR / "assets"),
         title="TurboMoC", suppress_callback_exceptions=True)
@@ -542,7 +589,7 @@ def create_app(config_file=None, output_dir=None):
     def download(session, job, filename):
         folder = flow.directory({"session": session, "job": job})
         if Path(filename).name != filename or Path(filename).suffix.lower() not in (
-            ".json", ".yaml", ".cgns", ".log"):
+            ".json", ".yaml", ".cgns", ".log", ".step", ".png"):
             abort(404)
         if Path(filename).suffix.lower() == ".cgns":
             status_file = folder / "status.json"
@@ -646,6 +693,13 @@ def create_app(config_file=None, output_dir=None):
                             html.Div(id="design-statistics", className="design-statistics")],
                             open=False, className="plot-group"),
                         ], id="blade-views"),
+                        html.Details([html.Summary("CAD export (STEP)"),
+                            html.Div([html.Button("Generate CAD", id="cad", n_clicks=0, disabled=True),
+                                html.Small("STEP solids in millimetres. Blade rows: fluid domain, blade, and disk-and-blade "
+                                           "assembly as separate parts and fused. Nozzle: fluid domain and nozzle body.")],
+                                className="cad-actions"),
+                            html.Div(id="cad-view", className="design-statistics")],
+                            open=False, className="plot-group"),
                     ], id="design-panel"),
                     html.Section([
                         html.Div([
@@ -1116,6 +1170,27 @@ def create_app(config_file=None, output_dir=None):
             return ""
         return design_statistics.panel(state["project"], registry)
 
+    @app.callback(Output("cad-view", "children"), Input("config", "data"), Input("row-references", "data"))
+    def cad_view(state, registry):
+        if not state or not state.get("valid"):
+            return ""
+        cards = []
+        for row in project_model.active_rows(state["project"]):
+            refs = (registry or {}).get(row["id"], {})
+            reference = refs.get("cad")
+            if not reference:
+                continue
+            try:
+                config = flow.resolved_configuration(state["project"], row["id"], registry)
+                status = "current" if flow.current(reference, flow.keys(config, refs.get("nozzle"))["cad"]) else "outdated"
+                report = json.loads((flow.directory(reference) / "cad_report.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError, KeyError, RuntimeError) as exc:
+                cards.append(html.Div(f"{row_label(row)}: CAD export unavailable ({exc}).", className="message"))
+                continue
+            cards.append(cad_card(row_label(row) if not nozzle_mode(state["project"]) else "Nozzle",
+                                  status, report, reference))
+        return cards or html.Small("Generate CAD to export STEP files.", className="message")
+
     @app.callback(Output("mesh-width", "data"), Input("config", "data"))
     def display_settings(state):
         if not state or not state.get("valid"):
@@ -1329,7 +1404,7 @@ def create_app(config_file=None, output_dir=None):
         return {"key": key, "rows": datasets}, selected_report
 
     @app.callback(Output("job", "data"), Output("job-error", "children"),
-        *[Input(action, "n_clicks") for action in ACTIONS],
+        *[Input(action, "n_clicks") for action in ACTIONS], Input("cad", "n_clicks"),
         State("config", "data"), State("session", "data"), State("job", "data"),
         State("job-completion", "data"), State("row-references", "data"),
         State("calculation-scope", "value"), prevent_initial_call=True,
@@ -1375,7 +1450,7 @@ def create_app(config_file=None, output_dir=None):
             refs.setdefault(row_id, {})[handle["action"]] = result["reference"]
             if row_id in {
                     r["id"] for r in project_model.active_rows(project)}:
-                destination = "design" if handle["action"] == "nozzle" else "mesh"
+                destination = "design" if handle["action"] in ("nozzle", "cad") else "mesh"
                 if visible is None or row_id in visible:
                     selected = row_id
             try:
@@ -1407,7 +1482,7 @@ def create_app(config_file=None, output_dir=None):
     def progress_title(message):
         return message or ""
 
-    @app.callback(*[Output(action, "disabled") for action in ACTIONS],
+    @app.callback(*[Output(action, "disabled") for action in ACTIONS], Output("cad", "disabled"),
         Output("volume-status", "children"), Output("calculation-controls", "title"),
         Input("config", "data"), Input("row-references", "data"), Input("job", "data"),
         Input("job-completion", "data"), Input("launch-busy", "data"),
@@ -1415,7 +1490,7 @@ def create_app(config_file=None, output_dir=None):
     def readiness(state, registry, handle, completed, launching, scope=None):
         busy = bool(launching or (handle and completed != handle["job"]))
         available, reasons = [], []
-        for action in ("nozzle", "reference", "volume"):
+        for action in ("nozzle", "reference", "volume", "cad"):
             try:
                 if not state or not state.get("valid"):
                     raise ValueError("Correct the invalid settings before calculating.")
@@ -1425,7 +1500,7 @@ def create_app(config_file=None, output_dir=None):
             except (ValueError, OSError, RuntimeError, KeyError) as exc:
                 available.append(False)
                 reasons.append(str(exc))
-        disabled = (*(busy or not value for value in available), not busy)
+        disabled = (*(busy or not value for value in available[:3]), not busy, busy or not available[3])
         message = ""
         if state and state.get("valid"):
             outdated = [row_label(row) for row in project_model.active_rows(state["project"])
@@ -1441,7 +1516,7 @@ def create_app(config_file=None, output_dir=None):
             except ValueError:
                 scope_note = "Select an active row to calculate."
             scope_note += " Rows run in machine order; plot visibility is independent."
-            reason = next((item for item in reasons if item), "")
+            reason = next((item for item in reasons[:3] if item), "")
             if reason:
                 scope_note += " " + reason
         return (*disabled, message, scope_note)

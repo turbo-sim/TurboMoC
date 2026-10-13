@@ -7,6 +7,7 @@ from turbo_moc.core.thermo_characteristics import build_convergent_inlet
 NOZZLE_DEFAULTS = {
     "convergent_length": 0.04,
     "planar_depth": 0.02,
+    "wall_thickness": 0.002,
     "axial_cells": 120,
     "radial_cells": 40,
     "wall_growth_ratio": 1.1,
@@ -27,7 +28,7 @@ def axisymmetric(parameters):
 
 
 def validate_settings(settings):
-    for name in ("convergent_length", "planar_depth", "wall_growth_ratio"):
+    for name in ("convergent_length", "planar_depth", "wall_growth_ratio", "wall_thickness"):
         value = settings[name]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 0:
             raise ValueError(f"mesh.nozzle.{name} must be a positive number.")

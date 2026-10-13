@@ -15,6 +15,7 @@ from turbo_moc.configuration.row import normalize, validate_configuration, VIEW_
 from turbo_moc.configuration.rotor import default_axial_interspace_mm, normalize_rotor_geometry, validate_rotor_configuration
 from turbo_moc.configuration.fluid_inputs import INLET_FIELDS, inlet_values
 from turbo_moc.geometry.nozzle import NOZZLE_DEFAULTS
+from turbo_moc.geometry.cad_export import CAD_DEFAULTS
 
 
 GEOMETRY_SECTIONS = (
@@ -147,6 +148,11 @@ def normalize_project(config):
                 row["mesh"] = flat["mesh"]
         nozzle_only = isinstance(project.get("machine"), dict) and project["machine"].get("design_mode") == "nozzle"
         for row in rows:
+            if isinstance(row.get("mesh"), dict):
+                cad = row["mesh"].setdefault("cad", {})
+                if isinstance(cad, dict):
+                    for name, value in CAD_DEFAULTS.items():
+                        cad.setdefault(name, value)
             inputs = row.get("geometry", {}).get("method_of_characteristics") if row.get("role") == "stator" else None
             if isinstance(inputs, dict):
                 inputs.setdefault("outlet_condition", "pressure")

@@ -12,7 +12,7 @@ from turbo_moc.configuration import project as projects
 from turbo_moc.app import workflow as flow
 
 ALL_ROWS = "all"
-STAGE_LABELS = {"nozzle": "blade design", "reference": "2D mesh", "volume": "3D mesh"}
+STAGE_LABELS = {"nozzle": "blade design", "reference": "2D mesh", "volume": "3D mesh", "cad": "CAD export"}
 _ADVANCE_LOCK = RLock()
 
 

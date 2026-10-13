@@ -140,6 +140,33 @@ def _logs(meshes):
     return "\n".join(chunks)
 
 
+def cad_entries(project, registry):
+    """Current, completed CAD exports as (archive name, file) pairs, plus README lines."""
+    entries, readme = [], []
+    for row in projects.active_rows(project):
+        references = (registry or {}).get(row["id"], {})
+        reference = references.get("cad")
+        if not reference:
+            continue
+        try:
+            config = flow.resolved_configuration(project, row["id"], registry)
+            if not flow.current(reference, flow.keys(config, references.get("nozzle"))["cad"]):
+                readme.append(f"{row['id']}: CAD export out of date; not included.")
+                continue
+            folder = flow.directory(reference)
+            if flow.read_json(folder / "status.json").get("state") != "complete":
+                continue
+            report = flow.read_json(folder / "cad_report.json")
+        except (OSError, ValueError, KeyError, RuntimeError):
+            continue
+        names = [*report["files"].values(), "cad_report.json",
+                 *sorted(item.name for item in folder.glob("*.png"))]
+        entries += [(f"cad/{row['id']}/{name}", folder / name) for name in names if (folder / name).is_file()]
+        readme.append(f"cad/{row['id']}/ ({report['units']}, {report['frame']} frame): "
+                      + ", ".join(report["files"].values()) + "; cad_report.json with validation and printability notes.")
+    return entries, readme
+
+
 def build_archive(project, registry):
     """Return the complete active stage plus settings and per-row diagnostics."""
     meshes, omitted, stages = stage_meshes(project, registry)
@@ -229,8 +256,14 @@ def build_archive(project, registry):
         "The project YAML also retains any inactive rows; their meshes are not included."])
     if omitted:
         readme.extend(["", "UNAVAILABLE MESHES", *omitted])
+    cad, cad_readme = cad_entries(project, registry)
+    if cad_readme:
+        readme.extend(["", "CAD (STEP)", *cad_readme,
+                       "Rows of a stage are written in the shared machine frame, so they open in place together."])
     stream = BytesIO()
     with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
+        for name, source in cad:
+            archive.write(source, name)
         archive.writestr("project.yaml", yaml.safe_dump(project, sort_keys=False, allow_unicode=True))
         archive.writestr("README.txt", "\n".join(readme) + "\n")
         archive.writestr("mesh_report.json", json.dumps(report, indent=2, ensure_ascii=False) + "\n")
@@ -343,6 +376,11 @@ def nozzle_archive(project, registry):
         readme.append("  Boundaries: " + ", ".join(f"{name} ({patch['bc_type']})" for name, patch in patches.items()) + ".")
     if omitted:
         readme.extend(["", "UNAVAILABLE MESHES", *omitted])
+    cad, cad_readme = cad_entries(project, registry)
+    for name, source in cad:
+        files[name] = source.read_bytes()
+    if cad_readme:
+        readme.extend(["", "CAD (STEP)", *cad_readme])
     readme.extend(["", "COORDINATES",
                    f"x is the axial distance from the throat. The 2D mesh is a half-domain bounded by the {lower}; "
                    f"the 3D mesh is {solid}"])
