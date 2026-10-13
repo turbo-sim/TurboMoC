@@ -18,7 +18,8 @@ _ADVANCE_LOCK = RLock()
 
 def scope_options(project):
     rows = projects.active_rows(project)
-    options = [{"label": "Stator" if row["id"] == "stator_1" else
+    options = [{"label": "Nozzle" if project["machine"]["design_mode"] == "nozzle" else
+        "Stator" if row["id"] == "stator_1" else
         "Rotor" if row["id"] == "rotor_1" else row["id"].replace("_", " ").title(),
         "value": row["id"]} for row in rows]
     return options

@@ -14,14 +14,15 @@ import yaml
 from turbo_moc.configuration.row import normalize, validate_configuration, VIEW_DEFAULTS
 from turbo_moc.configuration.rotor import default_axial_interspace_mm, normalize_rotor_geometry, validate_rotor_configuration
 from turbo_moc.configuration.fluid_inputs import INLET_FIELDS, inlet_values
+from turbo_moc.geometry.nozzle import NOZZLE_DEFAULTS
 
 
 GEOMETRY_SECTIONS = (
     "method_of_characteristics", "meridional_channel", "blade_geometry", "flow_domain",
 )
-DESIGN_MODES = ("stator", "rotor", "stator_rotor")
+DESIGN_MODES = ("nozzle", "stator", "rotor", "stator_rotor")
 GEOMETRY_TYPES = ("linear", "axial", "radial")
-MODE_ROLES = {"stator": ("stator",), "rotor": ("rotor",),
+MODE_ROLES = {"nozzle": ("stator",), "stator": ("stator",), "rotor": ("rotor",),
               "stator_rotor": ("stator", "rotor")}
 PLACEMENT_DEFAULTS = {"streamwise_offset_mm": 0.0, "angular_phase_deg": 0.0}
 
@@ -135,6 +136,16 @@ def normalize_project(config):
                 row["geometry"] = {name: value for name, value in flat.items()
                                    if name not in ("mesh", "workflow")}
                 row["mesh"] = flat["mesh"]
+        if isinstance(project.get("machine"), dict) and project["machine"].get("design_mode") == "nozzle":
+            for row in rows:
+                inputs = row.get("geometry", {}).get("method_of_characteristics") if row.get("role") == "stator" else None
+                if isinstance(inputs, dict):
+                    inputs.setdefault("outlet_condition", "pressure")
+                    inputs.setdefault("exit_mach", 2.0)
+                if isinstance(inputs, dict) and isinstance(row.get("mesh"), dict):
+                    settings = row["mesh"].setdefault("nozzle", {})
+                    for name, value in deepcopy(NOZZLE_DEFAULTS).items():
+                        settings.setdefault(name, value)
         return _normalize_fluid_inputs(project)
     flat = normalize(config)
     if set(flat) != {*GEOMETRY_SECTIONS, "mesh", "workflow"}:
@@ -414,6 +425,11 @@ def set_design_mode(project, mode):
         else:
             result["rows"].append(template)
     result["machine"]["design_mode"] = mode
+    if mode != "nozzle":
+        for row in result["rows"]:
+            inputs = row["geometry"].get("method_of_characteristics")
+            if row["role"] == "stator" and isinstance(inputs, dict) and "outlet_condition" in inputs:
+                inputs["outlet_condition"] = "pressure"
     return normalize_project(result)
 
 

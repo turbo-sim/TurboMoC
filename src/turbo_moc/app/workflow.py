@@ -22,7 +22,8 @@ SOURCE_DIR = APP_DIR.parent
 OUTPUT = Path("output").resolve()
 INTEGER_KEYS = {"n", "n_cp", "num_baseline_points", "num_curve_points", "num_points", "number_of_points",
                 "num_blades", "curvature_elements", "algorithm", "recombination_algorithm",
-                "smoothing_steps", "span_layers", "verbosity"}
+                "smoothing_steps", "span_layers", "verbosity", "axial_cells", "radial_cells",
+                "circumferential_cells", "depth_cells"}
 
 
 def digest(value):
@@ -71,7 +72,7 @@ def keys(config, nozzle_reference=None):
     # A generated mesh now includes CGNS; BC/unit/filename edits invalidate
     # the deliverable instead of silently offering an older CGNS snapshot.
     cgns = {k: v for k, v in config["mesh"]["cgns"].items() if k != "enabled"}
-    reference = digest([geometry, numerics, cgns])
+    reference = digest([geometry, numerics, cgns, config["mesh"].get("nozzle")])
     volume = digest([reference, config["mesh"]["numerics"]["span_layers"],
                      config["mesh"]["numerics"]["span_stretch"]])
     # Retain the original stage name in saved references; for a rotor this

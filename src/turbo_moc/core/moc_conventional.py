@@ -75,6 +75,7 @@ class MOCSolver:
             self.fluid_manager = FluidManager(
                 fluid_name=self.fluid_name, backend="HEOS", P0=self.P0, T0=self.T0, Q0=self.Q0
             )
+        self.fluid_manager.delta = float(self.delta_flow)
         self.t0 = time.time()
         
         # 1b. Initialize Global Reusable Calculation Objects (State is copied to these)
@@ -219,7 +220,7 @@ class MOCSolver:
             p.rho_t = self.rho_t
             p.gamma = gamma_star
             p.a = self.fluid_manager.a_star
-            p.delta = 0.0
+            p.delta = float(self.delta_flow)
             p.SauerMain()
 
             self.Sauer.append(p)
@@ -533,20 +534,11 @@ class MOCSolver:
             # hardcoded planar assumption) rather than re-deriving it.
             mass_cumulative = 0.0
             for i in range(1, len(final_IVP_line)):
-                p_prev, p_cur = final_IVP_line[i - 1], final_IVP_line[i]
-                seg_len = DistCalc(p_prev.x, p_prev.y, p_cur.x, p_cur.y)
-                rot_vec = RotVec(MakeVec(p_prev.x, p_prev.y, p_cur.x, p_cur.y), -90)
-                rho_avg = (p_prev.rho + p_cur.rho) / 2
-                u_avg = (p_prev.u + p_cur.u) / 2
-                v_avg = (p_prev.v + p_cur.v) / 2
-                V_avg = vecDotVec(u_avg, v_avg, rot_vec[0], rot_vec[1])
-                mass_cumulative = mass_cumulative + (rho_avg * seg_len * V_avg)
+                mass_cumulative = mass_cumulative + segment_mass_flow(
+                    final_IVP_line[i - 1], final_IVP_line[i], self.delta_flow)
 
                 Ref_P = (final_IVP_line[i],)
-                MassIn = mass_cumulative
-                MassOut = MassFlowCalc(Ref_P)
-
-                l = MassIn / MassOut
+                l = reflex_length(Ref_P[0], mass_cumulative, self.delta_flow)
                 self.length.append(l)
 
                 p_reflex_input = InternalPoint(self.fluid_manager)

@@ -62,6 +62,31 @@ def validate_inlet_inputs(parameters):
             raise ValueError(f"{field}: {PROPERTIES[prop][0].lower()} must be positive.")
 
 
+OUTLET_FIELDS = ("outlet_condition", "exit_mach")
+OUTLET_CONDITIONS = ("pressure", "mach")
+
+
+def validate_outlet_inputs(parameters):
+    condition = parameters.get("outlet_condition", "pressure")
+    if condition not in OUTLET_CONDITIONS:
+        raise ValueError("outlet_condition must be 'pressure' or 'mach'.")
+    if condition == "mach":
+        value = parameters.get("exit_mach")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value) or value <= 1:
+            raise ValueError("exit_mach must be a finite number larger than 1.")
+
+
+def outlet_parameters(parameters):
+    validate_outlet_inputs(parameters)
+    result = deepcopy(parameters)
+    condition = result.pop("outlet_condition", "pressure")
+    mach = result.pop("exit_mach", None)
+    if condition == "mach":
+        result.pop("p_back", None)
+        result["Noz_Mach"] = float(mach)
+    return result
+
+
 def solver_parameters(parameters, *, rotor=False):
     """Resolve any selected pair to PT or PQ, preserving two-phase quality."""
     result = deepcopy(parameters)
