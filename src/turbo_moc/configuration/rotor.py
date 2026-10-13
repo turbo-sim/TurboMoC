@@ -16,7 +16,9 @@ ROTOR_DEFAULTS = {
     "fluid_name": "Novec649", "P0_rel": 5e5, "T0_rel": 400.0,
     "M_inlet": 1.5, "M_outlet": 1.5, "M_lower": 1.05, "M_upper": 2.0,
     "beta_inlet": 65.0, "num_points": 60, "le_te_ratio": 25.0,
+    "outlet_condition": "mach", "p_back": 1e5,
 }
+ROTOR_OUTLET_CONDITIONS = ("mach", "pressure")
 SPEED_TYPES = {"actual": "Actual speed [rpm]", "blade_velocity_ratio": "Blade velocity ratio U/c₀ [-]",
                "specific": "Specific speed [-]"}
 COUPLING_DEFAULTS = {"mode": "manual", "rotational_speed": {"type": "actual", "value": 20716.71}}
@@ -116,6 +118,9 @@ def validate_rotor_configuration(config):
     for name in ("M_inlet", "M_outlet", "M_lower", "M_upper"):
         _finite(design[name], f"rotor_design.{name}", minimum=1, strict=True)
     _finite(design["beta_inlet"], "rotor_design.beta_inlet")
+    if design["outlet_condition"] not in ROTOR_OUTLET_CONDITIONS:
+        raise ValueError("rotor_design.outlet_condition must be mach or pressure.")
+    _finite(design["p_back"], "rotor_design.p_back", minimum=0, strict=True)
     if abs(design["beta_inlet"]) >= 90:
         raise ValueError("rotor_design.beta_inlet must be strictly between -90 and 90 degrees.")
     if type(design["num_points"]) is not int or design["num_points"] < 10:
@@ -142,3 +147,29 @@ def validate_rotor_configuration(config):
         _finite(domain[name], f"flow_domain.{name}", minimum=0, strict=True)
     validate_mesh_configuration(config["mesh"])
     return config
+
+
+def vortex_parameters(inputs):
+    """Resolve the rotor exit target to the relative exit Mach number of the vortex solver."""
+    result = deepcopy(inputs)
+    condition = result.pop("outlet_condition", "mach")
+    back_pressure = result.pop("p_back", None)
+    if condition != "pressure":
+        return result
+    import jaxprop as jxp
+    fluid = jxp.Fluid(result["fluid_name"], backend=result.get("backend", "HEOS"))
+    quality = result.get("Q0_rel", float("nan"))
+    if quality is not None and np.isfinite(quality):
+        total = fluid.get_state(jxp.PQ_INPUTS, result["P0_rel"], quality)
+    else:
+        total = fluid.get_state(jxp.PT_INPUTS, result["P0_rel"], result["T0_rel"])
+    if not 0 < back_pressure < float(total.p):
+        raise ValueError("The rotor backpressure must be below the relative stagnation pressure.")
+    exit_state = fluid.get_state(jxp.PSmass_INPUTS, back_pressure, total.s)
+    mach = float(np.sqrt(2 * (float(total.h) - float(exit_state.h))) / float(exit_state.a))
+    if not mach > 1:
+        raise ValueError(f"The rotor backpressure gives a subsonic relative exit (M = {mach:.3f}); "
+                         "the vortex rotor requires M > 1.")
+    result["M_outlet"] = mach
+    return result
+

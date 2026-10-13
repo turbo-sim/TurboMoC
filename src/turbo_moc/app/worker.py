@@ -71,7 +71,8 @@ def _run_job(request_path, request):
                 # an indeterminate indicator while it builds its fluid table
                 # and marches the transition arcs, rather than inventing %s.
                 progress("Rotor: thermodynamic table and vortex transition arcs")
-                inputs = solver_parameters(config["rotor_design"], rotor=True)
+                from turbo_moc.configuration.rotor import vortex_parameters
+                inputs = vortex_parameters(solver_parameters(config["rotor_design"], rotor=True))
                 rotor = design_rotor_vortex_blade(**inputs)
                 rotor.update(P0_rel=inputs["P0_rel"], T0_rel=inputs["T0_rel"],
                              Q0_rel=inputs.get("Q0_rel", float("nan")))

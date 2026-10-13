@@ -145,12 +145,13 @@ def normalize_project(config):
                 row["geometry"] = {name: value for name, value in flat.items()
                                    if name not in ("mesh", "workflow")}
                 row["mesh"] = flat["mesh"]
-        if isinstance(project.get("machine"), dict) and project["machine"].get("design_mode") == "nozzle":
-            for row in rows:
-                inputs = row.get("geometry", {}).get("method_of_characteristics") if row.get("role") == "stator" else None
-                if isinstance(inputs, dict):
-                    inputs.setdefault("outlet_condition", "pressure")
-                    inputs.setdefault("exit_mach", 2.0)
+        nozzle_only = isinstance(project.get("machine"), dict) and project["machine"].get("design_mode") == "nozzle"
+        for row in rows:
+            inputs = row.get("geometry", {}).get("method_of_characteristics") if row.get("role") == "stator" else None
+            if isinstance(inputs, dict):
+                inputs.setdefault("outlet_condition", "pressure")
+                inputs.setdefault("exit_mach", 2.0)
+            if nozzle_only:
                 if isinstance(inputs, dict) and isinstance(row.get("mesh"), dict):
                     settings = row["mesh"].setdefault("nozzle", {})
                     for name, value in deepcopy(NOZZLE_DEFAULTS).items():
@@ -444,11 +445,6 @@ def set_design_mode(project, mode):
         else:
             result["rows"].append(template)
     result["machine"]["design_mode"] = mode
-    if mode != "nozzle":
-        for row in result["rows"]:
-            inputs = row["geometry"].get("method_of_characteristics")
-            if row["role"] == "stator" and isinstance(inputs, dict) and "outlet_condition" in inputs:
-                inputs["outlet_condition"] = "pressure"
     return normalize_project(result)
 
 

@@ -105,7 +105,8 @@ def validate_workflow(workflow, config_file):
             "The Fluent stator workflow requires planar MoC flow (delta_flow: 0)."
         )
     p0 = positive(solver_parameters(nozzle)["P0"], "nozzle.P0")
-    p_back = positive(nozzle.get("p_back", np.nan), "nozzle.p_back")
+    from turbo_moc.configuration.fluid_inputs import exit_pressure
+    p_back = positive(exit_pressure(nozzle) if "p_back" in nozzle else np.nan, "nozzle.p_back")
     if p_back >= p0:
         raise ValueError("The stator expansion requires nozzle.p_back < nozzle.P0.")
     cgns = config["mesh"].get("cgns", {})

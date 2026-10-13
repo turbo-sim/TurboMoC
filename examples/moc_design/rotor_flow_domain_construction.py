@@ -29,6 +29,7 @@ from turbo_moc.configuration.fluid_inputs import solver_parameters
 from turbo_moc.geometry import passage_2d as planar
 from turbo_moc.geometry.rotor_blade import build_rotor_design
 from turbo_moc.core.vortex_blade import design_rotor_vortex_blade
+from turbo_moc.configuration.rotor import vortex_parameters
 
 
 SEGMENTS = ("Pressure wall", "TE fillet", "TE stub", "Suction wall", "LE stub", "LE fillet")
@@ -80,7 +81,7 @@ def main():
     project = projects.load_project(CASE)
     config = projects.row_configuration(project, ROW_ID)
     print(f"Generating vortex rotor from {CASE}", flush=True)
-    result = design_rotor_vortex_blade(**solver_parameters(config["rotor_design"], rotor=True))
+    result = design_rotor_vortex_blade(**vortex_parameters(solver_parameters(config["rotor_design"], rotor=True)))
     design = build_rotor_design(result, config)
     blade, curves = design.blade, design.curves
     contour = planar.blade_contour(blade)

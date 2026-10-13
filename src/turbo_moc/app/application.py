@@ -99,21 +99,33 @@ OUTLET_OPTIONS = [{"label": "Static pressure", "value": "pressure"},
                   {"label": "Mach number", "value": "mach"}]
 
 
-def outlet_controls(parameters, row_id):
-    condition = parameters.get("outlet_condition", "pressure")
+ROTOR_OUTLET_OPTIONS = [{"label": "Relative exit Mach number", "value": "mach"},
+                        {"label": "Static backpressure", "value": "pressure"}]
+
+
+def outlet_controls(parameters, row_id, section="method_of_characteristics"):
+    rotor = section == "rotor_design"
+    condition = parameters.get("outlet_condition", "mach" if rotor else "pressure")
+    kind = "rotor-outlet-field" if rotor else "outlet-field"
 
     def field(name, label, key):
         return html.Div(html.Label([html.Span(label), dcc.Input(
-            id={"type": "parameter", "row": row_id, "path": f"method_of_characteristics.{key}"},
+            id={"type": "parameter", "row": row_id, "path": f"{section}.{key}"},
             value=parameters.get(key), type="number", debounce=True, step="any")], className="control"),
-            id={"type": "outlet-field", "row": row_id, "condition": name},
+            id={"type": kind, "row": row_id, "condition": name},
             style={} if condition == name else {"display": "none"})
 
+    title = ("Relative frame: the rotor's relative stagnation state is expanded isentropically "
+             "to the backpressure, which sets the relative exit Mach number." if rotor else
+             "Absolute frame: the inlet stagnation state is expanded isentropically; "
+             "an exit Mach number is converted to the corresponding static pressure.")
     return group("Outlet", [html.Label([html.Span("Outlet condition"), dcc.Dropdown(
-            id={"type": "parameter", "row": row_id, "path": "method_of_characteristics.outlet_condition"},
-            value=condition, options=OUTLET_OPTIONS, clearable=False, searchable=False)], className="control"),
+            id={"type": "parameter", "row": row_id, "path": f"{section}.outlet_condition"},
+            value=condition, options=ROTOR_OUTLET_OPTIONS if rotor else OUTLET_OPTIONS,
+            clearable=False, searchable=False)], className="control", title=title),
         field("pressure", "Exit static pressure [Pa]", "p_back"),
-        field("mach", "Exit Mach number [-]", "exit_mach")])
+        field("mach", "Relative exit Mach number [-]" if rotor else "Exit Mach number [-]",
+              "M_outlet" if rotor else "exit_mach")])
 
 
 def number_field(row_id, path, label, value, kind=None):
@@ -381,19 +393,22 @@ def sidebar(project):
     for row in project_model.active_rows(project):
         identifier, geometry = row["id"], row["geometry"]
         if row["role"] == "stator":
-            fields = [group(title, moc_controls(geometry[name], identifier)
+            fields = [group(title, moc_controls(geometry[name], identifier, ("p_back",))
                 if name == "method_of_characteristics" else meridional_controls(geometry[name], identifier)
                 if name == "meridional_channel" else controls(geometry[name], name, identifier)) for name, title in (
                 ("method_of_characteristics", "Method of characteristics"),
                 ("meridional_channel", "Linear cascade definition" if family == "linear"
                      else "Meridional channel definition"),
                 ("blade_geometry", "Blade geometry definition"))]
+            fields.insert(1, outlet_controls(geometry["method_of_characteristics"], identifier))
             fields.append(flow_domain_controls(project, row))
         else:
             fields = [rotor_inlet_controls(geometry, identifier,
                     project["machine"]["design_mode"] == "stator_rotor"),
                 group("Vortex blade design", controls({k: v for k, v in geometry["rotor_design"].items()
-                    if k not in {*ROTOR_INLET_FIELDS, *INLET_FIELDS}}, "rotor_design", identifier)),
+                    if k not in {*ROTOR_INLET_FIELDS, *INLET_FIELDS, "outlet_condition", "p_back", "M_outlet"}},
+                    "rotor_design", identifier)),
+                outlet_controls(geometry["rotor_design"], identifier, "rotor_design"),
                 group("Linear cascade definition" if family == "linear" else "Meridional channel definition",
                     meridional_controls(geometry["meridional_channel"], identifier)),
                 flow_domain_controls(project, row)]
@@ -978,6 +993,13 @@ def create_app(config_file=None, output_dir=None):
     def outlet_fields(condition):
         hidden = {"display": "none"}
         return ({}, hidden) if condition != "mach" else (hidden, {})
+
+    @app.callback(Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "pressure"}, "style"),
+        Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "mach"}, "style"),
+        Input({"type": "parameter", "row": MATCH, "path": "rotor_design.outlet_condition"}, "value"))
+    def rotor_outlet_fields(condition):
+        hidden = {"display": "none"}
+        return ({}, hidden) if condition == "pressure" else (hidden, {})
 
     @app.callback(Output("nozzle-views", "style"), Output("blade-views", "style"),
         Output("nozzle-mesh-views", "style"), Output("blade-mesh-views", "style"),

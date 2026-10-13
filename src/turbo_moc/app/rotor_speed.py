@@ -3,7 +3,7 @@ from math import cos, isfinite, pi, radians, sqrt
 
 import jaxprop as jxp
 
-from turbo_moc.configuration.fluid_inputs import inlet_values
+from turbo_moc.configuration.fluid_inputs import exit_pressure, inlet_values
 
 
 def stator_reference(config, nozzle, alpha_deg):
@@ -17,7 +17,8 @@ def stator_reference(config, nozzle, alpha_deg):
     fluid = jxp.Fluid(inputs["fluid_name"])
     inlet = fluid.get_state(jxp.INPUT_PAIRS[values["inlet_property_pair"]],
                            values["inlet_property_1"], values["inlet_property_2"])
-    outlet = fluid.get_state(jxp.PSmass_INPUTS, inputs["p_back"], inlet.s)
+    back_pressure = float(nozzle.get("p_back") or exit_pressure(inputs))
+    outlet = fluid.get_state(jxp.PSmass_INPUTS, back_pressure, inlet.s)
     drop = float(inlet.h - outlet.h)
     if not isfinite(drop) or drop <= 0:
         raise ValueError("Speed reference requires an expansion to the stator back pressure.")
@@ -35,7 +36,7 @@ def stator_reference(config, nozzle, alpha_deg):
     meridional_velocity = float(wall["M"][-1]) * float(static.a) * cos(radians(alpha_deg))
     return {"enthalpy_drop": drop, "exit_density": float(outlet.rho),
             "mass_flow": density * meridional_velocity * area,
-            "reference_pressure": inputs["p_back"], "c0": sqrt(2 * drop)}
+            "reference_pressure": back_pressure, "c0": sqrt(2 * drop)}
 
 
 def resolve_speed(specification, radius_mm, *, enthalpy_drop=None, exit_density=None, mass_flow=None):

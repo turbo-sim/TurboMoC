@@ -71,7 +71,8 @@ def generate_barotropic_model(barotropy, config, nozzle, settings, output_dir):
     """
     logger.info("  Resolve the actual MoC inlet state.")
     fluid, inlet, quality = resolve_inlet_state(barotropy, config["nozzle"], nozzle)
-    p_back = float(config["nozzle"]["p_back"])
+    from turbo_moc.configuration.fluid_inputs import exit_pressure
+    p_back = exit_pressure(config["nozzle"])
     output_dir.mkdir(parents=True, exist_ok=True)
     # The model pressure range is independent of the MoC/CFD back pressure.
     triple_limit = float(fluid.triple_point_liquid.p)
