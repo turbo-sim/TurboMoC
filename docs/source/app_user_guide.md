@@ -4,6 +4,8 @@ Design a stator and rotor, inspect their meshes, and export a complete project.
 
 This tutorial follows the supplied {download}`stator–rotor example <../../examples/apps/cases/stator_rotor.yaml>`. It introduces the essential controls as you use them, from the inlet state to a three-dimensional mesh. You can also follow the stator-only branch below.
 
+The screenshots show a freshly calculated case in the current app. Numbered brown callouts are guide annotations; the plotted geometry, cells, and reported values come from that calculation.
+
 TurboMoC calculates a stator profile using the **method of characteristics (MoC)** and a rotor profile using a **vortex-flow design method**. It then constructs blade passages and generates meshes for subsequent analysis. These are design calculations: the app does **not** run a CFD simulation or predict viscous losses, efficiency, or off-design performance.
 
 ## 1. Quick reference
@@ -86,7 +88,7 @@ Under **Blade geometry definition**, the main controls are:
 
 Keep the spline and point-count controls unchanged for this walkthrough.
 
-<img src="assets/app_user_guide/02-stator-settings.png" alt="Stator settings showing the inlet property pair, expansion inputs, and channel dimensions." width="440">
+<img src="assets/app_user_guide/02-stator-settings.png" alt="Current stator controls, annotated to distinguish the inlet property pair from the target pressure and MoC solver." width="680">
 
 *Thermodynamic inputs determine the expansion; channel and blade controls determine the physical blade row.*
 
@@ -108,6 +110,10 @@ Expand **Flow domain definition** to control the passage around the blade. These
 A straight extension continues the blade-reference tangent to the inlet or outlet plane. Changing extension type can move where the periodic boundaries meet that plane; inspect the resulting domain before meshing. For a connected stator–rotor pair, the app derives the two internal extension lengths from the inter-row gap, as described below.
 
 Saved YAML files use the same nested **Inlet** and **Outlet** groups. Older flat flow-domain settings are converted when loaded. If extension types were omitted, choose **Smooth B-spline** at both ends to reproduce the earlier all-smooth construction.
+
+<img src="assets/app_user_guide/15-flow-domain.png" alt="Current nested inlet and outlet extension controls, with the stator's derived outlet interface and extension lengths annotated." width="680">
+
+*The stator inlet remains editable. Its outlet meets the rotor at the shared interface, so the outlet lengths below the nested groups are calculated readouts.*
 
 ## 4. Understand the rotor and row connection
 
@@ -131,7 +137,7 @@ Under **Vortex blade design**, the main controls are:
 
 The outlet flow angle is derived from mass continuity. The vortex method requires a **supersonic relative inlet**, and the app also rejects negative relative inlet angles. If changing speed produces a warning, correct the speed or inlet conditions before calculating.
 
-<img src="assets/app_user_guide/03-rotor-settings.png" alt="Rotor settings showing stator-exit coupling, rotational speed, and vortex design inputs." width="440">
+<img src="assets/app_user_guide/03-rotor-settings.png" alt="Current rotor settings annotated to show stator-exit coupling, rotational speed, calculated relative inlet conditions, and vortex design inputs." width="680">
 
 *Read-only inlet quantities are calculated from the upstream stator; they are not additional values to type.*
 
@@ -154,7 +160,7 @@ In **Blade-to-blade and meridional channel geometry**, inspect blade profiles an
 
 ![Three-dimensional blade geometry with blue stator blades, orange rotor blades, and the Configure display panel.](assets/app_user_guide/04-stage-geometry.png)
 
-*Three display copies of each row: stator in blue and rotor in orange. Endwalls are hidden here to expose the blades; use the meridional view to check their alignment.*
+*Three display copies of each row: stator in blue and rotor in orange, with gray hub supports. The open **Displayed blades** menu shows independent counts; the orientation cube changes the camera direction.*
 
 ### Choose rows, blade copies, and surfaces
 
@@ -264,51 +270,144 @@ Turn **Mesh edges** on and show **Blade** and **Hub** first. Hide **Shroud** or 
 
 ### Locate poor-quality cells
 
-Choose **Mesh quality filter**, then **Metric → Skewness**, **Orthogonality**, or **Edge aspect ratio**. Under **Select cells**, choose:
+The quality filter reveals cells that boundary surfaces can hide. Start with one row and one displayed blade so repeated passages do not obscure the region you want to inspect:
 
-- **Worst N:** enter the **Number of cells** to show. The app selects that many original cells per row, up to the number available.
-- **Threshold:** show cells at or above the chosen skewness or aspect ratio, or at or below the chosen orthogonality. The field label shows the comparison direction.
+1. Under **Blade rows**, check **Rotor** only. Set its **Displayed blades** count to `1`.
+2. Select **Display mode → Mesh quality filter** and **Metric → Skewness**.
+3. Select **Worst N** and enter `100` in **Number of cells**. This locates a small set of cells with the highest skewness. Increase the number if you need to see the surrounding pattern.
+4. Expand **Transparent surfaces**. Initially all surfaces are checked. To reproduce the screenshots, keep only **Blade** checked and zoom toward the blade region; add other boundaries when you need more passage context.
+5. Rotate and zoom around the colored cells. Check whether they are isolated or form a band near a blade, an endwall, a periodic side, or an extension transition.
 
-The selected cells are colored green for better quality through yellow to red for worse quality. A single colorbar inside **Configure display** shows the scale. Skewness and orthogonality use their 0–1 ranges, with opposite good-to-bad directions. Edge aspect ratio uses a logarithmic scale from 1 to a rounded upper value covering the selected meshes.
+![The rotor's 100 worst skewness cells, with the ranking controls and transparent passage context annotated.](assets/app_user_guide/11-quality-filter.png)
 
-Expand **Transparent surfaces** to choose the faint gray boundaries that help locate the cells within the passage. All surfaces are checked initially; uncheck any that obscure the region of interest. This selection is independent of **Boundary surfaces**. Displayed copies repeat the same selected cells; they do not add cells to the quality statistics.
+*The 100 worst rotor cells ranked by skewness. The faint gray blade provides location; only the selected volume cells carry quality colors.*
+
+In this tutorial run, the rotor has **nine cells with skewness above 0.8**. **Worst N = 100** includes those cells and the next highest-ranked cells, making the broader pattern easier to inspect. Most of the selected cells lie toward the hub, with others elsewhere in the span, including near the shroud. A larger N adds cells by quality rank; it does not select their geometric neighbors automatically.
+
+Repeat with **Orthogonality** to locate the cells with the lowest values. These need not be the same cells as those ranked worst by skewness. With several rows selected, **Worst N** selects up to N original cells **in each row**, rather than N cells across the stage. Displayed blade copies repeat this selection; they do not create additional samples or change the statistics.
+
+### Use a threshold to reveal the extent of a problem
+
+Switch **Select cells → Threshold** when you want to see every cell beyond a chosen limit. With **Rotor** selected, choose **Metric → Orthogonality** and set **Orthogonality ≤** to `0.5`. This selects **81 cells** in the tutorial run. No cells in either row fall below the report's 0.2 orthogonality flag, so raising the viewer cutoff to 0.5 reveals the rotor's lower-orthogonality region for closer inspection. The label beside the input shows the comparison direction:
+
+| Metric | Cells selected by a threshold | Better → worse |
+| --- | --- | --- |
+| **Skewness** | Values at or above the threshold | 0 → 1 |
+| **Orthogonality** | Values at or below the threshold | 1 → 0 |
+| **Edge aspect ratio** | Values at or above the threshold | 1 → larger values |
+
+![Rotor cells with orthogonality at or below 0.5, with the metric, threshold, and selected region annotated.](assets/app_user_guide/13-quality-threshold.png)
+
+*The 81 rotor cells with orthogonality ≤ 0.5. A threshold answers “where are all cells beyond this value?” Its selection can grow, shrink, or become empty as the mesh changes.*
+
+Here the selected cells occupy the first seven layers from the hub, around 40–73% of the axial blade chord, near the transition from inflation cells to the passage mesh. This points to a useful region for layer-by-layer inspection. It does not by itself establish which setting should change.
+
+To see more surrounding cells, lower the skewness or aspect-ratio threshold, or raise the orthogonality threshold. An empty selection means no cells meet that criterion; use **Boundary surfaces** to confirm the row is visible. Neither the default thresholds nor red coloring constitute a universal CFD acceptance rule.
+
+The single colorbar inside **Configure display** runs from green through yellow to red. It uses the metric's scale, not the rank within the selected cells: the worst 100 cells in a good mesh may still appear green or yellow. Skewness and orthogonality keep their full 0–1 scales. Edge aspect ratio uses a logarithmic scale from 1 to a rounded upper value covering the selected row meshes. The same scale applies to all displayed rows; selecting different rows can change the aspect-ratio upper limit.
+
+Large aspect ratios can be intentional in thin wall-adjacent cells. Inspect their location and the other metrics before interpreting a large ratio as a defect. **Transparent surfaces** is independent of the surface selection in **Boundary surfaces** mode.
 
 ### Inspect the interior one layer at a time
 
-Choose **Spanwise layer** and a metric. Move the slider, or use **Previous** and **Next**, to step from hub to shroud. The caption shows the layer number and its midpoint as a percentage of span, for example **Layer 2 of 25 · 3.4% span**.
+Switch to **Spanwise layer** after locating a suspect region. This reveals its surroundings even when those cells did not pass the quality filter:
 
-This mode shows the complete cell layer, without the quality filter, so you can follow changes through the interior. Colors describe the original 3D cells. With several rows selected, the app aligns their layers by span position even if their layer counts differ. The slider and caption follow the first selected row. **Transparent surfaces** remains available for context.
+1. Retain one row and one displayed blade, then choose **Display mode → Spanwise layer**.
+2. Choose **Metric → Skewness** to compare with the Worst N view above. When following a different metric, retain it in both views so their colors remain comparable.
+3. Move the slider to **Layer 13 of 25**, at **50.0% span**, to reproduce the middle-layer view below. Move toward **Hub** or **Shroud/tip**, or use **Previous** and **Next** for one-layer steps.
+4. Compare an endwall layer with a middle layer. Follow the same region through successive layers to see whether poor quality is confined to one part of the span or persists through it.
+5. Use **Transparent surfaces** to keep a blade outline for orientation while hiding any endwall or periodic surface that blocks the view.
 
-Check smooth spanwise progression and the intended interface location. Coincident interface positions do not imply matching nodes or a connected fluid solution.
+![Rotor layer 13 of 25 at 50 percent span, colored by skewness, with navigation controls and the shared colorbar annotated.](assets/app_user_guide/12-spanwise-layer.png)
 
-Changing only **span layers** or **span stretch** requires a new 3D mesh. Display colors, surfaces, copies, and mesh edge widths do not require remeshing.
+*The complete middle rotor layer, colored by skewness. Better cells remain visible around the less favorable regions; the threshold filter is inactive.*
+
+Zoom into the blade and inflation region, then keep the same camera and **Skewness** metric while changing the layer. Comparing the same region at midspan and near the hub makes spanwise differences easier to recognize:
+
+![Close-up of the rotor's middle spanwise layer, showing blade-adjacent cells and the transition into the passage mesh, colored by skewness.](assets/app_user_guide/16-spanwise-detail.png)
+
+*Layer 13: a closer view of the blade and surrounding cells at 50.0% span.*
+
+![The same rotor region and camera view at layer 3 near the hub, colored by the same skewness scale.](assets/app_user_guide/17-hub-layer.png)
+
+*Layer 3 of 25, at **4.0% span**: the same region near the hub. The camera and color scale are retained so changes in cell quality can be compared directly.*
+
+The caption shows **Layer … of …** and the layer midpoint as a percentage of hub-to-shroud span. Stretched layers have unequal thickness, so equal slider steps need not give equal percentage changes. This is one complete layer of original **3D volume cells**, not a newly meshed 2D section or an arbitrary cutting plane; the colors remain their original 3D quality values. The quality threshold is inactive in this mode.
+
+With several rows selected, the app aligns layers by span position even if their layer counts differ. The slider and caption follow the first selected row. Check smooth spanwise progression and the intended interface location; coincident interface positions do not imply matching nodes or a connected fluid solution.
+
+### Turn observations into a mesh change
+
+Use location as a clue, then change one input group at a time:
+
+| What you see | What to inspect next |
+| --- | --- |
+| A cluster around a leading or trailing edge | Zoom into the **2D mesh** and examine curvature resolution, blade spacing, and how inflation cells turn around the edge. |
+| A band where inflation meets the passage mesh | Compare **growth ratio**, **thickness**, and **domain size** with the 2D transition. |
+| Poor cells near a domain extension or periodic side | Inspect the domain shape and extension settings together with local mesh spacing. |
+| Quality changes strongly toward hub or shroud | Compare adjacent layers, the meridional channel shape, and **span layers / span stretch**. |
+| High aspect ratio in thin wall-adjacent cells | Cross-check skewness and orthogonality; establish whether the anisotropy is intentional for the intended calculation. |
+
+These observations suggest where to investigate; they do not uniquely identify a cause. After a 2D sizing change, regenerate the **2D mesh**, then the **3D mesh**. Changing only **span layers** or **span stretch** requires a new 3D mesh. Compare the report and repeat the same inspection view after regenerating. Display mode, colors, surfaces, copies, camera orientation, and edge widths do not require remeshing.
 
 ## 8. Read the mesh quality report
 
-Expand **Mesh quality report**. Set **Report → Total** for a stage overview, then select **Stator** or **Rotor** for an individual row.
+Expand **Mesh quality report**. Set **Report → Total** for a stage overview, then select **Stator** or **Rotor** for an individual row. This selector is independent of **Blade rows**: hiding the rotor in a plot does not remove it from the total report. Quality filters and layer selections also leave the report unchanged.
 
 ![Mesh quality report with row status, cell counts, quality metrics, and histograms.](assets/app_user_guide/09-mesh-quality.png)
 
-*Start with availability and current status, then inspect the weakest cells and metric distributions.*
+*The total report compares the rows and combines their actual cell samples. Check status and tail counts before using the plots to locate the affected regions.*
 
-Read the report in this order:
+### Check status, size, and the worst values
 
 1. **Status:** every active row should be **Current**. Reports can still show older meshes; heed **Outdated** or **Unavailable** labels.
 2. **Volume cells / Volume nodes:** counts describe one generated passage per row. Displayed blade copies do not multiply statistics. Combined node counts sum rows without merging interface nodes.
 3. **Minimum signed inverse condition number (SICN):** values near zero indicate poor or degenerate shape; negative values indicate inversion. Thin inflation cells can have low positive SICN.
-4. **Distributions and extremes:** use the interpretation below to identify regions needing closer inspection.
+4. **Maximum skewness / Minimum orthogonality / Maximum edge aspect ratio:** compare the row columns to decide where to start visual inspection. A single extreme does not tell you how much of the mesh is affected.
+5. **Threshold counts:** compare **Cells with skewness > 0.8** and **Cells with orthogonality < 0.2** with each row's volume-cell count. A fixed number of flagged cells can represent very different fractions of differently sized meshes.
+
+The threshold counts are inspection flags, not universal acceptance criteria. The report uses strict comparisons (`>` and `<`); the viewer includes equality (`≥` and `≤`), so cells exactly at the threshold can explain a difference between its selection and the report count.
+
+For the run shown in these screenshots, the report reads:
+
+| Quantity | Stator | Rotor |
+| --- | --- | --- |
+| Volume cells | 211,400 | 132,950 |
+| Volume nodes | 221,520 | 147,914 |
+| Maximum skewness | 0.6335 | 0.8559 |
+| Minimum orthogonality | 0.7273 | 0.3580 |
+| Maximum edge aspect ratio | 41.62 | 22.18 |
+| Minimum SICN | 0.06003 | 0.1013 |
+| Cells with skewness > 0.8 | 0 | 9 |
+| Cells with orthogonality < 0.2 | 0 | 0 |
+
+The combined mesh contains **344,350 cells** and **369,434 nodes**. The rotor's nine high-skewness cells account for about **0.0068% of its cells**: a small population worth locating, rather than evidence that the whole rotor mesh has similarly high skewness. Its worse skewness and orthogonality extremes make it a useful starting point for the filter walkthrough. The stator has the larger maximum aspect ratio, illustrating why the metrics should be considered together. These numbers describe this run; they are not target values or a mesh-acceptance certificate.
+
+### Read the statistics and histograms together
 
 | Metric | Interpretation |
 | --- | --- |
 | **Skewness** | Maximum equiangular face skewness per cell; 0 is ideal and 1 is degenerate. Inspect the maximum and high-value tail. |
-| **Orthogonality** | Face-normal/centroid-connector alignment; 1 is ideal. Inspect the minimum and low-value tail. |
+| **Orthogonality** | Worst face-normal/centroid-connector alignment in each cell; 1 is ideal. Inspect the minimum and low-value tail. |
 | **Edge aspect ratio** | Longest cell edge divided by shortest; 1 means equal edge lengths. Thin inflation cells naturally have larger ratios. |
 
-Tables include **Min**, **Mean**, **Max**, and **P95**. P95 is the 95th percentile: it describes the high-value tail even for orthogonality, where low values are the concern. Histograms show whether an extreme affects a few cells or much of the mesh.
+The statistics table contains **Min**, **Mean**, **Max**, and **P95**. The mean describes the overall population and can conceal a small poor-quality tail. P95 is the 95th percentile: approximately 95% of cell values lie at or below it. For skewness and aspect ratio, compare P95 with the maximum to distinguish a broad high-value population from a few extreme cells. For orthogonality, P95 describes the *high*, usually better end of the distribution; use the **minimum** and low-value tail to diagnose poor cells.
 
-The total report counts cells with **skewness > 0.8** and **orthogonality < 0.2**. These are inspection flags, not universal acceptance criteria. Individual reports include **Worst cells · original Gmsh IDs** for locating problematic elements. Hover over metric labels for definitions; the app's definitions may differ from a CFD solver's metrics.
+Each histogram bar counts cells in a metric interval; its height is **Cells**, not a percentage or cell volume. Hover for the plotted metric value and count. Skewness and orthogonality use equal-width intervals from 0 to 1. The aspect-ratio axis and its intervals are logarithmic: equal horizontal distances represent multiplicative changes. Look to the **right** for poor skewness or large aspect ratios, and to the **left** for poor orthogonality.
 
-Use **Mesh quality filter** to locate cells highlighted by the report, then inspect nearby layers before changing mesh settings. Successful mesh generation does not establish suitability for a particular CFD calculation. Cell counts and quality values depend on your current settings; the figures illustrate how to read the results rather than target values to reproduce.
+Combined means, percentiles, and histograms pool all cells from the available row meshes. A larger mesh therefore contributes more samples; the combined mean is not a simple average of the row means. If a row is unavailable or outdated, the status message tells you why the displayed total is incomplete or includes older results.
+
+### Investigate one row and retain a traceable record
+
+Choose **Report → Rotor** to follow the regions shown in the inspection screenshots, or **Stator** to inspect the other row. The individual report adds its span-layer count and mesh-generation time, and lets you expand **Worst cells · original Gmsh IDs**.
+
+![The rotor mesh report with its metric table, distribution tails, and original worst-cell IDs annotated.](assets/app_user_guide/14-row-quality.png)
+
+*The rotor report separates its distribution from the stage total. The worst-cell list records original mesh element IDs and their metric values.*
+
+The worst-cell list includes up to ten cells per metric. Use the same row and metric in **Mesh quality filter → Worst N** to inspect the corresponding worst region; rankings can include tied values. IDs belong to that row's saved mesh and may change after remeshing, so keep the exported mesh and report together if you need to investigate an element later. They are not displayed-blade numbers.
+
+A useful review sequence is **total report → individual row → quality filter → spanwise layers → revised mesh → report again**. Record both the new extremes and the size of the affected tail: moving one worst cell is different from improving a broad region. Hover over metric labels for definitions; these geometric measures may differ from a CFD solver's metrics. Successful mesh generation alone does not establish suitability for a particular CFD calculation.
 
 ## 9. Save settings and export the project
 
@@ -356,4 +455,4 @@ For more background, see [nozzle design](theory/nozzle_design.md), [stator desig
 
 ---
 
-*Updated for the app on 2026-10-13 using `examples/apps/cases/stator_rotor.yaml`. The screenshots illustrate the original tutorial run; some control layouts predate the display updates described here. Save the exported configuration to record the settings used for your own run.*
+*All screenshots were captured on 2026-10-13 from the current app after recomputing `examples/apps/cases/stator_rotor.yaml`. The design calculation selected 28 stator blades and 85 rotor blades. Camera framing, displayed copies, and visible surfaces vary to illustrate each task; the underlying meshes are the same throughout. Save the exported configuration to record the settings used for your own run.*
