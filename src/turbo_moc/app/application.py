@@ -16,7 +16,7 @@ from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, 
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
-from turbo_moc.app import workflow as flow, plots, nozzle_views, project_export, calculations, rotor_inlet, blade_counts, display_panel, mesh_reporting, inspection_panel
+from turbo_moc.app import workflow as flow, plots, nozzle_views, design_statistics, project_export, calculations, rotor_inlet, blade_counts, display_panel, mesh_reporting, inspection_panel
 from turbo_moc.meshing import mesh_3d as mesh
 from turbo_moc.configuration import project as project_model
 from turbo_moc.configuration.rotor import default_axial_interspace_mm, SPEED_TYPES
@@ -627,6 +627,9 @@ def create_app(config_file=None, output_dir=None):
                         html.Details([html.Summary("Three dimensional geometry"),
                             *display_panel.view(project, "geometry", viewport("geometry"))],
                             open=True, className="plot-group", id="geometry-details"),
+                        html.Details([html.Summary("Design statistics"),
+                            html.Div(id="design-statistics", className="design-statistics")],
+                            open=False, className="plot-group"),
                         ], id="blade-views"),
                     ], id="design-panel"),
                     html.Section([
@@ -1083,6 +1086,13 @@ def create_app(config_file=None, output_dir=None):
     def nozzle_display_preset(_):
         return (list(nozzle_views.SURFACE_COLORS) if ctx.triggered_id["action"] == "all"
                 else list(nozzle_views.DEFAULT_SURFACES))
+
+    @app.callback(Output("design-statistics", "children"),
+        Input("config", "data"), Input("row-references", "data"))
+    def statistics(state, registry):
+        if not state or not state.get("valid") or nozzle_mode(state["project"]):
+            return ""
+        return design_statistics.panel(state["project"], registry)
 
     @app.callback(Output("mesh-width", "data"), Input("config", "data"))
     def display_settings(state):

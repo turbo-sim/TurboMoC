@@ -193,3 +193,30 @@ a {color:#376a7d}
 .display-count-selection .control {display:grid;padding:0;gap:8px}
 .display-row-count {padding:0 0 12px}
 .display-row-count + .display-row-count {border-top:1px solid #e4ebee}
+.design-statistics {display:flex;flex-direction:column;gap:12px;padding:4px 0 8px}
+.stats-grid {display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;align-items:stretch}
+.stats-columns {display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:12px;align-items:stretch}
+.stats-card {background:white;border:1px solid #dfe7eb;border-radius:7px;padding:10px 14px;min-width:0}
+.stats-card-header {display:flex;align-items:flex-start;justify-content:space-between;gap:8px;
+  border-bottom:1px solid #e4ebee;padding-bottom:8px;margin-bottom:6px}
+.stats-card-header h4 {margin:0;font-size:13px;font-weight:600;color:#233c46}
+.stats-card-header small {color:#6b7f87;font-size:11px}
+.status-badge {font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 8px;border-radius:999px;white-space:nowrap}
+.status-badge.current {background:#e3f1e7;color:#2f6b3f}
+.status-badge.outdated {background:#fbe9e7;color:#9c3b2e}
+.stats-table {width:100%;border-collapse:collapse;font-size:12px}
+.stats-table td,.stats-table th {padding:5px 6px;border-bottom:1px solid #f0f3f5}
+.stats-table tr:last-child td {border-bottom:none}
+.stats-table td:not(:first-child),.stats-table th:not(:first-child) {text-align:right;font-variant-numeric:tabular-nums}
+.stats-table.stations th {background:#f4f7f8;font-weight:600;color:#233c46;line-height:1.2}
+.stats-table.stations th small {font-weight:400;color:#6b7f87}
+.stats-table.stations td:nth-child(2),.stats-table.stations th:nth-child(2) {text-align:left}
+.stats-table.stations tbody tr:nth-child(even) {background:#fafcfc}
+.stats-scroll {overflow-x:auto}
+.frame-tag {font-size:10px;color:#526d79;background:#eef3f5;border-radius:4px;padding:1px 6px;white-space:nowrap}
+.stats-notes {margin:4px 0 0;padding-left:18px;font-size:12px;line-height:1.55;color:#3b5560}
+.stats-notes.warning {color:#9c3b2e}
+.stats-subheader {margin-top:12px}
+@media (max-width: 1100px) {.stats-columns {grid-template-columns:minmax(0,1fr)}}
+
