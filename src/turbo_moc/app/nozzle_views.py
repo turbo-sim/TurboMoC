@@ -15,24 +15,22 @@ SURFACE_COLORS = {"wall": [0.55, 0.6, 0.63], "inlet": [0.35, 0.6, 0.85], "outlet
                   "side": [0.75, 0.78, 0.8]}
 
 
+DOMAIN = "#72858e"
+
+
 def section_figure(shape):
     x, y = shape["x"] * MM, shape["y"] * MM
-    lower = "Axis" if shape["axisymmetric"] else "Symmetry plane"
     result = plots.figure("Nozzle cross section", "Axial distance [mm]",
                           "Radius [mm]" if shape["axisymmetric"] else "Height [mm]")
-    result.add_trace(go.Scatter(x=np.concatenate([x, x[::-1]]), y=np.concatenate([y, -y[::-1]]),
-                                fill="toself", fillcolor="rgba(140, 180, 200, 0.25)", mode="lines",
-                                line=dict(color=plots.EDGE, width=1.6), hoverinfo="skip"))
-    result.add_trace(go.Scatter(x=[x[0], x[-1]], y=[0, 0], mode="lines", name=lower,
-                                line=dict(color="#526d79", width=1, dash="dashdot")))
-    throat = shape["throat_index"]
-    for index, label in ((throat, "Throat"), (len(x) - 1, "Exit")):
-        result.add_trace(go.Scatter(x=[x[index], x[index]], y=[-y[index], y[index]], mode="lines",
-                                    line=dict(color="#8a9aa1", width=1, dash="dot"), hoverinfo="skip"))
-        result.add_annotation(x=x[index], y=y[index], text=f"{label} · {y[index]:.3f} mm", showarrow=False,
-                              yshift=12, font=dict(size=11))
-    result.update_layout(title=dict(text="Axisymmetric nozzle · meridional section" if shape["axisymmetric"]
-                                    else "Planar nozzle · mid-depth section", font=dict(size=13)))
+    for sign in (1, -1):
+        result.add_trace(go.Scatter(x=x, y=sign * y, mode="lines", name="wall",
+                                    line=dict(color=plots.EDGE, width=1.5)))
+    for index, name in ((0, "inlet"), (len(x) - 1, "outlet")):
+        result.add_trace(go.Scatter(x=[x[index], x[index]], y=[-y[index], y[index]], mode="lines", name=name,
+                                    line=dict(color=DOMAIN, width=1)))
+    result.add_trace(go.Scatter(x=[x[0], x[-1]], y=[0, 0], mode="lines",
+                                name="axis" if shape["axisymmetric"] else "symmetry plane",
+                                line=dict(color=DOMAIN, width=1, dash="dashdot")))
     return result
 
 
@@ -46,19 +44,11 @@ def meridional_figure(shape, depth):
         result = plots.figure("Streamwise/span geometry", "Streamwise distance [mm]", "Span height [mm]")
         hub, shroud = np.zeros_like(x), np.full_like(x, depth * MM)
         names = ("Span start", "Span end")
-    result.add_trace(go.Scatter(x=np.concatenate([x, x[::-1]]), y=np.concatenate([hub, shroud[::-1]]),
-                                fill="toself", fillcolor="rgba(140, 180, 200, 0.18)", mode="none",
-                                hoverinfo="skip", showlegend=False))
     for values, name in zip((hub, shroud), names):
-        result.add_trace(go.Scatter(x=x, y=values, mode="lines", name=name,
-                                    line=dict(color=plots.EDGE, width=1, dash="dashdot" if name == "Axis" else None)))
+        result.add_trace(go.Scatter(x=x, y=values, mode="lines", name=name, line=dict(color=plots.EDGE, width=1)))
     for index, name in ((0, "inlet"), (len(x) - 1, "outlet")):
         result.add_trace(go.Scatter(x=[x[index], x[index]], y=[hub[index], shroud[index]], mode="lines",
-                                    name=f"{name} flow domain", line=dict(color="#72858e", width=1.2, dash="dash")))
-    throat = shape["throat_index"]
-    result.add_trace(go.Scatter(x=[x[throat], x[throat]], y=[hub[throat], shroud[throat]], mode="lines",
-                                name="Throat", line=dict(color="#8a9aa1", width=1, dash="dot")))
-    result.update_layout(showlegend=True, legend=dict(orientation="h", y=1.1, x=0))
+                                    name=f"{name} flow domain", line=dict(color=DOMAIN, width=1.2, dash="dash")))
     result.update_yaxes(range=[0, 1.05 * float(shroud.max())], autorange=False, minallowed=0, constrain="domain")
     return result
 

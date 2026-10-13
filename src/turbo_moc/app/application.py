@@ -607,17 +607,20 @@ def create_app(config_file=None, output_dir=None):
                         html.Details([html.Summary("Axis and wall distributions"),
                             html.Small(id="nozzle-summary", className="message"),
                             html.Div([
-                                html.Div([dcc.Graph(id="nozzle-characteristics", figure=empty("Characteristic net"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                                html.Div([dcc.Graph(id="nozzle-ts", figure=empty("T-s diagram"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                            ], className="split"),
-                            html.Div([
                                 html.Div([dcc.Graph(id="nozzle-axis", figure=empty("Axis properties"),
                                     config={"displaylogo": False}, className="engineering-plot")], className="pane"),
                                 html.Div([dcc.Graph(id="nozzle-wall", figure=empty("Wall properties"),
                                     config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                            ], className="split")], open=False, className="plot-group"),
+                            ], className="split"),
+                            dcc.Checklist(id="nozzle-extra-plots", value=[], options=[
+                                {"label": " Show characteristic net and T-s diagram", "value": "show"}]),
+                            html.Div([
+                                html.Div([dcc.Graph(id="nozzle-characteristics", figure=empty("Characteristic net"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                                html.Div([dcc.Graph(id="nozzle-ts", figure=empty("T-s diagram"),
+                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                            ], className="split", id="nozzle-extra-plot-row", style={"display": "none"}),
+                            ], open=False, className="plot-group"),
                         ], id="nozzle-views", style={"display": "none"}),
                         html.Div([
                         html.Details([html.Summary("Blade-to-blade and meridional channel geometry"), html.Div([
@@ -967,6 +970,10 @@ def create_app(config_file=None, output_dir=None):
         kind = "axisymmetric" if delta else "planar"
         return [{} if identifier["field"].startswith(kind + ":") else {"display": "none"}
                 for identifier in identifiers]
+
+    @app.callback(Output("nozzle-extra-plot-row", "style"), Input("nozzle-extra-plots", "value"))
+    def nozzle_extra_plots(value):
+        return {} if value else {"display": "none"}
 
     @app.callback(Output({"type": "outlet-field", "row": MATCH, "condition": "pressure"}, "style"),
         Output({"type": "outlet-field", "row": MATCH, "condition": "mach"}, "style"),
