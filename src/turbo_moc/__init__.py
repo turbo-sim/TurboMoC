@@ -29,4 +29,4 @@ __all__ = [
     "make_progress_reporter",
     "mpl", "plotly",
 ]
-__version__ = "1.1.4"
+__version__ = "1.2.0"
