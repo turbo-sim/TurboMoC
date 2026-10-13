@@ -79,8 +79,8 @@ def moc_controls(parameters, row_id, exclude=()):
 NOZZLE_SETUP_FIELDS = {
     "delta_flow": ("Nozzle type", [{"label": "Planar", "value": 0.0},
                                    {"label": "Axisymmetric", "value": 1.0}]),
-    "solver": ("Nozzle contour", [{"label": "Conventional (rounded throat)", "value": "conventional"},
-                                  {"label": "Minimum length (sharp corner)", "value": "mln"}]),
+    "solver": ("Nozzle contour", [{"label": "Conventional", "value": "conventional"},
+                                  {"label": "Minimum length", "value": "mln"}]),
 }
 
 
@@ -596,31 +596,18 @@ def create_app(config_file=None, output_dir=None):
                 html.Div([dcc.Loading(html.Div([
                     html.Section([
                         html.Div([
-                        html.Details([html.Summary("Nozzle geometry"),
-                            html.Small(id="nozzle-geometry-summary", className="message"),
-                            html.Div([
-                                html.Div([dcc.Graph(id="nozzle-section", figure=empty("Nozzle cross section"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                                html.Div([dcc.Graph(id="nozzle-meridional", figure=empty("Meridional geometry"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                            ], className="split")], open=True, className="plot-group"),
-                        html.Details([html.Summary("Axis and wall distributions"),
-                            html.Small(id="nozzle-summary", className="message"),
-                            html.Div([
-                                html.Div([dcc.Graph(id="nozzle-axis", figure=empty("Axis properties"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                                html.Div([dcc.Graph(id="nozzle-wall", figure=empty("Wall properties"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                            ], className="split"),
-                            dcc.Checklist(id="nozzle-extra-plots", value=[], options=[
-                                {"label": " Show characteristic net and T-s diagram", "value": "show"}]),
-                            html.Div([
-                                html.Div([dcc.Graph(id="nozzle-characteristics", figure=empty("Characteristic net"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                                html.Div([dcc.Graph(id="nozzle-ts", figure=empty("T-s diagram"),
-                                    config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                            ], className="split", id="nozzle-extra-plot-row", style={"display": "none"}),
-                            ], open=False, className="plot-group"),
+                        html.Details([html.Summary("Nozzle geometry"), html.Div([
+                            html.Div([dcc.Graph(id="nozzle-section", figure=empty("Nozzle cross section"),
+                                config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                            html.Div([dcc.Graph(id="nozzle-meridional", figure=empty("Meridional geometry"),
+                                config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                        ], className="split")], open=True, className="plot-group"),
+                        html.Details([html.Summary("Axis and wall distributions"), html.Div([
+                            html.Div([dcc.Graph(id="nozzle-axis", figure=empty("Axis properties"),
+                                config={"displaylogo": False}, style={"height": "300px"})], className="pane"),
+                            html.Div([dcc.Graph(id="nozzle-wall", figure=empty("Wall properties"),
+                                config={"displaylogo": False}, style={"height": "300px"})], className="pane"),
+                        ], className="split")], open=False, className="plot-group"),
                         ], id="nozzle-views", style={"display": "none"}),
                         html.Div([
                         html.Details([html.Summary("Blade-to-blade and meridional channel geometry"), html.Div([
@@ -636,13 +623,15 @@ def create_app(config_file=None, output_dir=None):
                     ], id="design-panel"),
                     html.Section([
                         html.Div([
-                        html.Details([html.Summary("Nozzle 2D mesh"),
+                        html.Details([html.Summary("Meridional and cross-plane mesh"), html.Div([
                             html.Div([dcc.Graph(id="nozzle-mesh-2d", figure=empty("Structured 2D mesh"),
                                 config={"displaylogo": False}, className="engineering-plot")], className="pane"),
-                            html.Div(id="nozzle-mesh-2d-info", className="message")],
-                            open=True, className="plot-group"),
-                        html.Details([html.Summary("Nozzle 3D mesh"),
-                            html.Div(html.Div(id="nozzle-mesh-3d", className="vtk-host"), className="vtk-frame"),
+                            html.Div([dcc.Graph(id="nozzle-mesh-cross", figure=empty("Cross-plane grid"),
+                                config={"displaylogo": False}, className="engineering-plot")], className="pane"),
+                        ], className="split")], open=True, className="plot-group"),
+                        html.Details([html.Summary("Three dimensional mesh"),
+                            html.Div([html.Div(html.Div(id="nozzle-mesh-3d", className="vtk-host"), className="vtk-frame"),
+                                nozzle_views.display_panel()], className="display-viewport"),
                             html.Div(id="nozzle-mesh-3d-info", className="message")],
                             open=True, className="plot-group"),
                         html.Details([html.Summary("Mesh quality report"),
@@ -806,7 +795,8 @@ def create_app(config_file=None, output_dir=None):
                 state["project"] if state and state.get("project") else base, values, identifiers))
             if state and not state.get("valid"):
                 raise ValueError("Correct the invalid settings before saving the configuration.")
-            download = {"content": yaml.safe_dump(project, sort_keys=False, allow_unicode=True),
+            saved = project_model.nozzle_case(project) if nozzle_mode(project) else project
+            download = {"content": yaml.safe_dump(saved, sort_keys=False, allow_unicode=True),
                 "filename": f"turbo_moc_{datetime.now():%Y-%m-%d_%H-%M-%S}.yaml", "type": "text/yaml"}
             return no_update, download, "Configuration saved.", *unchanged
         except (ValueError, TypeError, KeyError) as exc:
@@ -971,10 +961,6 @@ def create_app(config_file=None, output_dir=None):
         return [{} if identifier["field"].startswith(kind + ":") else {"display": "none"}
                 for identifier in identifiers]
 
-    @app.callback(Output("nozzle-extra-plot-row", "style"), Input("nozzle-extra-plots", "value"))
-    def nozzle_extra_plots(value):
-        return {} if value else {"display": "none"}
-
     @app.callback(Output({"type": "outlet-field", "row": MATCH, "condition": "pressure"}, "style"),
         Output({"type": "outlet-field", "row": MATCH, "condition": "mach"}, "style"),
         Input({"type": "parameter", "row": MATCH, "path": "method_of_characteristics.outlet_condition"}, "value"))
@@ -990,27 +976,20 @@ def create_app(config_file=None, output_dir=None):
         nozzle, blade = ({}, {"display": "none"}) if shown else ({"display": "none"}, {})
         return nozzle, blade, nozzle, blade
 
-    @app.callback(Output("nozzle-characteristics", "figure"), Output("nozzle-ts", "figure"),
-        Output("nozzle-axis", "figure"), Output("nozzle-wall", "figure"),
-        Output("nozzle-summary", "children"),
+    @app.callback(Output("nozzle-axis", "figure"), Output("nozzle-wall", "figure"),
         Input("config", "data"), Input("row-references", "data"))
     def nozzle_report(state, registry):
-        blank = (empty("Characteristic net"), empty("T-s diagram"),
-                 empty("Axis properties"), empty("Wall properties"))
+        blank = (empty("Axis properties"), empty("Wall properties"))
         if not state or not state.get("valid") or not nozzle_mode(state["project"]):
-            return (*blank, "")
+            return blank
         row = project_model.active_rows(state["project"])[0]
         try:
             config = flow.resolved_configuration(state["project"], row["id"], registry)
             data = flow.load_nozzle((registry or {}).get(row["id"], {}).get("nozzle"), config)
         except (ValueError, OSError, RuntimeError, KeyError):
-            return (*blank, "Compute the nozzle to display its design.")
-        status = "Converged" if data.get("converged") else "Not converged"
-        summary = (f"{status} · exit Mach {data['exit_M']:.4f} (design {data['design_Noz_Mach']:.4f})"
-                   f" · runtime {data['runtime_s']:.2f} s")
-        return (nozzle_plots.plot_characteristics_mesh(data, mirror=True),
-                nozzle_plots.plot_ts_diagram(data), nozzle_plots.plot_axis_properties(data),
-                nozzle_plots.plot_wall_properties(data), summary)
+            return blank
+        return tuple(figure.update_layout(showlegend=False) for figure in (
+            nozzle_plots.plot_axis_properties(data), nozzle_plots.plot_wall_properties(data)))
 
     def nozzle_shape(state, registry):
         row = project_model.active_rows(state["project"])[0]
@@ -1021,72 +1000,81 @@ def create_app(config_file=None, output_dir=None):
         return config, refs, data, nozzle_geometry.contour(data, parameters, config["mesh"]["nozzle"])
 
     @app.callback(Output("nozzle-section", "figure"), Output("nozzle-meridional", "figure"),
-        Output("nozzle-geometry-summary", "children"),
         Input("config", "data"), Input("row-references", "data"))
     def nozzle_geometry_views(state, registry):
         blank = (empty("Nozzle cross section"), empty("Meridional geometry"))
         if not state or not state.get("valid") or not nozzle_mode(state["project"]):
-            return (*blank, "")
+            return blank
         try:
-            config, _, data, shape = nozzle_shape(state, registry)
-        except (ValueError, OSError, RuntimeError, KeyError) as exc:
-            return (*blank, str(exc) if "convergent" in str(exc) or "single-valued" in str(exc)
-                    else "Compute the nozzle to display its geometry.")
-        settings = config["mesh"]["nozzle"]
-        status = "Converged" if data.get("converged") else "Not converged"
-        summary = (f"{status} · exit Mach {data['exit_M']:.4f} (design {data['design_Noz_Mach']:.4f})"
-                   f" · exit pressure {data['p_back'] / 1e3:.2f} kPa"
-                   f" · exit/throat {'radius' if shape['axisymmetric'] else 'height'} "
-                   f"{shape['y'][-1] / shape['y'][shape['throat_index']]:.4f}"
-                   f" · divergent length {shape['x'][-1] * 1e3:.2f} mm")
-        return (nozzle_views.section_figure(shape), nozzle_views.meridional_figure(shape, settings["planar_depth"]),
-                summary)
+            config, _, _, shape = nozzle_shape(state, registry)
+        except (ValueError, OSError, RuntimeError, KeyError):
+            return blank
+        return (nozzle_views.section_figure(shape),
+                nozzle_views.meridional_figure(shape, config["mesh"]["nozzle"]["planar_depth"]))
 
-    @app.callback(Output("nozzle-mesh-2d", "figure"), Output("nozzle-mesh-2d-info", "children"),
-        Output("nozzle-mesh-3d", "children"), Output("nozzle-mesh-3d-info", "children"),
-        Output("nozzle-mesh-report", "children"),
+    @app.callback(Output("nozzle-mesh-2d", "figure"), Output("nozzle-mesh-cross", "figure"),
+        Output("nozzle-mesh-3d-info", "children"), Output("nozzle-mesh-report", "children"),
         Input("config", "data"), Input("row-references", "data"))
     def nozzle_mesh_views(state, registry):
-        blank = empty("Structured 2D mesh")
+        blank = (empty("Structured 2D mesh"), empty("Cross-plane grid"))
         if not state or not state.get("valid") or not nozzle_mode(state["project"]):
-            return blank, "", None, "", ""
+            return *blank, "", ""
         row = project_model.active_rows(state["project"])[0]
         refs = (registry or {}).get(row["id"], {})
         try:
             config = flow.resolved_configuration(state["project"], row["id"], registry)
             keys = flow.keys(config, refs.get("nozzle"))
         except (ValueError, OSError, RuntimeError, KeyError) as exc:
-            return blank, str(exc), None, "", ""
-        figure, info2, scene, info3, report = blank, "Generate the 2D mesh.", None, "Generate the 3D mesh.", []
-        axisymmetric = nozzle_geometry.axisymmetric(config["method_of_characteristics"])
+            return *blank, str(exc), ""
+        figure, cross, note, report = *blank, "Generate the 3D mesh.", []
+        settings = config["mesh"]["nozzle"]
         width = config["mesh"]["visualization"]["section_edge_width"]
         reference = refs.get("reference")
         if reference:
             try:
                 data = nozzle_views.load(reference, "nozzle_mesh_2d.json")
-                folder = flow.directory(reference)
-                figure = nozzle_views.mesh_2d_figure(folder, data["summary"]["axisymmetric"], max(width, 0.6))
-                outdated = [] if flow.current(reference, keys["reference"]) else [html.Div(
+                summary = data["summary"]
+                figure = nozzle_views.mesh_2d_figure(flow.directory(reference), summary["axisymmetric"], max(width, 0.6))
+                cross = nozzle_views.cross_figure(summary, settings, max(width, 0.6))
+                status = [] if flow.current(reference, keys["reference"]) else [html.Div(
                     "Outdated 2D mesh: regenerate for the current settings.", className="message")]
-                info2 = [*outdated, *nozzle_views.summary_2d(data["summary"], reference)]
-                report += nozzle_views.quality("2D mesh", data["report"])
+                report += [html.H3("2D mesh"), *status, *nozzle_views.report_2d(summary, data["report"])]
             except (OSError, ValueError, KeyError) as exc:
-                info2 = f"2D mesh unavailable: {exc}"
+                report.append(html.Div(f"2D mesh unavailable: {exc}", className="message"))
         volume = refs.get("volume")
         if volume:
             try:
                 summary = nozzle_views.load(volume, "nozzle_mesh_3d.json")
-                scene = nozzle_views.mesh_3d_scene(flow.directory(volume))
-                outdated = [] if flow.current(volume, keys["volume"]) else [html.Div(
-                    "Outdated 3D mesh: regenerate for the current settings.", className="message")]
-                info3 = [*outdated, *nozzle_views.summary_3d(summary, volume)]
-                report += nozzle_views.quality("3D mesh", nozzle_views.load(volume, "mesh_report.json"))
+                note = ("" if flow.current(volume, keys["volume"]) else
+                        "Outdated 3D mesh: regenerate for the current settings.")
+                status = [html.Div(note, className="message")] if note else []
+                report += [html.H3("3D mesh"), *status,
+                           *nozzle_views.report_3d(summary, nozzle_views.load(volume, "mesh_report.json"))]
             except (OSError, ValueError, KeyError) as exc:
-                info3 = f"3D mesh unavailable: {exc}"
-        if not report:
-            report = ("Generate a mesh to see its report. The 3D mesh is a "
-                      + ("full revolution." if axisymmetric else "planar slab."))
-        return figure, info2, scene, info3, report
+                note = f"3D mesh unavailable: {exc}"
+        return figure, cross, note, report or "Generate a mesh to see its report."
+
+    @app.callback(Output("nozzle-mesh-3d", "children"), Output("nozzle-display-surfaces", "options"),
+        Input("config", "data"), Input("row-references", "data"),
+        Input("nozzle-display-surfaces", "value"), Input("nozzle-display-edges", "value"))
+    def nozzle_mesh_scene(state, registry, surfaces, edges):
+        if not state or not state.get("valid") or not nozzle_mode(state["project"]):
+            return None, no_update
+        row = project_model.active_rows(state["project"])[0]
+        volume = (registry or {}).get(row["id"], {}).get("volume")
+        if not volume:
+            return None, no_update
+        try:
+            scene, available = nozzle_views.mesh_3d_scene(flow.directory(volume), surfaces or [], bool(edges))
+        except (OSError, ValueError, KeyError):
+            return None, no_update
+        return scene, [{"label": name.title(), "value": name} for name in available]
+
+    @app.callback(Output("nozzle-display-surfaces", "value"),
+        Input({"type": "nozzle-display-preset", "action": ALL}, "n_clicks"), prevent_initial_call=True)
+    def nozzle_display_preset(_):
+        return (list(nozzle_views.SURFACE_COLORS) if ctx.triggered_id["action"] == "all"
+                else list(nozzle_views.DEFAULT_SURFACES))
 
     @app.callback(Output("mesh-width", "data"), Input("config", "data"))
     def display_settings(state):
@@ -1457,6 +1445,12 @@ def create_app(config_file=None, output_dir=None):
             return True, "Wait for the active job to finish before downloading the project."
         if not state or not state.get("valid"):
             return True, "Correct the configuration before downloading the project."
+        if nozzle_mode(state["project"]):
+            try:
+                project_export.nozzle_ready(state["project"], registry)
+            except (ValueError, TypeError, KeyError, OSError) as exc:
+                return True, str(exc)
+            return False, "Download the nozzle case, coordinates, MoC result, meshes, mesh report and activity log."
         try:
             meshes, omitted, stages = project_export.stage_meshes(state["project"], registry)
         except (ValueError, TypeError, KeyError) as exc:
@@ -1478,7 +1472,8 @@ def create_app(config_file=None, output_dir=None):
             if not state or not state.get("valid"):
                 raise ValueError("Correct the invalid settings before downloading the project.")
             project = project_model.validate_project(flow.edited_project(state["project"], values, identifiers))
-            data, filename = project_export.build_archive(project, registry)
+            build = project_export.nozzle_archive if nozzle_mode(project) else project_export.build_archive
+            data, filename = build(project, registry)
             return dcc.send_bytes(data, filename, type="application/zip"), ""
         except (OSError, ValueError, KeyError, TypeError) as exc:
             return no_update, f"Cannot download project: {exc}"

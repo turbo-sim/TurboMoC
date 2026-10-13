@@ -4,15 +4,15 @@ import json
 import dash_vtk
 import numpy as np
 import plotly.graph_objects as go
-from dash import html
+from dash import dcc, html
 
 from turbo_moc.app import mesh_reporting, plots
 from turbo_moc.app import workflow as flow
 from turbo_moc.geometry import nozzle as geometry
 
 MM = 1e3
-SURFACE_COLORS = {"wall": [0.55, 0.6, 0.63], "inlet": [0.35, 0.6, 0.85], "outlet": [0.9, 0.55, 0.3],
-                  "side": [0.75, 0.78, 0.8]}
+SURFACE_COLORS = {"wall": "#a6b3b8", "inlet": "#c94f4f", "outlet": "#c94f4f", "side": "#4d9966"}
+DEFAULT_SURFACES = ("wall", "outlet")
 
 
 DOMAIN = "#72858e"
@@ -22,9 +22,9 @@ def section_figure(shape):
     x, y = shape["x"] * MM, shape["y"] * MM
     result = plots.figure("Nozzle cross section", "Axial distance [mm]",
                           "Radius [mm]" if shape["axisymmetric"] else "Height [mm]")
-    for sign in (1, -1):
-        result.add_trace(go.Scatter(x=x, y=sign * y, mode="lines", name="wall",
-                                    line=dict(color=plots.EDGE, width=1.5)))
+    result.add_trace(go.Scatter(x=np.concatenate([x, x[::-1], x[:1]]), y=np.concatenate([y, -y[::-1], y[:1]]),
+                                mode="lines", name="nozzle", fill="toself", fillcolor=plots.BLADE_FILL,
+                                line=dict(color=plots.EDGE, width=1.5)))
     for index, name in ((0, "inlet"), (len(x) - 1, "outlet")):
         result.add_trace(go.Scatter(x=[x[index], x[index]], y=[-y[index], y[index]], mode="lines", name=name,
                                     line=dict(color=DOMAIN, width=1)))
@@ -44,6 +44,8 @@ def meridional_figure(shape, depth):
         result = plots.figure("Streamwise/span geometry", "Streamwise distance [mm]", "Span height [mm]")
         hub, shroud = np.zeros_like(x), np.full_like(x, depth * MM)
         names = ("Span start", "Span end")
+    result.add_trace(go.Scatter(x=np.concatenate([x, x[::-1]]), y=np.concatenate([hub, shroud[::-1]]),
+                                mode="none", fill="toself", fillcolor=plots.BLADE_FILL, hoverinfo="skip"))
     for values, name in zip((hub, shroud), names):
         result.add_trace(go.Scatter(x=x, y=values, mode="lines", name=name, line=dict(color=plots.EDGE, width=1)))
     for index, name in ((0, "inlet"), (len(x) - 1, "outlet")):
@@ -79,17 +81,62 @@ def mesh_2d_figure(folder, axisymmetric, edge_width):
     return result
 
 
-def mesh_3d_scene(folder):
+def rgb(color):
+    return [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+
+
+def display_panel():
+    return html.Aside([
+        html.Div(html.Strong("Configure display"), className="display-panel-header"),
+        html.Section([
+            html.Div([html.Button(text, id={"type": "nozzle-display-preset", "action": action}, n_clicks=0)
+                      for text, action in (("All surfaces", "all"), ("Reset display", "reset"))],
+                     className="display-presets"),
+            dcc.Checklist(id="nozzle-display-surfaces", value=list(DEFAULT_SURFACES),
+                          options=[{"label": name.title(), "value": name} for name in SURFACE_COLORS],
+                          className="display-surfaces"),
+            dcc.Checklist(id="nozzle-display-edges", options=[{"label": "Mesh edges", "value": "edges"}],
+                          value=["edges"]),
+        ]),
+    ], className="display-panel")
+
+
+def mesh_3d_scene(folder, selected, edges):
     surfaces = json.loads((folder / "browser_surfaces.json").read_text(encoding="utf-8"))
-    representations = []
-    for name, data in surfaces.items():
-        points = (np.asarray(data["points"]) * MM).tolist()
-        representations.append(dash_vtk.GeometryRepresentation(
-            children=[dash_vtk.PolyData(points=points, polys=data["polys"])],
-            property={"edgeVisibility": True, "color": SURFACE_COLORS.get(name, [0.7, 0.7, 0.7]),
-                      "edgeColor": [0.15, 0.15, 0.15], "opacity": 0.35 if name in ("wall", "side") else 1.0}))
-    return dash_vtk.View(representations, background=[1, 1, 1], cameraPosition=[-1, -1, 1],
+    representations = [dash_vtk.GeometryRepresentation(
+        children=[dash_vtk.PolyData(points=(np.asarray(data["points"]) * MM).tolist(), polys=data["polys"])],
+        property={"edgeVisibility": edges, "color": rgb(SURFACE_COLORS.get(name, "#a6b3b8")),
+                  "edgeColor": [0.1, 0.1, 0.1]})
+        for name, data in surfaces.items() if name in selected]
+    view = dash_vtk.View(representations, background=[1, 1, 1], cameraPosition=[-1, -1, 1],
                          cameraViewUp=[0, 0, 1], style={"width": "100%", "height": "100%"})
+    return view, list(surfaces)
+
+
+def cross_figure(summary, settings, edge_width):
+    radius = summary["exit_radius"] * MM
+    if summary["axisymmetric"]:
+        from turbo_moc.meshing.nozzle_mesh import o_grid_disk
+        points, quads, _ = o_grid_disk(settings["circumferential_cells"] // 4, settings["radial_cells"],
+                                       settings["wall_growth_ratio"])
+        points = points * radius
+        result = plots.figure("Cross-plane grid", "y [mm]", "z [mm]")
+    else:
+        from turbo_moc.meshing.nozzle_mesh import wall_distribution
+        eta = wall_distribution(settings["radial_cells"], settings["wall_growth_ratio"])
+        height = np.concatenate([-eta[::-1], eta[1:]]) * radius
+        depth = np.linspace(-0.5, 0.5, settings["depth_cells"] + 1) * settings["planar_depth"] * MM
+        z, y = np.meshgrid(depth, height, indexing="ij")
+        points = np.column_stack([z.ravel(), y.ravel()])
+        index = np.arange(len(points)).reshape(z.shape)
+        quads = np.stack([index[:-1, :-1], index[1:, :-1], index[1:, 1:], index[:-1, 1:]], -1).reshape(-1, 4)
+        result = plots.figure("Cross-plane grid", "Span [mm]", "Height [mm]")
+    edges = unique_edges(quads)
+    segments = np.full((len(edges), 3, 2), np.nan)
+    segments[:, :2] = points[edges]
+    result.add_trace(go.Scattergl(x=segments[:, :, 0].ravel(), y=segments[:, :, 1].ravel(), mode="lines",
+                                  line=dict(color=plots.MESH_EDGE, width=edge_width), hoverinfo="skip"))
+    return result
 
 
 def table(rows):
@@ -97,33 +144,22 @@ def table(rows):
                       className="report-table")
 
 
-def download(reference, filename, label):
-    return html.A(label, href=f"/artifacts/{reference['session']}/{reference['job']}/{filename}",
-                  className="download-link")
-
-
-def summary_2d(summary, reference):
+def report_2d(summary, report):
     return [table([("Cells", f"{summary['cells']:,}"), ("Nodes", f"{summary['nodes']:,}"),
                    ("Axial × radial cells", f"{summary['axial_cells']} × {summary['radial_cells']}"),
-                   ("First wall cell height (throat) [mm]", f"{summary['first_wall_height'] * MM:.4g}"),
-                   ("Nozzle length incl. convergent [mm]", f"{summary['length'] * MM:.4g}"),
-                   ("Exit / throat radius", f"{summary['exit_radius'] / summary['throat_radius']:.4f}"),
+                   ("First wall cell height at the throat [mm]", f"{summary['first_wall_height'] * MM:.4g}"),
                    ("2D time [s]", f"{summary['elapsed_s']:.2f}")]),
-            download(reference, "nozzle_mesh_2d.cgns", "Download 2D CGNS")]
+            mesh_reporting.metric_table(report["metrics"], report["definitions"]),
+            mesh_reporting.histogram_row(report["metrics"], report["definitions"])]
 
 
-def summary_3d(summary, reference):
+def report_3d(summary, report):
     sweep = ("Circumferential cells", summary["circumferential_cells"]) if summary["axisymmetric"] else (
         "Depth cells", summary["depth_cells"])
-    return [table([("Volume cells (hexahedra)", f"{summary['cells']:,}"), ("Volume nodes", f"{summary['nodes']:,}"),
+    return [table([("Volume cells", f"{summary['cells']:,}"), ("Volume nodes", f"{summary['nodes']:,}"),
                    ("Axial × radial cells", f"{summary['axial_cells']} × {summary['radial_cells']}"), sweep,
-                   ("Topology", "O-grid revolution" if summary["axisymmetric"] else "Extruded slab"),
                    ("3D time [s]", f"{summary['elapsed_s']:.2f}")]),
-            download(reference, "nozzle_mesh_3d.cgns", "Download 3D CGNS")]
-
-
-def quality(title, report):
-    return [html.H3(title), mesh_reporting.metric_table(report["metrics"], report["definitions"]),
+            mesh_reporting.metric_table(report["metrics"], report["definitions"]),
             mesh_reporting.histogram_row(report["metrics"], report["definitions"])]
 
 

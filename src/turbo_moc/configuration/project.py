@@ -112,6 +112,15 @@ def normalize_project(config):
         rows = project.get("rows", [])
         if not isinstance(rows, list):
             raise ValueError("rows must be an ordered list.")
+        machine = project.get("machine")
+        if isinstance(machine, dict) and machine.get("design_mode") == "nozzle":
+            machine.setdefault("geometry_type", "axial")
+            template, workflow = _stator_template(machine["geometry_type"])
+            project.setdefault("workflow", workflow)
+            for row in rows:
+                if isinstance(row, dict) and row.get("role") == "stator":
+                    row["geometry"] = {**template["geometry"], **(row.get("geometry") or {})}
+                    row["mesh"] = {**template["mesh"], **(row.get("mesh") or {})}
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError("Each blade row must be a mapping.")
@@ -343,6 +352,15 @@ _DEFAULT_STATOR_ROW = {'id': 'stator_1',
                                       'hub': 'BCWallViscous',
                                       'shroud': 'BCWallViscous'}}}}
 _DEFAULT_WORKFLOW = {'save_figures': True, 'show_gmsh': True, 'show_pyvista': True, 'log_level': 'INFO'}
+
+
+def nozzle_case(project):
+    row = next(row for row in active_rows(project) if row["role"] == "stator")
+    return {"machine": {"design_mode": "nozzle", "fluid_name": project["machine"]["fluid_name"]},
+            "rows": [{"id": row["id"], "role": "stator",
+                      "geometry": {"method_of_characteristics": row["geometry"]["method_of_characteristics"]},
+                      "mesh": {"nozzle": row["mesh"]["nozzle"]}}],
+            "workflow": project["workflow"]}
 
 
 def _stator_template(family):

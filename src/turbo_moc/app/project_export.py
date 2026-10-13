@@ -240,3 +240,115 @@ def build_archive(project, registry):
         for mesh in meshes:
             archive.write(mesh["path"], mesh["file"])
     return stream.getvalue(), f"turbo_moc_project_{now:%Y-%m-%d_%H-%M-%S}.zip"
+
+
+def _current_job(references, stage, key):
+    reference = references.get(stage)
+    if not flow.current(reference, key):
+        raise ValueError("not generated" if not reference else "out of date; regenerate for the current settings")
+    folder = flow.directory(reference)
+    if flow.read_json(folder / "status.json").get("state") != "complete":
+        raise ValueError("not completed successfully")
+    return reference, folder
+
+
+def _csv(header, columns):
+    rows = [",".join(header)] + [",".join(f"{float(value):.10g}" for value in row) for row in zip(*columns)]
+    return "\n".join(rows) + "\n"
+
+
+def nozzle_ready(project, registry):
+    row = next(row for row in projects.active_rows(project) if row["role"] == "stator")
+    references = (registry or {}).get(row["id"], {})
+    config = flow.resolved_configuration(project, row["id"], registry)
+    keys = flow.keys(config, references.get("nozzle"))
+    try:
+        _current_job(references, "nozzle", keys["nozzle"])
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Compute the nozzle for the current settings before downloading ({exc}).") from exc
+    return row, references, config, keys
+
+
+def nozzle_archive(project, registry):
+    from turbo_moc.geometry import nozzle as geometry
+    row, references, config, keys = nozzle_ready(project, registry)
+    nozzle_reference, nozzle_folder = _current_job(references, "nozzle", keys["nozzle"])
+    data = flow.read_json(nozzle_folder / "moc_result.json")
+    parameters, settings = config["method_of_characteristics"], config["mesh"]["nozzle"]
+    shape = geometry.contour(data, parameters, settings)
+    now = datetime.now(timezone.utc)
+    generated = now.isoformat(timespec="seconds")
+    kind = "axisymmetric" if shape["axisymmetric"] else "planar"
+    files = {
+        "project.yaml": yaml.safe_dump(projects.nozzle_case(project), sort_keys=False, allow_unicode=True),
+        "nozzle/moc_result.json": json.dumps(data, indent=2) + "\n",
+        "nozzle/wall_contour.csv": _csv(("x_m", "r_m" if shape["axisymmetric"] else "y_m"), (shape["x"], shape["y"])),
+        "nozzle/wall_distribution.csv": _csv(("x_m", "y_m", "p_Pa", "M", "rho_kg_m3", "T_K"),
+            [data["wall_final"][name] for name in ("x", "y", "p", "M", "rho", "T")]),
+        "nozzle/axis_distribution.csv": _csv(("x_m", "p_Pa", "M", "rho_kg_m3", "T_K"),
+            [data["axis"][name] for name in ("x", "p", "M", "rho", "T")]),
+    }
+    nozzle = {"type": kind, "solver": parameters["solver"], "converged": data.get("converged"),
+              "exit_mach": data.get("exit_M"), "design_exit_mach": data.get("design_Noz_Mach"),
+              "exit_pressure_Pa": data.get("p_back"), "throat_half_height_m": parameters["y_t"],
+              "exit_half_height_m": float(shape["y"][-1]), "length_m": float(shape["x"][-1] - shape["x"][0])}
+    report = {"created_utc": generated, "nozzle": nozzle, "meshes": {}}
+    jobs, omitted = [nozzle_folder], []
+    for stage, dimension, summary_name in (("reference", "2d", "nozzle_mesh_2d.json"),
+                                           ("volume", "3d", "nozzle_mesh_3d.json")):
+        try:
+            _, folder = _current_job(references, stage, keys[stage])
+            cgns = folder / f"nozzle_mesh_{dimension}.cgns"
+            summary = flow.read_json(folder / summary_name)
+            if stage == "reference":
+                summary, quality = summary["summary"], summary["report"]
+            else:
+                quality = flow.read_json(folder / "mesh_report.json")
+            files[f"meshes/{cgns.name}"] = cgns.read_bytes()
+            report["meshes"][dimension] = {"file": f"meshes/{cgns.name}", "summary": summary, "quality": quality}
+            jobs.append(folder)
+        except (OSError, ValueError, KeyError) as exc:
+            omitted.append(f"{dimension.upper()} mesh: {exc}.")
+    logs = []
+    for folder in jobs:
+        handle = flow.read_json(folder / "request.json")["handle"]
+        title = f"{handle['row_id']} | {handle['action']} | {_timestamp(handle['started'])}"
+        text = (folder / "activity.log").read_text(encoding="utf-8", errors="replace").rstrip()
+        logs.append(f"{'=' * 72}\n{title}\n{'=' * 72}\n{text}\n")
+    files["mesh_report.json"] = json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+    files["activity.log"] = "\n".join(logs)
+    lower = "axis" if shape["axisymmetric"] else "symmetry plane"
+    solid = ("a full 360 degree revolution." if shape["axisymmetric"] else
+             f"a full-height slab of depth {settings['planar_depth']:g} m centred on z = 0.")
+    readme = ["TurboMoC nozzle", f"Packaged: {generated}",
+              f"Nozzle: {kind}, {parameters['solver']} contour; fluid {project['machine']['fluid_name']}", "",
+              "CONTENTS",
+              "project.yaml - nozzle case; load this file in TurboMoC to reproduce the design.",
+              "nozzle/moc_result.json - complete method-of-characteristics solution.",
+              "nozzle/wall_contour.csv - wall coordinates in metres, convergent inlet included, from inlet to exit.",
+              "nozzle/wall_distribution.csv - wall coordinates and flow properties of the divergent section.",
+              "nozzle/axis_distribution.csv - flow properties along the " + lower + ".",
+              "mesh_report.json - nozzle summary, mesh statistics and quality results.",
+              "activity.log - computation logs of the included jobs.",
+              "meshes/ - structured CGNS meshes, coordinates in metres.", "",
+              "NOZZLE",
+              f"Exit Mach {nozzle['exit_mach']:.4f} (design {nozzle['design_exit_mach']:.4f}); "
+              f"exit pressure {nozzle['exit_pressure_Pa']:.6g} Pa.",
+              f"Throat half-height {nozzle['throat_half_height_m']:.6g} m; exit half-height "
+              f"{nozzle['exit_half_height_m']:.6g} m; length {nozzle['length_m']:.6g} m.", "", "MESHES"]
+    for dimension, entry in report["meshes"].items():
+        patches = entry["summary"]["export"]["boundaries"]
+        readme.append(f"{entry['file']} ({dimension.upper()}): {entry['summary']['nodes']} nodes, "
+                      f"{entry['summary']['cells']} cells.")
+        readme.append("  Boundaries: " + ", ".join(f"{name} ({patch['bc_type']})" for name, patch in patches.items()) + ".")
+    if omitted:
+        readme.extend(["", "UNAVAILABLE MESHES", *omitted])
+    readme.extend(["", "COORDINATES",
+                   f"x is the axial distance from the throat. The 2D mesh is a half-domain bounded by the {lower}; "
+                   f"the 3D mesh is {solid}"])
+    files["README.txt"] = "\n".join(readme) + "\n"
+    stream = BytesIO()
+    with ZipFile(stream, "w", compression=ZIP_DEFLATED) as archive:
+        for name, content in files.items():
+            archive.writestr(name, content)
+    return stream.getvalue(), f"turbo_moc_nozzle_{now:%Y-%m-%d_%H-%M-%S}.zip"
