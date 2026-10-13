@@ -52,7 +52,8 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       scene.styleKey = styleKey;
       for (const actor of scene.actors) {
         if (!actor.props.actor.visibility) continue;
-        actor.props.mapper = window.turbomocMeshEdges.mapper(scene.width, actor.displayEdges, pixelRatio);
+        actor.props.mapper = window.turbomocMeshEdges.mapper(
+          scene.width, actor.displayEdges, pixelRatio, actor.scalarMapper);
       }
       studio.commit(scene);
       // Wait for React to apply mapper settings before requesting a new frame.
@@ -76,8 +77,10 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
           // the shader only when their GPU buffers have been rebuilt.
           for (const actor of scene.actors) {
             if (!actor.props.actor.visibility) continue;
-            const array = actor.props.children[0].props.children[0].props.children[0];
-            array.props.values = array.props.values.slice();
+            const pointData = actor.props.children[0].props.children.find(field => field.type === "PointData");
+            const array = pointData && pointData.props.children.find(field =>
+              field.props.name === "MeshEdgeCoordinates");
+            if (array) array.props.values = array.props.values.slice();
           }
           studio.commit(scene);
           requestAnimationFrame(() => {
@@ -124,7 +127,7 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         actor: Object.assign({}, actor.props.actor, {visibility: false})
       })}));
     },
-    render: function(data, settings, pane, plottedRows, width) {
+    render: function(data, settings, pane, plottedRows, width, inspection) {
       const studio = window.dash_clientside.studio;
       const previous = studio.scenes[pane];
       settings = settings || {};
@@ -146,11 +149,17 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
         studio.commit(hidden);
         return [window.dash_clientside.no_update, note];
       }
+      // Selection data belong to exactly one immutable mesh artifact. Never
+      // render a late result on a replacement mesh or a hidden blade row.
+      const inspectionRow = pane === "mesh" && inspection && inspection.mode !== "off" &&
+        rows.find(row => row.id === inspection.row_id && row.job === inspection.job);
+      const inspecting = !!inspectionRow;
       const lineWidth = Number(width) > 0 ? Number(width) : 0.35;
       // Visibility changes actor selection, but retains the numerical data key
       // and camera. No regeneration or removal of hidden row results is needed.
-      const key = [data.key, JSON.stringify(rows.map(row => [row.id, settings[row.id]]))].join("|");
-      const note = rows.map(row => (row.label || row.id) + ": " +
+      const key = [data.key, JSON.stringify(rows.map(row => [row.id, settings[row.id]])),
+        inspecting ? JSON.stringify([inspection.row_id, inspection.job, inspection.key, inspection.context]) : ""].join("|");
+      const note = inspecting ? inspection.note : rows.map(row => (row.label || row.id) + ": " +
         Math.min(row.is_linear ? 25 : row.num_blades, Math.max(1, Math.round((settings[row.id] || {}).copies || 1)))
         + " displayed").join(" · ") + " · XYZ [mm] · " +
         (pane === "mesh" ? "actual volume boundary cells" : "geometry display tessellation") +
@@ -171,16 +180,19 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       const actors = [];
       // Row datasets remain independent. Translation/rotation is a display
       // transform, so changing assembly placement never mutates mesh nodes.
-      for (const row of rows) {
+      for (const row of inspecting ? [inspectionRow] : rows) {
         const display = settings[row.id] || {};
-        const count = Math.max(1, Math.round(display.copies || 1));
-        const names = display.surfaces || ["blade", "hub"];
+        const count = inspecting ? 1 : Math.max(1, Math.round(display.copies || 1));
+        const names = inspecting ? ["inspection", ...(inspection.context === false ? [] : display.surfaces || [])]
+          : display.surfaces || ["blade", "hub"];
         const rowCount = row.is_linear ? count : Math.min(row.num_blades, count);
         const placement = row.placement || {};
         const rowId = row.id || 'stator_1';
         for (let i = 0; i < rowCount; ++i) for (const name of names) {
-        const original = row.surfaces[name];
-        if (!original) continue;
+        const quality = inspecting && name === "inspection";
+        const context = inspecting && !quality;
+        const original = quality ? (inspection.surfaces || {}).inspection : row.surfaces[name];
+        if (!original || !original.polys.length) continue;
         const s = pane === "mesh" ? window.turbomocMeshEdges.prepare(original) : original;
         const arrays = [];
         if (s.normals) arrays.push({namespace: "dash_vtk", type: "DataArray", props: {
@@ -192,19 +204,37 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
             type: "Float32Array", values: s.coordinates}});
         const fields = arrays.length ? [{namespace: "dash_vtk", type: "PointData",
           props: {children: arrays}}] : [];
+        if (quality) {
+          const cells = [];
+          for (const [name, values, type, components] of [
+            ["MeshQualityColors", s.colors, "Uint8Array", 3],
+            ["MeshQualityValue", s.cellValues, "Float64Array", 1],
+            ["OriginalCellId", s.cellIds, "Float64Array", 1]]) {
+            if (values) cells.push({namespace: "dash_vtk", type: "DataArray", props: {
+              name, values, type, numberOfComponents: components,
+              registration: name === "MeshQualityColors" ? "setScalars" : "addArray"}});
+          }
+          fields.push({namespace: "dash_vtk", type: "CellData", props: {children: cells}});
+        }
         const hex = (display.colors || {})[name];
-        const color = /^#[0-9a-f]{6}$/i.test(hex || "") ?
-          [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255) : colors[name];
+        const color = context ? [.56, .61, .65] : /^#[0-9a-f]{6}$/i.test(hex || "") ?
+          [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255) : colors[name] || [1,1,1];
+        // vtk.js: USE_CELL_FIELD_DATA=4, DIRECT_SCALARS=2. Explicit RGB values
+        // keep the same green-to-red legend across metrics, subsets and layers.
+        const scalarMapper = quality && s.colors ? {scalarVisibility: true,
+          scalarMode: 4, colorMode: 2, colorByArrayName: "MeshQualityColors",
+          interpolateScalarsBeforeMapping: false} : {scalarVisibility: false};
         actors.push({namespace: "dash_vtk", type: "GeometryRepresentation",
-          displayEdges: !!display.edges, props: {
+          displayEdges: !context && !!display.edges, scalarMapper, props: {
           id: pane + "-actor-" + rowId + "-" + i + "-" + name,
           actor: {visibility: true,
             orientation: [0,0,row.is_linear ? 0 : (placement.angular_phase_deg || 0) - 360 * i / row.num_blades],
             position: row.is_linear ? [0, i * row.pitch_mm, 0] : [0, 0, placement.streamwise_offset_mm || 0]},
-          mapper: pane === "mesh" ? window.turbomocMeshEdges.mapper(lineWidth, false)
+          mapper: pane === "mesh" ? window.turbomocMeshEdges.mapper(lineWidth, false, 1, scalarMapper)
                                   : {scalarVisibility: false},
           property: {color, edgeColor: [0,0,0],
-            edgeVisibility: false, ambient: .25, diffuse: .75,
+            edgeVisibility: false, ambient: quality ? 1 : .25, diffuse: quality ? 0 : .75,
+            opacity: context ? .18 : 1,
             interpolation: pane === "geometry" ? 2 : 1},
           children: [{namespace: "dash_vtk", type: "PolyData", props: {
             id: pane + "-poly-" + rowId + "-" + i + "-" + name, points: s.points, polys: s.polys,
@@ -238,7 +268,7 @@ window.dash_clientside = Object.assign({}, window.dash_clientside, {
       // Fit new numerical datasets; display controls preserve the camera.
       if (scene.active) setTimeout(() => studio.fit(id, key, pane, pool.length, 0), 0);
       return [window.dash_clientside.no_update,
-              actors.length ? note : "Select a surface to display."];
+              inspecting || actors.length ? note : "Select a surface to display."];
     }
   }
 });

@@ -7,6 +7,7 @@ from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 
 from turbo_moc.configuration import project as projects
 from turbo_moc.meshing.mesh_3d import BOUNDARIES
+from turbo_moc.app import inspection_panel
 
 
 COLORS = {"blade": "#477db3", "hub": "#a6b3b8", "shroud": "#ccd1d6",
@@ -37,7 +38,7 @@ def defaults(row):
             "colors": colors, "edges": row["mesh"]["pyvista"]["show_mesh_edges"]}
 
 
-def content(project, pane, preferences=None):
+def content(project, pane, preferences=None, inspection_preferences=None):
     editors = []
     for row in projects.active_rows(project):
         row_id = row["id"]
@@ -58,7 +59,7 @@ def content(project, pane, preferences=None):
                     **{"data-color-id": json.dumps(color_id, sort_keys=True, separators=(",", ":")),
                        "data-color": color, "data-color-label": f"{label(row)} {text} color"}),
             ], className="display-surface-row"))
-        editors.append(html.Section([
+        appearance = [
             html.Label([html.Span("Displayed blades"), dcc.Input(id=identifier("copies", pane, row_id),
                 type="number", min=1, max=maximum, step=1, value=count, debounce=True)], className="control",
                 title="Display copies only; the physical blade count and exported mesh are unchanged."),
@@ -71,50 +72,41 @@ def content(project, pane, preferences=None):
             *([dcc.Checklist(id=identifier("edges", pane, row_id), options=[{"label": "Mesh edges", "value": "edges"}],
                 value=["edges"] if settings["edges"] else [])]
               if pane == "mesh" else []),
-        ], id=identifier("editor", pane, row_id), style={"display": "none"}))
+        ]
+        children = inspection_panel.controls(row_id, appearance,
+            (inspection_preferences or {}).get(row_id)) if pane == "mesh" else appearance
+        editors.append(html.Section(children, id=identifier("editor", pane, row_id), style={"display": "none"}))
     return editors
 
 
 def view(project, pane, viewport):
     preferences = {row["id"]: defaults(row) for row in projects.active_rows(project)}
     rows = projects.active_rows(project)
-    return [dcc.Store(id=f"{pane}-display", data=preferences), dcc.Store(id=f"{pane}-display-open", data=False),
-        html.Div(html.Button("Configure display", id=f"{pane}-configure-display", n_clicks=0,
-            title="Choose a blade row and configure its displayed blades, surfaces and colors."),
-            className="cascade-display-toolbar"),
+    return [dcc.Store(id=f"{pane}-display", data=preferences),
+        *(inspection_panel.stores() if pane == "mesh" else []),
         html.Div([viewport, html.Aside([
-            html.Div([html.Strong("Configure display"), html.Button("×", id=f"{pane}-close-display", n_clicks=0,
-                title="Close display panel", **{"aria-label": "Close display panel"})], className="display-panel-header"),
+            html.Div(html.Strong("Configure display"), className="display-panel-header"),
             html.Label([html.Span("Blade row"), dcc.Dropdown(id=f"{pane}-display-row", clearable=False, searchable=False,
                 value=rows[0]["id"], options=[{"label": label(row), "value": row["id"]} for row in rows])],
                 className="control display-row-selector", title="Configure this row without changing which rows are shown."),
             html.Div(content(project, pane, preferences), id=f"{pane}-display-editors"),
-        ], id=f"{pane}-display-panel", className="display-panel",
-            style={"display": "none"})], className="display-viewport")]
+        ], id=f"{pane}-display-panel", className="display-panel")], className="display-viewport")]
 
 
 def register(app, pane):
     @app.callback(Output(f"{pane}-display-editors", "children"), Output(f"{pane}-display-row", "options"),
         Output(f"{pane}-display-row", "value"), Input("base-project", "data"),
-        State(f"{pane}-display", "data"), State(f"{pane}-display-row", "value"))
-    def structure(project, preferences, selected):
+        State(f"{pane}-display", "data"), State(f"{pane}-display-row", "value"),
+        *([State("mesh-inspection-settings", "data")] if pane == "mesh" else []))
+    def structure(project, preferences, selected, inspection_preferences=None):
         rows = projects.active_rows(project)
         selected = selected if selected in {row["id"] for row in rows} else rows[0]["id"]
-        return content(project, pane, preferences), [{"label": label(row), "value": row["id"]} for row in rows], selected
+        return content(project, pane, preferences, inspection_preferences), [{"label": label(row), "value": row["id"]} for row in rows], selected
 
-    @app.callback(Output(identifier("editor", pane, ALL), "style"), Output(f"{pane}-display-panel", "style"),
-        Output(f"{pane}-display-open", "data"), Input(f"{pane}-configure-display", "n_clicks"),
-        Input(f"{pane}-close-display", "n_clicks"), Input(f"{pane}-display-row", "value"),
-        Input(identifier("editor", pane, ALL), "id"), State(f"{pane}-display-open", "data"))
-    def open_panel(opens, closes, selected, identifiers, opened):
-        triggered = ctx.triggered_id
-        if triggered == f"{pane}-configure-display" and opens:
-            opened = True
-        elif triggered == f"{pane}-close-display" and closes:
-            opened = False
-        opened = bool(opened and selected in {item["row"] for item in identifiers})
-        return ([{} if item["row"] == selected else {"display": "none"} for item in identifiers],
-                {} if opened else {"display": "none"}, opened)
+    @app.callback(Output(identifier("editor", pane, ALL), "style"), Input(f"{pane}-display-row", "value"),
+        Input(identifier("editor", pane, ALL), "id"))
+    def selected_editor(selected, identifiers):
+        return [{} if item["row"] == selected else {"display": "none"} for item in identifiers]
 
     @app.callback(Output(f"{pane}-display", "data"),
         Input(identifier("copies", pane, ALL), "value"),

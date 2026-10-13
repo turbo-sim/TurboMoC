@@ -16,7 +16,7 @@ from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, 
 from dash.exceptions import MissingCallbackContextException
 from flask import abort, send_from_directory
 
-from turbo_moc.app import workflow as flow, plots, project_export, calculations, rotor_inlet, blade_counts, display_panel, mesh_reporting
+from turbo_moc.app import workflow as flow, plots, project_export, calculations, rotor_inlet, blade_counts, display_panel, mesh_reporting, inspection_panel
 from turbo_moc.meshing import mesh_3d as mesh
 from turbo_moc.configuration import project as project_model
 from turbo_moc.configuration.rotor import default_axial_interspace_mm, SPEED_TYPES
@@ -502,6 +502,7 @@ def create_app(config_file=None, output_dir=None):
                         ], className="split")], open=True, className="plot-group"),
                         html.Details([html.Summary("Three dimensional mesh"),
                             *display_panel.view(project, "mesh", viewport("mesh")),
+                            html.Div(id="mesh-inspection-summary", className="mesh-inspection-summary"),
                             html.Div(id="volume-status", className="message")], open=True, className="plot-group", id="mesh-details"),
                         html.Details([html.Summary("Mesh quality report"),
                                 html.Div([html.Label("Report", htmlFor="report-scope"), dcc.Dropdown(id="report-scope", value="all",
@@ -518,6 +519,7 @@ def create_app(config_file=None, output_dir=None):
     app.layout = layout
     for pane in ("geometry", "mesh"):
         display_panel.register(app, pane)
+    inspection_panel.register(app)
 
     @app.callback(Output({"type": "natural-blade-sizing", "row": ALL}, "children"),
         Input("config", "data"), Input("row-references", "data"),
@@ -962,7 +964,8 @@ def create_app(config_file=None, output_dir=None):
                     state["project"], row["id"])
                 dataset = {"id": row["id"], "label": row_label(row), "surfaces": surfaces,
                     "is_linear": linear, "placement": placement,
-                    "job": reference["job"]}
+                    "job": reference["job"], "session": reference["session"],
+                    "span_stations": summary.get("span_stations", [])}
                 if linear:
                     dataset["pitch_mm"] = definition["pitch_mm"]
                 else:
@@ -970,6 +973,7 @@ def create_app(config_file=None, output_dir=None):
                     dataset["num_blades"] = definition.get("num_blades", cfg["meridional_channel"]["num_blades"])
                 datasets.append(dataset)
                 status = mesh_reporting.mesh_status(state["project"], row, registry)
+                dataset["status"] = status
                 if scope == "all":
                     arrays = mesh_reporting.metric_arrays(str(flow.directory(reference) / "volume_data.npz"))
                     entries.append({"id": row["id"], "label": row_label(row), "status": status,
@@ -1172,9 +1176,13 @@ def create_app(config_file=None, output_dir=None):
     app.clientside_callback("function(data, settings, rows) { return window.dash_clientside.studio.render(data, settings, 'geometry', rows, 1); }",
         Output("geometry-scene", "children"), Output("geometry-note", "children"), Input("geometry-data", "data"),
         Input("geometry-display", "data"), Input("plotted-rows", "value"))
-    app.clientside_callback("function(data, settings, width, rows) { return window.dash_clientside.studio.render(data, settings, 'mesh', rows, width); }",
+    app.clientside_callback("""function(data, settings, width, rows, result, request) {
+        return window.dash_clientside.studio.render(data, settings, 'mesh', rows, width,
+            window.turbomocInspection.active(result, request));
+    }""",
         Output("mesh-scene", "children"), Output("mesh-note", "children"), Input("volume-data", "data"),
-        Input("mesh-display", "data"), Input("mesh-width", "data"), Input("plotted-rows", "value"))
+        Input("mesh-display", "data"), Input("mesh-width", "data"), Input("plotted-rows", "value"),
+        Input("mesh-inspection-result", "data"), Input("mesh-inspection-request", "data"))
     return app
 
 

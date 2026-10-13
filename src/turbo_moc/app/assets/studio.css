@@ -90,11 +90,9 @@ button:disabled {opacity:.4;cursor:default}
 .vtk-host {min-height:0;flex:1}
 .display-viewport {display:flex;align-items:stretch;min-width:0}
 .display-viewport > .vtk-frame {flex:1;min-width:0}
-.cascade-display-toolbar {display:flex;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid #e4ebee}
 .display-panel {flex:0 0 285px;width:285px;background:#fafcfc;border-left:1px solid #dfe7eb;
   padding:14px;overflow:auto;max-height:58vh;min-height:370px}
 .display-panel-header {display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
-.display-panel-header button {font-size:20px;padding:0 8px;border:none;background:transparent}
 .display-panel .control {grid-template-columns:minmax(0,1fr) 70px;gap:8px}
 .display-panel .display-row-selector {grid-template-columns:minmax(0,1fr) 150px}
 .display-presets {display:flex;gap:5px;flex-wrap:wrap;margin:12px 0}
@@ -103,6 +101,21 @@ button:disabled {opacity:.4;cursor:default}
   border-bottom:1px solid #e4ebee;font-size:12px}
 .display-surface-row input[type=checkbox] {margin-right:7px;accent-color:#376a7d}
 .surface-color-picker input {width:32px;height:26px;padding:1px;border:1px solid #bacbd3;border-radius:4px;cursor:pointer}
+.display-panel .inspection-control {grid-template-columns:minmax(0,1fr);gap:6px}
+.inspection-controls {font-size:12px}
+.inspection-controls small {display:block;line-height:1.5;margin:10px 0}
+.inspection-controls input[type=checkbox] {margin-right:7px;accent-color:#376a7d}
+.inspection-caption {font-size:12px;line-height:1.5;margin:10px 0}
+.inspection-layer-slider {padding:0 32px}
+.inspection-step {display:flex;justify-content:space-between;margin:12px 0 18px}
+.inspection-step button {padding:6px 10px}
+.mesh-inspection-summary:empty {display:none}
+.mesh-inspection-summary {border-top:1px solid #e4ebee;padding:12px 14px;font-size:12px}
+.inspection-readout {display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.inspection-count {flex:1;min-width:220px;line-height:1.7}
+.inspection-scale {flex:0 1 270px;min-width:190px;font-size:11px}
+.inspection-gradient {height:13px;border-radius:3px;margin:6px 0;background:linear-gradient(to right,#239b56,#f4d03f,#c0392b)}
+.inspection-ticks {display:flex;justify-content:space-between;font-variant-numeric:tabular-nums}
 .display-panel section > div:last-child,.display-panel section > button:last-child {margin-top:12px}
 .mesh-quality .report {width:100%;max-width:none;min-width:0;height:auto;min-height:0;resize:none;border:none}
 .report-availability {margin:0 0 12px;font-size:12px;color:#233c46}

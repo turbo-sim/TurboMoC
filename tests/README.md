@@ -13,6 +13,7 @@ nesting, colours, labels or exact histogram bin counts.
 | Workflow | Artifact invalidation, worker provenance, independent submission/polling and navigation after successful meshing |
 | Runtime | Sample-case startup, packaged assets, execution outside the checkout directory, separate output folders and Windows file locks |
 | Views | Visibility of both rows, physical interspace and interface coordinates, closed blade previews and visualization updates without remeshing |
+| Mesh inspection | Exact worst-N/threshold IDs, actual span-layer membership, fixed quality colors, saved-artifact selection and superseded-response rejection |
 | Project export | Current CGNS files, multi-zone packaging, provenance and rejection of stale or incomplete exports |
 
 The geometry, meshing, interface and CGNS tests remain because they verify the
@@ -52,7 +53,9 @@ callback's positional input order.
   `test_app_output_directory.py` into runtime, workflow, view, design/meshing and
   example tests. Those old test module names no longer describe the codebase.
 - Removed tests of the former slice/worst-cell app inspection controls; retained
-  quality metric and real mesh validation checks.
+  quality metric and real mesh validation checks. The current Display mode controls are
+  covered by `test_app_mesh_inspection.py`, `test_mesh_inspection.py` and the
+  JavaScript renderer checks below.
 
 Plot assertions identify blade rows by name rather than by their position among
 flow-domain traces. Essential behavior should survive adding a trace or changing
@@ -69,6 +72,15 @@ From the repository root, run the current implementation suite:
 Plain `pytest` uses the same default selection, excluding `tests/fluent/` and
 `tests/deprecated/`. The default suite requires neither PyFluent, a Fluent
 installation/license, CadQuery nor the companion barotropy package.
+
+Run the browser-independent mesh renderer and inspection-request checks with Node:
+
+```powershell
+node --test tests/js/test_mesh_inspection.js
+```
+
+These checks preserve cell values/IDs through triangulation, scalar colors through
+edge changes, camera identity and rejection of pending or obsolete selections.
 
 Fluent workflow and graphics checks are opt-in:
 

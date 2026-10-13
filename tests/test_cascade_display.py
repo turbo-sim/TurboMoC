@@ -38,7 +38,7 @@ def test_preferences_are_independent_and_do_not_edit_design(app):
 
 
 @pytest.mark.parametrize("pane", ["geometry", "mesh"])
-def test_single_panel_selects_hidden_rows_and_preserves_settings(app, monkeypatch, pane):
+def test_single_panel_selects_hidden_rows_and_preserves_settings(app, pane):
     project = projects.set_design_mode(projects.default_project(), "stator_rotor")
     saved = {row["id"]: display.defaults(row) for row in projects.active_rows(project)}
     saved["rotor_1"].update(copies=4, surfaces=["blade"])
@@ -50,19 +50,14 @@ def test_single_panel_selects_hidden_rows_and_preserves_settings(app, monkeypatc
     assert selected == "rotor_1"
     assert [item["value"] for item in options] == ["stator_1", "rotor_1"]
     identifiers = [display.identifier("editor", pane, row["id"]) for row in projects.active_rows(project)]
-    open_panel = callback(app, pane, '"type":"display-editor"')
-    monkeypatch.setattr(display, "ctx", SimpleNamespace(triggered_id=f"{pane}-configure-display"))
-    styles, panel, opened = open_panel(1, 0, selected, identifiers, False)
-    assert opened and panel == {} and styles == [{"display": "none"}, {}]
-    monkeypatch.setattr(display, "ctx", SimpleNamespace(triggered_id=f"{pane}-display-row"))
-    styles, panel, opened = open_panel(1, 0, "stator_1", identifiers, opened)
-    assert opened and styles == [{}, {"display": "none"}]
+    select = callback(app, pane, '"type":"display-editor"')
+    assert select(selected, identifiers) == [{"display": "none"}, {}]
+    assert select("stator_1", identifiers) == [{}, {"display": "none"}]
     assert saved == original
     # Switching design mode reconciles a removed row without losing preferences.
     _, options, selected = structure(projects.set_design_mode(project, "stator"), saved, "rotor_1")
     assert selected == "stator_1" and len(options) == 1
-    monkeypatch.setattr(display, "ctx", SimpleNamespace(triggered_id=f"{pane}-close-display"))
-    assert open_panel(1, 1, selected, identifiers[:1], True)[1:] == ({"display": "none"}, False)
+    assert select(selected, identifiers[:1]) == [{}]
 
 
 def test_reset_display_uses_selected_mesh_row_defaults(app, monkeypatch):

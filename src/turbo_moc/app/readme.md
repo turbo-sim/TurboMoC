@@ -17,6 +17,8 @@ The [theory guide](../../../docs/internal_information/theory_guide.md) and
 | `worker.py` | Isolated numerical execution with live progress and logs. |
 | `../visualization/geometry_preview.py` | Shared smooth, capped geometry tessellation and display normals. |
 | `plots.py` | Labeled 2D engineering views and quality histograms. |
+| `inspection_panel.py` | Per-row inspection controls, saved-cell extraction and metric legends. |
+| `assets/inspection.js` | Display requests and rejection of superseded inspection responses. |
 | `assets/studio.js` | Browser VTK scenes, rotational/translational display copies and mapper updates. |
 | `assets/mesh_edges.js` | Reused display triangles and antialiased cell-edge shader. |
 | `assets/studio.css` | App layout and styling. |
@@ -66,8 +68,8 @@ skipping already-current meshes. All selected rows need current blade designs;
 dependencies are checked before a mesh queue begins.
 
 The **Show** dropdown selects Both, Stator or Rotor for all 2D and 3D geometry
-and mesh views, preserving hidden rows' results. Each 3D viewer has one
-**Configure display** button; its panel's **Blade row** selector chooses which
+and mesh views, preserving hidden rows' results. Each 3D viewer has an always-open
+**Configure display** panel on the right; its **Blade row** selector chooses which
 row's displayed blades, surfaces and colors to edit, including hidden rows.
 Switching the configured row preserves its preferences and does not change
 Show. Geometry and mesh preferences remain separate. Multirow blade-to-blade plots use a common midspan
@@ -81,6 +83,37 @@ actual inlet/outlet flow-domain extensions, including shared interfaces.
 Pending designs show a pale prescribed blade extent without inventing a flow
 domain. Calculation and visibility controls share one compact sidebar block, with
 instructions and physical interspace details available on hover.
+
+In **Three dimensional mesh → Configure display**, the **Display mode** selector
+switches between **Boundary surfaces**, **Mesh quality filter**, and **Spanwise
+layer**. The controls below it change with the selected mode. Boundary surfaces
+contains the surface visibility, colors, display copies and mesh-edge controls.
+Quality filters select the worst N cells or all
+cells on the poor side of an inclusive threshold: skewness ≥ threshold,
+orthogonality ≤ threshold, or edge aspect ratio ≥ threshold. Ties in worst-N
+ranking use original Gmsh cell IDs. Inspection shows one passage of the configured
+row, with optional faint context for every surface selected under **Boundary
+surfaces**. Clearing the surface selection also clears the context. **Boundary
+surfaces** restores the usual
+row visibility and display copies. A hidden row must first be selected under Show.
+
+The green–yellow–red legend always means better to worse. Skewness and
+orthogonality retain their fixed 0–1 ranges, with the direction reversed for
+orthogonality. Edge aspect ratio uses a logarithmic scale with an automatic upper
+limit rounded above the whole mesh maximum (for example, 37 becomes 50, and 100
+becomes 200). The limit stays fixed while changing filters or layers. High aspect
+ratios can be intentional in boundary-layer cells. Each visible face carries its
+owner volume cell's quality, without averaging between cells.
+
+The layer slider selects one complete swept cell layer, following the actual
+hub-to-shroud geometry for axial, radial, curved and linear channels. Its caption
+shows the saved span interval, including nonuniform spacing. Slider release and
+Previous/Next update the layer while retaining the camera. Inspection reads the
+displayed saved artifact, including an explicitly labelled outdated mesh, and
+does not change design YAML, volume connectivity, metric calculations or exports.
+Two loaded artifacts and two extracted selections are cached; responses from an
+older selection cannot replace the current one. Selections exceeding 50,000 cells
+report their full count and pause drawing instead of silently sampling cells.
 
 The **Total / Stator / Rotor** dropdown in the separate expandable mesh quality report is
 independent of all visualization and calculation selections. Total compares

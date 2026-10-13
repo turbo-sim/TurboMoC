@@ -56,7 +56,9 @@ def test_dropdown_scopes_and_report_are_independent(monkeypatch):
     assert layout["calculation-scope"]["value"] == "all"
     assert layout["plot-scope"]["value"] == "all"
     assert layout["report-scope"]["value"] == "all"
-    assert "geometry-configure-display" in layout and "mesh-configure-display" in layout
+    assert "geometry-display-panel" in layout and "mesh-display-panel" in layout
+    assert all(layout[f"{pane}-display-panel"].get("style", {}).get("display") != "none"
+               for pane in ("geometry", "mesh"))
     sidebar = components(layout["sidebar"]["children"])
     assert "calculation-scope" in sidebar and "plot-scope" in sidebar
     assert "Show" in str(sidebar["interspace-note"]["children"])
