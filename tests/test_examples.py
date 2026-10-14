@@ -47,7 +47,7 @@ def test_workflow_runners_resolve_local_files_from_another_directory(tmp_path, m
         ("gmsh_2D", meshing_2d, "run_mesh_generation.py"),
         ("gmsh_3D", meshing_3d, "run_mesh_generation.py"),
         ("fluent_2D", workflow_2d, "run_fluent_case.py"),
-        ("fluent_3D", workflow_3d, "run_fluent_case.py"),
+        ("fluent_3D/stator", workflow_3d, "run_fluent_case.py"),
     ):
         calls = []
         monkeypatch.setattr(module, "main", lambda *args: calls.append(args))

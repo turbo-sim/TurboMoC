@@ -1,10 +1,10 @@
-> **App YAML compatibility:** see [Reuse an app project](../workflow_configuration.md) for the shared schema, copy/paste instructions, and 2D/3D restrictions.
+> **App YAML compatibility:** see [Reuse an app project](../../workflow_configuration.md) for the shared schema, copy/paste instructions, and 2D/3D restrictions.
 
 # MoC stator volume mesh and barotropic Fluent simulation
 
 This example generates a fresh 3D stator passage with the existing
-[Gmsh 3D workflow](../gmsh_3D/readme.md), builds the same barotropic material as
-[Fluent 2D](../fluent_2D/readme.md), and configures a 3D Fluent simulation.
+[Gmsh 3D workflow](../../gmsh_3D/readme.md), builds the same barotropic material as
+[Fluent 2D](../../fluent_2D/readme.md), and configures a 3D Fluent simulation.
 It supports one selected stationary stator row with axial, radial or linear
 geometry. Rotors and coupled multirow simulations are outside this workflow.
 
@@ -13,7 +13,7 @@ From the repository root:
 ```powershell
 poetry install --extras fluent
 poetry run python -m pip install -e ../barotropy
-poetry run python -m examples.fluent_3D.run_fluent_case
+poetry run python -m examples.fluent_3D.stator.run_fluent_case
 ```
 
 Fluent must be installed and licensed. The YAML selects Fluent 2024 R2, double
@@ -98,8 +98,8 @@ with the final case and matching data. Stable filenames are overwritten on repea
 runs, and the transcript is reset for each session.
 
 Implementation lives in
-[`workflow_3d.py`](../../src/turbo_moc/fluent/workflow_3d.py), with shared Fluent
-execution in [`common.py`](../../src/turbo_moc/fluent/common.py). Automated checks
+[`workflow_3d.py`](../../../src/turbo_moc/fluent/workflow_3d.py), with shared Fluent
+execution in [`common.py`](../../../src/turbo_moc/fluent/common.py). Automated checks
 exercise configuration and mocked solver behavior. A live Fluent 2024 R2 axial
 case with 229,075 cells verified CGNS import, rotational periodicity of
 `-360/31` degrees, a staged 10-iteration execution, final reports including wall
@@ -117,9 +117,9 @@ After solving, run the adjacent plotting script from the repository root:
 ```powershell
 poetry install --extras fluent
 # Save PNGs and open interactive windows; close each window to advance:
-poetry run python examples/fluent_3D/plot_fluent_case.py
+poetry run python examples/fluent_3D/stator/plot_fluent_case.py
 # Export only, without opening windows:
-poetry run python examples/fluent_3D/plot_fluent_case.py --no-show
+poetry run python examples/fluent_3D/stator/plot_fluent_case.py --no-show
 ```
 
 The script reads the matching `stator_fluent_3d.cas.h5` and `.dat.h5` files plus
