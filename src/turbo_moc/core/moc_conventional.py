@@ -534,6 +534,8 @@ class MOCSolver:
             # hardcoded planar assumption) rather than re-deriving it.
             mass_cumulative = 0.0
             for i in range(1, len(final_IVP_line)):
+                if not segment_has_length(final_IVP_line[i - 1], final_IVP_line[i]):
+                    continue
                 mass_cumulative = mass_cumulative + segment_mass_flow(
                     final_IVP_line[i - 1], final_IVP_line[i], self.delta_flow)
 
