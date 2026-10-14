@@ -33,3 +33,9 @@ fluent:
     z-velocity: 1.0e-6
     k: 1.0e-6
     omega: 1.0e-6
+
+report:
+  dpi: 200
+  passages_3d: 5                 # Passages per row in the 3D geometry view
+  passages_2d: 3                 # Pitches repeated in the unwrapped midspan plots
+  schlieren_percentile: 99.5     # Upper colour limit of the density-gradient plots (log scale)
