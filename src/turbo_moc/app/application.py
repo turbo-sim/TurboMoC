@@ -11,6 +11,8 @@ import yaml
 from uuid import uuid4
 
 import dash_vtk  # Register the browser bundle before constructing scenes.
+import numpy as np
+import plotly.graph_objects as go
 import jaxprop as jxp
 from dash import ALL, MATCH, Dash, Input, Output, Patch, State, ctx, dcc, html, no_update
 from dash.exceptions import MissingCallbackContextException
@@ -155,6 +157,85 @@ def nozzle_mesh_sidebar(row, settings):
                        "Planar: full-height section extruded through the slab depth.")]),
         group("CGNS boundary types", controls(settings["boundary_types"], "mesh.nozzle.boundary_types", identifier)),
     ], open=True, className="settings mesh row-settings", **{"data-row": identifier})
+
+
+def blade_geometry_group(values, identifier):
+    offsets = values.get("control_point_offsets") or {}
+    children = controls({k: v for k, v in values.items() if k != "control_point_offsets"}, "blade_geometry", identifier)
+    if offsets:
+        children.append(html.Small(f"{len(offsets)} control point{'s' if len(offsets) > 1 else ''} modified with "
+                                   "Modify control points (blade-to-blade view)."))
+    return group("Blade geometry definition", children)
+
+
+def control_point_editor():
+    return html.Div([
+        html.Div([html.Div([html.Span("Editing", className="cp-eyebrow"), html.H3("Stator control points"),
+                            html.Small(id="cp-info")]),
+                  html.Div([html.Button("Reset all", id="cp-reset", n_clicks=0),
+                            html.Button("Cancel", id="cp-cancel", n_clicks=0),
+                            html.Button("Apply", id="cp-apply", n_clicks=0, className="cp-apply")],
+                           className="cp-buttons")], className="cp-header"),
+        html.Div([html.Div(dcc.Graph(id="cp-figure", figure=empty("Control points"),
+                                     config={"displaylogo": False, "displayModeBar": False},
+                                     className="engineering-plot"), className="pane cp-plot"),
+                  html.Div(id="cp-sliders", className="cp-sliders")], className="cp-body"),
+        html.Div(id="cp-message", className="message"),
+    ], id="cp-editor", className="cp-editor", style={"display": "none"})
+
+
+CP_RANGE = 0.05
+
+
+def control_point_rows(editable, offsets):
+    rows = []
+    for index in editable:
+        value = float(offsets.get(str(index), 0.0))
+        rows.append(html.Div([
+            html.Span(str(index), className="cp-index"),
+            dcc.Slider(id={"type": "cp-slider", "index": index}, min=-CP_RANGE, max=CP_RANGE, step=0.0005,
+                       value=max(-CP_RANGE, min(CP_RANGE, value)), marks=None, updatemode="drag",
+                       className="cp-slider"),
+            dcc.Input(id={"type": "cp-value", "index": index}, type="number", value=value, step=0.001,
+                      debounce=True, className="cp-value"),
+        ], className="cp-row moved" if value else "cp-row", id={"type": "cp-row", "index": index}))
+    return rows
+
+
+def control_point_figure(session, edited):
+    from turbo_moc.geometry.stator_blade import editable_control_points
+    figure = plots.figure("Control points", "x [mm]", "y [mm]")
+    base_curve, edge = session["blade_curve"], session["trailing_edge"]
+    figure.add_trace(go.Scatter(x=base_curve["x"] + edge["x"], y=base_curve["y"] + edge["y"], mode="lines",
+                                name="original", line=dict(color="#8a9aa1", width=1.2, dash="dash")))
+    curve = edited["blade_curve"]
+    figure.add_trace(go.Scatter(x=curve["x"] + edge["x"] + curve["x"][:1], y=curve["y"] + edge["y"] + curve["y"][:1],
+                                mode="lines", name="edited", fill="toself", fillcolor=plots.BLADE_FILL,
+                                line=dict(color=plots.EDGE, width=1.5)))
+    points = edited["control_points"]
+    figure.add_trace(go.Scatter(x=[p[0] for p in points], y=[p[1] for p in points], mode="lines",
+                                line=dict(color="#9fb0b8", width=0.8), hoverinfo="skip", showlegend=False))
+    from turbo_moc.geometry.stator_blade import blade_chord, control_point_normals
+    editable = set(editable_control_points(edited))
+    moved = {int(key) for key, value in (edited.get("control_point_offsets") or {}).items() if value}
+    array = np.asarray(points, dtype=float)
+    normals = control_point_normals(array)
+    closed = np.vstack((array, array[:1]))
+    winding = np.sign(np.sum(closed[:-1, 0] * closed[1:, 1] - closed[1:, 0] * closed[:-1, 1])) or 1.0
+    labels = array - winding * 0.035 * blade_chord(edited) * normals
+    for name, members, color, size in (("editable", editable - moved, "#477db3", 9), ("moved", moved, "#c94f4f", 10),
+                                       ("locked", set(range(len(points))) - editable, "#a6b3b8", 7)):
+        order = sorted(members)
+        figure.add_trace(go.Scatter(x=array[order, 0], y=array[order, 1], mode="markers", name=name,
+                                    marker=dict(size=size, color=color, line=dict(color="white", width=1)),
+                                    customdata=order, hovertemplate="Point %{customdata}<extra></extra>"))
+    shown = sorted(editable)
+    figure.add_trace(go.Scatter(x=labels[shown, 0], y=labels[shown, 1], mode="text", text=[str(i) for i in shown],
+                                textfont=dict(size=11, color=["#c94f4f" if i in moved else "#233c46" for i in shown]),
+                                hoverinfo="skip", showlegend=False))
+    figure.update_layout(showlegend=True, legend=dict(orientation="h", y=1.06, x=0, font=dict(size=11)),
+                         uirevision="cp-editor")
+    return figure
 
 
 def cad_controls(row, family):
@@ -423,6 +504,7 @@ def sidebar(project):
                 ("meridional_channel", "Linear cascade definition" if family == "linear"
                      else "Meridional channel definition"),
                 ("blade_geometry", "Blade geometry definition"))]
+            fields[2] = blade_geometry_group(geometry["blade_geometry"], identifier)
             fields.insert(1, outlet_controls(geometry["method_of_characteristics"], identifier))
             fields.append(flow_domain_controls(project, row))
         else:
@@ -622,7 +704,7 @@ def create_app(config_file=None, output_dir=None):
         project = project_model.load_project(config_file) if config_file is not None else project_model.default_project()
         row = project_model.active_rows(project)[0]
         config = project_model.row_configuration(project, row["id"])
-        stores = [dcc.Store(id=n) for n in ("config", "job", "job-completion", "launch-busy",
+        stores = [dcc.Store(id=n) for n in ("config", "job", "job-completion", "launch-busy", "cp-session",
             "geometry-data", "geometry-key", "volume-data", "mesh-width")]
         return html.Div([*stores, dcc.Store(id="session", data=uuid4().hex),
             dcc.Store(id="loaded-project"), dcc.Download(id="configuration-download"),
@@ -700,8 +782,11 @@ def create_app(config_file=None, output_dir=None):
                                 config={"displaylogo": False}, style={"height": "300px"})], className="pane"),
                         ], className="split")], open=False, className="plot-group"),
                         ], id="nozzle-views", style={"display": "none"}),
-                        html.Div([
-                        html.Details([html.Summary("Blade-to-blade and meridional channel geometry"), html.Div([
+                        html.Div([html.Div([
+                        html.Details([html.Summary("Blade-to-blade and meridional channel geometry"),
+                            html.Div(html.Button("Modify stator control points", id="cp-edit-open", n_clicks=0,
+                                disabled=True), className="plot-toolbar", id="cp-toolbar", style={"display": "none"}),
+                            html.Div([
                             html.Div([dcc.Graph(id="design-section", figure=empty("Selected blade row"),
                                 config={"displaylogo": False}, className="engineering-plot"), html.Small(id="design-basis", style={"display": "none"})], className="pane"),
                             html.Div([dcc.Graph(id="meridional_channel", figure=empty("Machine geometry"),
@@ -713,7 +798,8 @@ def create_app(config_file=None, output_dir=None):
                         html.Details([html.Summary("Design statistics"),
                             html.Div(id="design-statistics", className="design-statistics")],
                             open=False, className="plot-group"),
-                        ], id="blade-views"),
+                        ], id="blade-views-body"), control_point_editor()], id="blade-views"),
+                        html.Div([
                         html.Details([html.Summary("CAD export (STEP)"),
                             html.Div([html.Button("Generate CAD", id="cad", n_clicks=0, disabled=True),
                                 html.Small("STEP solids in millimetres. Blade rows: fluid domain, blade, and disk-and-blade "
@@ -728,6 +814,7 @@ def create_app(config_file=None, output_dir=None):
                                 className="cad-actions"),
                             html.Div(id="bladegen-view", className="design-statistics")],
                             open=False, className="plot-group", id="bladegen-details"),
+                        ], id="export-panels"),
                     ], id="design-panel"),
                     html.Section([
                         html.Div([
@@ -1246,6 +1333,116 @@ def create_app(config_file=None, output_dir=None):
             cards.append(bladegen_card(row_label(row), status, report, reference))
         return (cards or html.Small("Generate the BladeGen files to export them for TurboGrid.",
                                     className="message")), {}
+
+    def editor_row(state, registry):
+        stator = next((row for row in project_model.active_rows(state["project"]) if row["role"] == "stator"), None)
+        if stator is None:
+            raise ValueError("Control-point editing needs a stator row.")
+        config = flow.resolved_configuration(state["project"], stator["id"], registry)
+        nozzle = flow.load_nozzle((registry or {}).get(stator["id"], {}).get("nozzle"), config)
+        return stator, config, nozzle
+
+    @app.callback(Output("cp-edit-open", "disabled"), Output("cp-edit-open", "title"), Output("cp-toolbar", "style"),
+        Input("config", "data"), Input("row-references", "data"))
+    def control_points_ready(state, registry):
+        hidden = {"display": "none"}
+        if not state or not state.get("project") or nozzle_mode(state["project"]) or not any(
+                row["role"] == "stator" for row in project_model.active_rows(state["project"])):
+            return True, "", hidden
+        if not state.get("valid"):
+            return True, "Correct the invalid settings first.", {}
+        try:
+            editor_row(state, registry)
+        except (ValueError, OSError, RuntimeError, KeyError):
+            return True, "Compute the stator blade design first.", {}
+        return False, "Move the stator blade's B-spline control points along their normals.", {}
+
+    @app.callback(Output("cp-session", "data"), Output("cp-sliders", "children"), Output("cp-info", "children"),
+        Output("blade-views-body", "style"), Output("cp-editor", "style"), Output("export-panels", "style"),
+        Input("cp-edit-open", "n_clicks"), State("config", "data"), State("row-references", "data"),
+        prevent_initial_call=True)
+    def open_control_point_editor(clicks, state, registry):
+        from turbo_moc.geometry.stator_blade import editable_control_points, parametrize_stator
+        if not clicks or not state or not state.get("valid"):
+            return (no_update,) * 6
+        stator, config, nozzle = editor_row(state, registry)
+        inputs = dict(config["blade_geometry"])
+        offsets = {str(key): float(value) for key, value in (inputs.pop("control_point_offsets", None) or {}).items()}
+        wall = nozzle["wall_final"]
+        base = parametrize_stator(wall["x"], wall["y"], **inputs)
+        editable = editable_control_points(base)
+        session = {"row_id": stator["id"], "control_points": base["control_points"], "knots": base["knots"],
+                   "blade_curve": base["blade_curve"], "trailing_edge": base["trailing_edge"], "offsets": offsets}
+        info = ""
+        return session, control_point_rows(editable, offsets), info, {"display": "none"}, {}, {"display": "none"}
+
+    @app.callback(Output({"type": "cp-slider", "index": ALL}, "value"),
+        Output({"type": "cp-value", "index": ALL}, "value"),
+        Output("cp-figure", "figure"), Output("cp-message", "children"), Output("cp-apply", "disabled"),
+        Input({"type": "cp-slider", "index": ALL}, "value"), Input({"type": "cp-value", "index": ALL}, "value"),
+        Input("cp-reset", "n_clicks"), Input("cp-session", "data"),
+        State({"type": "cp-slider", "index": ALL}, "id"), prevent_initial_call=True)
+    def control_point_values(sliders, values, reset, session, identifiers):
+        from turbo_moc.geometry.stator_blade import apply_control_point_offsets, blade_self_intersects
+        if not session or not identifiers:
+            return [], [], no_update, "", True
+        trigger = ctx.triggered_id
+        if trigger == "cp-reset":
+            offsets = [0.0] * len(identifiers)
+        elif isinstance(trigger, dict) and trigger.get("type") == "cp-value":
+            offsets = [float(value) if value is not None else 0.0 for value in values]
+        elif trigger == "cp-session":
+            offsets = [float(session["offsets"].get(str(item["index"]), 0.0)) for item in identifiers]
+        else:
+            offsets = [float(value or 0.0) for value in sliders]
+        blade = {key: session[key] for key in ("control_points", "knots", "blade_curve", "trailing_edge")}
+        edited = apply_control_point_offsets(blade, {item["index"]: value
+                                                     for item, value in zip(identifiers, offsets)})
+        invalid = blade_self_intersects(edited)
+        moved = sum(1 for value in offsets if value)
+        message = ("The edited blade intersects itself; reduce the offsets before applying." if invalid else
+                   f"{moved} control point{'s' if moved != 1 else ''} moved." if moved else "")
+        clipped = [max(-CP_RANGE, min(CP_RANGE, value)) for value in offsets]
+        return clipped, offsets, control_point_figure(session, edited), message, invalid
+
+    @app.callback(Output({"type": "cp-row", "index": ALL}, "className"),
+        Input("cp-figure", "clickData"), Input({"type": "cp-value", "index": ALL}, "value"),
+        State({"type": "cp-row", "index": ALL}, "id"), prevent_initial_call=True)
+    def control_point_rows_state(click, values, identifiers):
+        selected = None
+        if click and click.get("points") and "customdata" in click["points"][0]:
+            selected = int(click["points"][0]["customdata"])
+        return ["cp-row" + (" moved" if value else "") + (" selected" if item["index"] == selected else "")
+                for item, value in zip(identifiers, values)]
+
+    app.clientside_callback("""function(className, ids) {
+        const index = (ids || []).findIndex((id, i) => (className[i] || "").includes("selected"));
+        if (index >= 0) {
+            const element = document.getElementById(JSON.stringify(ids[index], Object.keys(ids[index]).sort()));
+            if (element) element.scrollIntoView({block: "center", behavior: "smooth"});
+        }
+        return window.dash_clientside.no_update;
+    }""", Output("cp-sliders", "title"), Input({"type": "cp-row", "index": ALL}, "className"),
+        State({"type": "cp-row", "index": ALL}, "id"), prevent_initial_call=True)
+
+    @app.callback(Output("base-project", "data", allow_duplicate=True),
+        Output("blade-views-body", "style", allow_duplicate=True), Output("cp-editor", "style", allow_duplicate=True),
+        Output("export-panels", "style", allow_duplicate=True), Input("cp-apply", "n_clicks"), State("cp-session", "data"), State({"type": "cp-value", "index": ALL}, "value"),
+        State({"type": "cp-value", "index": ALL}, "id"), State("config", "data"), prevent_initial_call=True)
+    def apply_control_points(clicks, session, values, identifiers, state):
+        if not clicks or not session or not state:
+            return (no_update,) * 4
+        project = deepcopy(state["project"])
+        row = project_model.get_row(project, session["row_id"])
+        row["geometry"]["blade_geometry"]["control_point_offsets"] = {
+            int(item["index"]): float(value) for item, value in zip(identifiers, values) if value}
+        return project_model.validate_project(project_model.normalize_project(project)), {}, {"display": "none"}, {}
+
+    @app.callback(Output("blade-views-body", "style", allow_duplicate=True),
+        Output("cp-editor", "style", allow_duplicate=True), Output("export-panels", "style", allow_duplicate=True),
+        Input("cp-cancel", "n_clicks"), prevent_initial_call=True)
+    def cancel_control_points(clicks):
+        return ({}, {"display": "none"}, {}) if clicks else (no_update,) * 3
 
     @app.callback(Output("mesh-width", "data"), Input("config", "data"))
     def display_settings(state):

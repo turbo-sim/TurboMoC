@@ -116,6 +116,8 @@ def normalize(config):
     if isinstance(result.get("blade_geometry"), dict):
         result["blade_geometry"] = {"parametrization": result["blade_geometry"].get("parametrization", "full"),
                                     **result["blade_geometry"]}
+        offsets = result["blade_geometry"].get("control_point_offsets") or {}
+        result["blade_geometry"]["control_point_offsets"] = {int(key): float(value) for key, value in offsets.items()}
     if isinstance(result["mesh"].get("numerics"), dict):
         result["mesh"]["numerics"].setdefault("recombine_minimum_quality", 0.1)
     view = result["mesh"].setdefault("visualization", {})

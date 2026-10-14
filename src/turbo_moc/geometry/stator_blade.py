@@ -24,6 +24,7 @@ from turbo_moc.geometry.splines import BSplineTool
 
 __all__ = [
     "parametrize_stator_blade", "parametrize_stator_blade_semi", "parametrize_stator", "STATOR_PARAMETRIZATIONS",
+    "apply_control_point_offsets", "editable_control_points", "blade_self_intersects",
     "export_blade_step", "export_flared_blade_step", "export_annular_blade_step",
     "export_annular_blade_stl",
     "move_control_point_along_normal",
@@ -995,7 +996,89 @@ def export_radial_blade_stl(blade_data, r1, r2, depth, stl_path,
 STATOR_PARAMETRIZATIONS = {"full": parametrize_stator_blade, "semi": parametrize_stator_blade_semi}
 
 
-def parametrize_stator(wall_x, wall_y, parametrization="full", **kwargs):
+LOCKED_CONTROL_POINTS = 2
+
+
+def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_offsets=None, **kwargs):
     if parametrization not in STATOR_PARAMETRIZATIONS:
         raise ValueError(f"Stator parametrization must be one of {tuple(STATOR_PARAMETRIZATIONS)}.")
-    return STATOR_PARAMETRIZATIONS[parametrization](wall_x, wall_y, **kwargs)
+    blade = STATOR_PARAMETRIZATIONS[parametrization](wall_x, wall_y, **kwargs)
+    return apply_control_point_offsets(blade, control_point_offsets) if control_point_offsets else blade
+
+
+def editable_control_points(blade):
+    count = len(blade["control_points"])
+    return list(range(LOCKED_CONTROL_POINTS, count - LOCKED_CONTROL_POINTS))
+
+
+def blade_chord(blade):
+    points = np.column_stack((blade["blade_curve"]["x"], blade["blade_curve"]["y"]))
+    return float(np.linalg.norm(np.ptp(points, axis=0)))
+
+
+def control_point_normals(control_points):
+    points = np.asarray(control_points, dtype=float)
+    tangent = np.roll(points, -1, axis=0) - np.roll(points, 1, axis=0)
+    tangent[0], tangent[-1] = points[1] - points[0], points[-1] - points[-2]
+    tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
+    return np.column_stack((-tangent[:, 1], tangent[:, 0]))
+
+
+def validate_control_point_offsets(blade, offsets):
+    editable = set(editable_control_points(blade))
+    result = {}
+    for key, value in (offsets or {}).items():
+        index = int(key)
+        if index not in editable:
+            raise ValueError(f"Control point {index} cannot be moved; editable points are "
+                             f"{min(editable)} to {max(editable)}.")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
+            raise ValueError(f"Control point {index} needs a finite offset.")
+        if value:
+            result[index] = float(value)
+    return result
+
+
+def apply_control_point_offsets(blade, offsets):
+    """Move control points along their normals by offset x chord, then re-evaluate the blade curve."""
+    offsets = validate_control_point_offsets(blade, offsets)
+    if not offsets:
+        return blade
+    points = np.asarray(blade["control_points"], dtype=float)
+    normals = control_point_normals(points)
+    moved = points.copy()
+    chord = blade_chord(blade)
+    for index, value in offsets.items():
+        moved[index] += value * chord * normals[index]
+    curve = BSplineTool(degree=3).forward(moved, np.asarray(blade["knots"], dtype=float),
+                                          num_points=len(blade["blade_curve"]["x"]))
+    result = dict(blade)
+    result["control_points"] = moved.tolist()
+    result["blade_curve"] = {"x": curve[:, 0].tolist(), "y": curve[:, 1].tolist()}
+    result["control_point_offsets"] = {str(index): value for index, value in offsets.items()}
+    return result
+
+
+def blade_self_intersects(blade):
+    curve = np.column_stack((blade["blade_curve"]["x"], blade["blade_curve"]["y"]))
+    edge = np.column_stack((blade["trailing_edge"]["x"], blade["trailing_edge"]["y"]))
+    points = np.vstack((curve, edge))
+    start, end = points[:-1], points[1:]
+    keep = np.linalg.norm(end - start, axis=1) > 1e-12
+    start, end = start[keep], end[keep]
+    count = len(start)
+
+    def cross(a, b):
+        return a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0]
+
+    d = end - start
+    rel = start[None, :, :] - start[:, None, :]
+    denominator = cross(d[:, None, :], d[None, :, :])
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t = cross(rel, d[None, :, :]) / denominator
+        u = cross(rel, d[:, None, :]) / denominator
+    hits = (np.abs(denominator) > 1e-14) & (t > 1e-9) & (t < 1 - 1e-9) & (u > 1e-9) & (u < 1 - 1e-9)
+    index = np.arange(count)
+    separation = np.abs(index[:, None] - index[None, :])
+    hits &= (separation > 1) & (separation < count - 1)
+    return bool(hits.any())
