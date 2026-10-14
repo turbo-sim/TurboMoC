@@ -97,6 +97,9 @@ def generate_barotropic_model(barotropy, config, nozzle, settings, output_dir):
         p_out=p_min,
         efficiency=settings["efficiency"],
         calculation_type=settings["calculation_type"],
+        **({"blending_onset": settings["blending_onset"], "blending_width": settings["blending_width"],
+            "HEOS_solver": settings.get("HEOS_solver", "hybr")}
+           if settings["calculation_type"] == "blending" else {}),
         ODE_solver=settings["ODE_solver"],
         ODE_tolerance=settings["ODE_tolerance"],
         polynomial_degree=settings["polynomial_degree"],
@@ -121,14 +124,20 @@ def generate_barotropic_model(barotropy, config, nozzle, settings, output_dir):
     logger.info("  Solve the expansion and fit the property polynomials.")
     model.solve()
     model.fit_polynomials()
-    logger.info("  Refine the fit and validate against independent EOS samples.")
-    fit_report = fit_wide_isentrope(
-        barotropy,
-        model.poly_fitter,
-        fluid,
-        float(inlet.s),
-        settings["polynomial_degree"],
-    )
+    if settings["calculation_type"] == "blending":
+        logger.info("  Keep barotropy's blended polynomials (equilibrium/metastable blending).")
+        fit_report = {"segments": len(model.poly_fitter.poly_breakpoints) - 1, "max_relative_error": {},
+                      "blending_onset": settings["blending_onset"], "blending_width": settings["blending_width"],
+                      "reference": "barotropy blended equilibrium/metastable expansion"}
+    else:
+        logger.info("  Refine the fit and validate against independent EOS samples.")
+        fit_report = fit_wide_isentrope(
+            barotropy,
+            model.poly_fitter,
+            fluid,
+            float(inlet.s),
+            settings["polynomial_degree"],
+        )
     summary(
         logger,
         "Polynomial fit validation",
@@ -227,6 +236,42 @@ def bounded_viscosity_expression(definition, p_min, p_max, mu_min, mu_max):
     )
 
 
+PHASE_INSET = 1e-6
+
+
+def _two_phase(barotropy, fluid, pressure, entropy):
+    return bool(fluid.get_state(barotropy.PSmass_INPUTS, float(pressure), entropy).to_dict()["is_two_phase"])
+
+
+def phase_boundaries(barotropy, fluid, entropy, p_low, p_high, samples=400):
+    """Pressures where the isentrope enters or leaves the two-phase region."""
+    pressures = np.geomspace(p_high, p_low, samples)
+    phases = [_two_phase(barotropy, fluid, value, entropy) for value in pressures]
+    result = []
+    for (high, low), (upper, lower) in zip(zip(pressures[:-1], pressures[1:]), zip(phases[:-1], phases[1:])):
+        if upper == lower:
+            continue
+        for _ in range(60):
+            middle = 0.5 * (high + low)
+            if _two_phase(barotropy, fluid, middle, entropy) == upper:
+                high = middle
+            else:
+                low = middle
+        result.append(0.5 * (high + low))
+    return result
+
+
+def _with_phase_boundaries(barotropy, fluid, entropy, breakpoints, p_in):
+    """Barotropy's normalized breakpoints with exact phase boundaries replacing nearby ones."""
+    breakpoints = [float(value) for value in breakpoints]
+    boundaries = [value / p_in for value in phase_boundaries(
+        barotropy, fluid, entropy, min(breakpoints) * p_in, max(breakpoints) * p_in)]
+    kept = [value for value in breakpoints
+            if all(abs(value - boundary) > 1e-3 * boundary for boundary in boundaries)
+            or value in (breakpoints[0], breakpoints[-1])]
+    return sorted(set(kept + boundaries), reverse=True)
+
+
 def fit_wide_isentrope(barotropy, fitter, fluid, entropy, degree):
     """Refine barotropy's phase segments for an extended pressure range.
 
@@ -237,15 +282,17 @@ def fit_wide_isentrope(barotropy, fitter, fluid, entropy, degree):
     # Barotropy expresses pressure as p / p_in. Preserve phase boundaries, then
     # subdivide each segment so its highest/lowest pressure ratio is at most 2.
     # This limits polynomial oscillation across a wide thermodynamic range.
+    breakpoints = _with_phase_boundaries(barotropy, fluid, entropy, fitter.poly_breakpoints, fitter.p_in)
     edges = []
-    for high, low in zip(fitter.poly_breakpoints[:-1], fitter.poly_breakpoints[1:]):
+    for high, low in zip(breakpoints[:-1], breakpoints[1:]):
         count = max(1, int(np.ceil(np.log2(high / low))))
         edges.extend(np.geomspace(high, low, count + 1)[:-1])
-    edges.append(fitter.poly_breakpoints[-1])
+    edges.append(breakpoints[-1])
     handles = {var: [] for var in PROPERTY_VARIABLES}
     errors = {var: 0.0 for var in PROPERTY_VARIABLES}
     for high, low in zip(edges[:-1], edges[1:]):
-        normalized_pressure = np.linspace(low, high, max(33, 4 * degree + 1))
+        inset = PHASE_INSET * (high - low)
+        normalized_pressure = np.linspace(low + inset, high - inset, max(33, 4 * degree + 1))
         states = [
             fluid.get_state(
                 barotropy.PSmass_INPUTS, float(pressure * fitter.p_in), entropy
