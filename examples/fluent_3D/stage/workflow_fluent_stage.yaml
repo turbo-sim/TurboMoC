@@ -2,6 +2,7 @@
 output_dir: output
 geometry_type: axial
 rpm: 2000.0                      # Rotor speed; keeps the rotor relative inlet supersonic
+axial_interspace_mm: 10.0        # Stator TE to rotor LE gap (app default 2 mm); the mixing plane sits halfway
 
 barotropic:
   calculation_type: equilibrium
@@ -37,5 +38,5 @@ fluent:
 report:
   dpi: 200
   passages_3d: 5                 # Passages per row in the 3D geometry view
-  passages_2d: 3                 # Pitches repeated in the unwrapped midspan plots
+  passages_2d: 2                 # Pitches shown in the unwrapped midspan plots
   schlieren_percentile: 99.5     # Upper colour limit of the density-gradient plots (log scale)

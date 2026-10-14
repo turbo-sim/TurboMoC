@@ -21,7 +21,7 @@ checkout is required, as for the [stator workflow](../stator/readme.md).
 | Physics | Pressure-based steady, SST k-omega, energy off, operating pressure 0 Pa |
 | Material | Barotropic density and viscosity expressions in both cell zones |
 | Rotor zone | Frame motion about +z at the YAML speed, with the sign that matches the stator swirl |
-| Stator/rotor coupling | General turbo interface, mixing-plane pitch change |
+| Stator/rotor coupling | General turbo interface, mixing-plane pitch change, halfway along the `axial_interspace_mm` gap (10 mm, half a chord) |
 | Periodicity | Rotational periodic pair per row |
 | Inlet | Stator total pressure, normal to the boundary |
 | Outlet | Rotor exit static pressure from the app's stage statistics |
@@ -37,7 +37,7 @@ checkout is required, as for the [stator workflow](../stator/readme.md).
 | `output/mesh/` | `stage.cgns`, row meshes and the mesh report from the project export |
 | `output/barotropy/` | Barotropic fits and figures |
 | `output/fluent/` | `stage_fluent.cas.h5`, `setup_summary.json` and the transcript |
-| `output/report/` | `report.md`, `report.json` and `figures/` from the report script below |
+| `output/report/` | `report.pdf` (also `.html`, `.md`), `report.json` and `figures/` from the report script below |
 
 ## Report of the solved stage
 
@@ -62,4 +62,4 @@ evaluated in Python, with H(p) = ∫dp/ρ as the isentropic head.
 | `stator_exit_pitchwise.png` | Mach number, p/P₀ and flow angle along the pitch at the stator exit |
 | `density_gradient_stator.png`, `density_gradient_rotor.png` | Numerical schlieren at midspan |
 | `residuals.png` | Residual history from the run transcript |
-| `report.md` | Mesh, setup and convergence, stage performance and mass-averaged stations, each against the MoC design |
+| `report.pdf`, `report.html`, `report.md` | Four-page report: summary cards and highlights, stage performance and station tables against the MoC design, mesh, setup and convergence, and all figures |

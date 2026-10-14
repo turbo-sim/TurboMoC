@@ -108,6 +108,7 @@ def prepare(workflow, output_dir):
     rotor = next(row for row in project["rows"] if row["role"] == "rotor")
     rotor["geometry"]["inlet_coupling"] = {"mode": "stator_exit",
                                            "rotational_speed": {"type": "actual", "value": float(workflow["rpm"])}}
+    rotor["geometry"]["axial_interspace_mm"] = float(workflow["axial_interspace_mm"])
     project = model.validate_project(model.normalize_project(project))
     session, registry = uuid4().hex, {}
     print("1/5 Blade designs and 3D meshes (app jobs)")
