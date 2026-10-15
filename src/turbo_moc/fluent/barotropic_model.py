@@ -1,6 +1,8 @@
 """Build and validate a barotropic model at the MoC inlet state."""
 
 import json
+import re
+from pathlib import Path
 
 import numpy as np
 from numpy.polynomial import Polynomial
@@ -20,6 +22,44 @@ PROPERTY_VARIABLES = (
 )
 POSITIVE_PROPERTIES = ("density", "viscosity", "speed_of_sound")
 MAX_FIT_RELATIVE_ERROR = 0.01
+
+
+class BarotropicClosure:
+    """The exported Fluent expressions evaluated in Python, plus the isentropic head H(p) = ∫ dp/ρ.
+
+    Post-processing then uses exactly the density and speed of sound the solver
+    used, instead of refitting or calling the equation of state again.
+    """
+
+    def __init__(self, expressions, p_min, p_max, samples=4000):
+        self.sources = {name: re.sub(r"\s*\[[^\]]*\]", "", text).replace("IF(", "where(")
+                        for name, text in expressions.items()}
+        grid = np.geomspace(0.8 * p_min, 1.05 * p_max, samples)
+        inverse = 1.0 / self.density(grid)
+        self._p = grid
+        self._head = np.concatenate([[0.0], np.cumsum(0.5 * (inverse[1:] + inverse[:-1]) * np.diff(grid))])
+
+    @classmethod
+    def from_file(cls, expressions_file, p_min, p_max):
+        expressions = json.loads(Path(expressions_file).read_text(encoding="utf-8"))
+        return cls(expressions, p_min, p_max)
+
+    def evaluate(self, name, pressure):
+        pressure = np.asarray(pressure, dtype=float)
+        return np.asarray(eval(self.sources[name], {"__builtins__": {}, "where": np.where, "exp": np.exp,
+                                                    "AbsolutePressure": pressure}), dtype=float)
+
+    def density(self, pressure):
+        return self.evaluate("barotropic_density", pressure)
+
+    def speed_of_sound(self, pressure):
+        return self.evaluate("barotropic_speed_of_sound", pressure)
+
+    def head(self, pressure):
+        return np.interp(pressure, self._p, self._head)
+
+    def pressure_from_head(self, head):
+        return np.interp(head, self._head, self._p)
 
 
 def positive(value, name):

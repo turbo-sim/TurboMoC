@@ -63,3 +63,21 @@ evaluated in Python, with H(p) = ∫dp/ρ as the isentropic head.
 | `density_gradient_stator.png`, `density_gradient_rotor.png` | Numerical schlieren at midspan |
 | `residuals.png` | Residual history from the run transcript |
 | `report.pdf`, `report.html`, `report.md` | Four-page report: summary cards and highlights, stage performance and station tables against the MoC design, mesh, setup and convergence, and all figures |
+
+## Code
+
+Both runners are thin wrappers around [`turbo_moc.fluent.stage`](../../../src/turbo_moc/fluent/stage/):
+
+| Module | Role |
+| --- | --- |
+| `design.py` | App jobs, stage CGNS export, MoC design point (`operating_point.json`) |
+| `case.py` | Fluent case: material, rotor frame motion, mixing plane, periodicity, boundaries |
+| `setup.py` | `main(config)` for `run_fluent_stage.py` |
+| `extraction.py` | Headless Fluent: surfaces, mass-flow and moment reports, mesh quality, residuals |
+| `analysis.py` | Kinematics, mass averages and stage performance from the extracted data |
+| `figures.py` | Report figures at printed size |
+| `document.py` | Report blocks rendered to Markdown, HTML and PDF |
+| `report.py` | `main(config, plots_only)` for `report_fluent_stage.py` |
+
+The Fluent barotropic expressions are evaluated in Python by `BarotropicClosure` in
+[`barotropic_model.py`](../../../src/turbo_moc/fluent/barotropic_model.py).
