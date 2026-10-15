@@ -87,25 +87,39 @@ def test_T0_rel_is_nudged_off_the_raw_isentropic_reconstruction():
     assert tri["T0_rel"] - float(raw_state0.T) >= 1e-3
 
 
-def test_rotor_inlet_state_survives_the_downstream_fluid_manager_query():
-    """Regression test for a real reported crash: design_rotor_vortex_blade
-    hands (P0_rel, T0_rel) to its own FluidManager, which re-derives the
-    state via jxp.FluidJAX's PT_INPUTS (core/classes.py's __init__) -- a
-    SEPARATE query from the one used here to derive P0_rel/T0_rel. For a
-    two-phase-capable fluid (Cyclopentane, matching the reported case) an
-    isentropic reconstruction can coincidentally land almost exactly on the
-    saturation curve, where that downstream query raises "Saturation
-    pressure ... is within 1e-4% of given p". This replays that exact
-    downstream query against our own output to confirm it no longer fails."""
+def _saturated_exit(fluid_name, p, quality, M):
+    import jaxprop as jxp
+    state = jxp.Fluid(fluid_name).get_state(jxp.PQ_INPUTS, p, quality)
+    rho, T = float(state.rho), float(state.T)
+    return {"wall_final": {"p": [p, p], "T": [T, T], "rho": [rho, rho], "M": [1.0, M]},
+            "fluid_name": fluid_name}, float(state.s)
+
+
+def test_two_phase_relative_stagnation_state_carries_its_quality():
+    """Inside the dome T0_rel = Tsat(P0_rel), so (P0_rel, T0_rel) cannot identify
+    the state; a nudged temperature would silently become saturated vapour.
+    The rotor must receive the quality and reproduce the stator entropy."""
     import jaxprop as jxp
 
-    nozzle_result = {
-        "wall_final": {"p": [2.0e5, 95006.4], "T": [320.0, 320.45],
-                        "rho": [12.0, 14.095], "M": [1.0, 1.4033]},
-        "fluid_name": "Cyclopentane",
-    }
-    tri = derive_rotor_inlet_from_stator(nozzle_result, alpha_deg=70.0, U=90.0)
+    nozzle_result, entropy = _saturated_exit("Cyclopentane", 95006.4, 0.1, 1.4033)
+    tri = derive_rotor_inlet_from_stator(nozzle_result, alpha_deg=65.0, U=22.0)
 
-    fluid_jax = jxp.FluidJAX("Cyclopentane", "HEOS")
-    state = fluid_jax.get_state(jxp.PT_INPUTS, tri["P0_rel"], tri["T0_rel"])
-    assert float(state.p) > 0
+    assert 0.0 < tri["Q0_rel"] < 1.0
+    total = jxp.Fluid("Cyclopentane").get_state(jxp.PQ_INPUTS, tri["P0_rel"], tri["Q0_rel"])
+    assert np.isclose(float(total.s), entropy, rtol=1e-6)
+    assert np.isclose(float(total.T), tri["T0_rel"], atol=1e-6)
+
+
+def test_subcooled_relative_stagnation_state_keeps_pressure_and_temperature():
+    """CO2 leaving the stator wet can still have a subcooled-liquid relative
+    stagnation state when W is large: no quality is passed, and the PT state
+    lies on the stator isentrope."""
+    import jaxprop as jxp
+
+    nozzle_result, entropy = _saturated_exit("CarbonDioxide", 3.0e6, 0.255, 1.905)
+    tri = derive_rotor_inlet_from_stator(nozzle_result, alpha_deg=70.0, U=33.0)
+
+    assert np.isnan(tri["Q0_rel"])
+    total = jxp.Fluid("CarbonDioxide").get_state(jxp.PT_INPUTS, tri["P0_rel"], tri["T0_rel"])
+    assert not total.is_two_phase
+    assert np.isclose(float(total.s), entropy, rtol=1e-3)

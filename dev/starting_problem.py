@@ -95,13 +95,13 @@ ratios = np.array([contraction_ratios(M) for M in M_1_range])
 
 import matplotlib.pyplot as plt
 
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(6,5))
 # ax.plot(M_1_range, ratios[:, 0], "k:", label=r"$C_{r,is}$ isentropic")
 ax.plot(M_1_range, ratios[:, 1], "k-", label=r"$C_r$ Kantrowitz (normal shock)")
 ax.set_xlabel(r"Inlet Mach number $M_1$ [-]")
 ax.set_ylabel(r"Area ratio $A_t/A_1$ [-]")
-ax.set_xlim(1, 2)
-ax.set_ylim(0.7, 1.02)
+ax.set_xlim(1, 3.5)
+ax.set_ylim(0.1, 1.01)
 ax.legend()
 plt.tight_layout()
 plt.show()

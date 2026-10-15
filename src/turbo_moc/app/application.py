@@ -1117,6 +1117,10 @@ def create_app(config_file=None, output_dir=None):
                     source = resolved["rotor_source"]
                     message += (f" Inlet midspan radius: {source['inlet_radius_mm']:.4g} mm; "
                                 f"blade speed: {source['triangle']['U']:.4g} m/s.")
+                    quality = source["triangle"].get("Q0_rel", float("nan"))
+                    if quality == quality:
+                        message += (f" Two-phase relative stagnation state, vapour quality {quality:.4g}: "
+                                    f"the rotor uses pressure and quality.")
                     speed = source.get("rotational_speed")
                     if speed:
                         message += f" Resolved speed: {speed['rpm']:.5g} rpm."

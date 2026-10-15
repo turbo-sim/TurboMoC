@@ -42,6 +42,8 @@ def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U):
           and flow angle.
         - ``P0_rel``, ``T0_rel``: relative stagnation state at the stator exit's
           entropy and the rothalpy-consistent relative stagnation enthalpy.
+        - ``Q0_rel``: its vapour quality when that state is two-phase, NaN
+          otherwise. With a finite quality the rotor uses (P0_rel, Q0_rel).
         - ``U``: blade speed used.
         - ``is_supersonic``: whether ``M_rel > 1``. The vortex-flow method
           requires supersonic relative inflow; otherwise its geometry is
@@ -75,23 +77,22 @@ def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U):
     P0_rel = float(state0_rel.p)
     T0_rel = float(state0_rel.T)
 
-    # design_rotor_vortex_blade hands (P0_rel, T0_rel) straight to its own
-    # FluidManager, which re-derives the state via a SEPARATE PT_INPUTS
-    # query (core/classes.py's __init__) -- a razor-thin coincidence where
-    # this isentropic reconstruction lands (P0_rel, T0_rel) almost exactly
-    # ON the saturation curve makes that downstream query raise
-    # "Saturation pressure ... is within 1e-4% of given p" with no context
-    # connecting it back to Omega/r here. Confirmed empirically: the failing
-    # band is a few 1e-4 K wide (matching CoolProp's own 1e-4% tolerance),
-    # not a broad unsafe region -- nudging T0_rel by a small, scale-aware
-    # margin reliably clears it (and is a no-op in every other case, well
-    # under this app's 2-decimal display precision).
-    T0_rel += max(1e-3, abs(T0_rel) * 1e-4)
+    # Inside the dome T0_rel = Tsat(P0_rel), so (P0_rel, T0_rel) cannot identify
+    # the state: the rotor receives (P0_rel, Q0_rel) instead and its
+    # FluidManager uses PQ_INPUTS. A single-phase state can still land within
+    # CoolProp's 1e-4 % saturation tolerance, where the downstream PT_INPUTS
+    # query raises; a scale-aware nudge clears that band and stays below the
+    # app's display precision.
+    if state0_rel.is_two_phase:
+        Q0_rel = float(state0_rel.Q)
+    else:
+        Q0_rel = float("nan")
+        T0_rel += max(1e-3, abs(T0_rel) * 1e-4)
 
     return {
         "p_static": p_static, "T_static": T_static, "rho_static": rho_static,
         "M_abs": M_abs, "V_abs": float(V_abs), "a": a,
         "W_rel": W_rel, "M_rel": float(M_rel), "beta_rel_deg": beta_rel_deg,
-        "P0_rel": P0_rel, "T0_rel": T0_rel,
+        "P0_rel": P0_rel, "T0_rel": T0_rel, "Q0_rel": Q0_rel,
         "U": float(U), "is_supersonic": bool(M_rel > 1.0),
     }

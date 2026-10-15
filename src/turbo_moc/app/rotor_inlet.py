@@ -72,9 +72,11 @@ def resolve_configuration(project, row_id, registry):
     inputs = config["rotor_design"]
     for name in INLET_FIELDS:
         inputs.pop(name, None)
-    inputs.update(P0_rel=triangle["P0_rel"],
-                  T0_rel=triangle["T0_rel"], M_inlet=triangle["M_rel"],
-                  beta_inlet=triangle["beta_rel_deg"])
+    inputs.update(P0_rel=triangle["P0_rel"], T0_rel=triangle["T0_rel"],
+                  M_inlet=triangle["M_rel"], beta_inlet=triangle["beta_rel_deg"])
+    inputs.pop("Q0_rel", None)
+    if isfinite(triangle.get("Q0_rel", float("nan"))):
+        inputs["Q0_rel"] = triangle["Q0_rel"]
     config["rotor_source"] = {"row_id": upstream["id"], "reference": {
         key: reference[key] for key in ("session", "job", "key")},
         "alpha_deg": angle, "inlet_radius_mm": radius, "triangle": triangle,
