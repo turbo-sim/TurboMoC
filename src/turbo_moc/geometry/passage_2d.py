@@ -244,9 +244,31 @@ def generate_flow_domain(blade, wall, *, inlet_chords, outlet_chords, smooth=Non
         "inlet_spline": inlet_spline, "outlet_spline": outlet_spline,
         "convergent_spline": convergent_spline,
     }
-    if domain_shift_mode == "auto":
-        return auto_center_flow_domain(blade, domain)
-    return apply_domain_shift(blade, domain, domain_shift)
+    if domain_shift_mode != "auto":
+        return apply_domain_shift(blade, domain, domain_shift)
+    try:
+        centered = auto_center_flow_domain(blade, domain)
+        if assess_clearance(blade, centered)["contained"]:
+            return centered
+    except ValueError:
+        pass
+    return midline_flow_domain(blade, inlet_chords, outlet_chords, smooth or {})
+
+
+def midline_flow_domain(blade, inlet_chords, outlet_chords, smooth):
+    """Passage on the blade's own midline, for staggers the camberline passage cannot contain.
+
+    At high exit angles the thin divergent blade runs nearly tangential and wanders off the
+    straight MoC-axis reference by more than half a pitch. The rotor's construction, a smooth
+    reference through the blade's slice midpoints with the metal angles at its ends, follows
+    the blade instead, and the half-pitch periodics then run along the flow channels.
+    """
+    from turbo_moc.geometry.rotor_blade import _flow_domain
+    settings = dict(smooth, inlet_chords=inlet_chords, outlet_chords=outlet_chords, domain_shift_mode="auto")
+    domain = _flow_domain(blade, settings)
+    if not assess_clearance(blade, domain)["contained"]:
+        raise ValueError("No passage contains the blade: reduce the blade count or the exit angle.")
+    return domain
 
 
 # =============================================================================

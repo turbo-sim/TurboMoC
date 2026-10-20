@@ -786,6 +786,7 @@ def create_app(config_file=None, output_dir=None):
                         html.Details([html.Summary("Blade-to-blade and meridional channel geometry"),
                             html.Div(html.Button("Modify stator control points", id="cp-edit-open", n_clicks=0,
                                 disabled=True), className="plot-toolbar", id="cp-toolbar", style={"display": "none"}),
+                            html.Div(id="geometry-errors"),
                             html.Div([
                             html.Div([dcc.Graph(id="design-section", figure=empty("Selected blade row"),
                                 config={"displaylogo": False}, className="engineering-plot"), html.Small(id="design-basis", style={"display": "none"})], className="pane"),
@@ -1356,9 +1357,13 @@ def create_app(config_file=None, output_dir=None):
         if not state.get("valid"):
             return True, "Correct the invalid settings first.", {}
         try:
-            editor_row(state, registry)
+            stator, config, _ = editor_row(state, registry)
         except (ValueError, OSError, RuntimeError, KeyError):
             return True, "Compute the stator blade design first.", {}
+        try:
+            flow.get_design(config, registry[stator["id"]]["nozzle"])
+        except (ValueError, OSError, RuntimeError, KeyError):
+            return True, "", hidden
         return False, "Move the stator blade's B-spline control points along their normals.", {}
 
     @app.callback(Output("cp-session", "data"), Output("cp-sliders", "children"), Output("cp-info", "children"),
@@ -1458,11 +1463,12 @@ def create_app(config_file=None, output_dir=None):
     @app.callback(Output("geometry-data", "data"), Output("geometry-key", "data"),
         Output("design-section", "figure"), Output("meridional_channel", "figure"),
         Output("design-basis", "children"), Output("assembly-basis", "children"),
+        Output("geometry-errors", "children"),
         Input("config", "data"), Input("row-references", "data"),
         Input("plotted-rows", "value"), State("geometry-key", "data"))
     def geometry(state, registry, visible=None, previous_key=None):
         if not state or not state.get("valid") or nozzle_mode(state["project"]):
-            return None, None, empty("Selected blade row"), empty("Machine geometry"), "", ""
+            return None, None, empty("Selected blade row"), empty("Machine geometry"), "", "", []
         ready = list(ready_rows(state, registry))
         active = project_model.active_rows(state["project"])
         visible = {r["id"] for r in active} if visible is None else set(visible)
@@ -1480,7 +1486,7 @@ def create_app(config_file=None, output_dir=None):
         key = flow.digest([sorted(visible), chart_rows, planning, interfaces, interface_error, [(r["id"], k["geometry"], placements[r["id"]])
             for r, _, _, k in ready]])
         if key == previous_key:
-            return (no_update,) * 6
+            return (no_update,) * 7
         datasets, views, errors, section_views, basis_notes = [], [], [], [], []
         basis = "Compute blade designs for the plotted rows to display their geometry."
         for row, config, reference, keys in ready:
@@ -1529,7 +1535,8 @@ def create_app(config_file=None, output_dir=None):
         if errors:
             note += " " + " ".join(errors)
         return {"key": data_key, "rows": datasets}, key, section, plots.assembly_meridional_figure(
-            views, planning, interfaces=interfaces), basis, note
+            views, planning, interfaces=interfaces), basis, note, [
+            html.Div(error, className="inlet-warning", role="alert") for error in errors]
 
     @app.callback(Output("reference-plot", "figure"), Output("meridional-plot", "figure"),
         Output("reference-basis", "children"), Output("meridional-basis", "children"),
