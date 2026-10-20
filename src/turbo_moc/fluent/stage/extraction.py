@@ -118,6 +118,11 @@ def extract(case_file, setup, data_dir, options, radii):
         reports = fluent_reports(settings, setup)
         reports["mesh_quality"] = mesh_quality(solver)
         reports["methods"] = settings.solution.methods.get_state()
+        reports["time_scale_factor"] = (
+            settings.solution.run_calculation.pseudo_time_settings.time_step_method.time_step_size_scale_factor())
+        reports["relaxation"] = (
+            settings.solution.controls.pseudo_time_explicit_relaxation_factor.global_dt_pseudo_relax.get_state())
+        reports["p_v_controls"] = settings.solution.controls.p_v_controls.get_state()
         reports["viscous"] = settings.setup.models.viscous.model()
         (data_dir / "fluent_reports.json").write_text(json.dumps(reports, indent=2, default=float), encoding="utf-8")
     finally:

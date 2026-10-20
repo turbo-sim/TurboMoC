@@ -111,7 +111,7 @@ class Midspan:
     """Unwrapped midspan cylinders of both rows, repeated over a common circumferential window."""
 
     def __init__(self, results, pitches):
-        self.flats = {}
+        self.flats, self.surfaces = {}, {}
         for row in ROWS:
             mesh = results.midspan[row].copy()
             values = {field: mesh.point_data[field] for field in FIELDS}
@@ -119,6 +119,7 @@ class Midspan:
             sound = results.model.speed_of_sound(values["absolute-pressure"])
             mesh.point_data["mach"] = (parts["c"] if row == "stator_1" else parts["w"]) / sound
             mesh.point_data["p_ratio"] = values["absolute-pressure"] / results.P0
+            self.surfaces[row] = mesh
             flat = unwrapped(mesh, results.theta_ref, results.r_mid)
             flat = flat.compute_derivative(scalars="density", gradient="grad_rho")
             flat.point_data["grad_rho"] = np.linalg.norm(flat.point_data["grad_rho"], axis=1) * 1e3
@@ -270,6 +271,109 @@ def residual_history(results, save):
     return save(fig, "residuals")
 
 
+def state_diagram(results, save):
+    """Temperature-entropy diagram: saturation dome and the design states of the stage."""
+    import CoolProp.CoolProp as CP
+    import jaxprop as jxp
+    import matplotlib.pyplot as plt
+    name = results.state["fluid_name"]
+    T_crit = CP.PropsSI("Tcrit", name)
+    T_dome = np.linspace(CP.PropsSI("Tmin", name) + 20, T_crit - 0.05, 160)
+    s_liquid = [CP.PropsSI("S", "T", T, "Q", 0, name) / 1e3 for T in T_dome]
+    s_vapour = [CP.PropsSI("S", "T", T, "Q", 1, name) / 1e3 for T in T_dome]
+    fluid = jxp.Fluid(name)
+    inlet = fluid.get_state(jxp.PQ_INPUTS, float(results.state["P0"]), float(results.state["Q0"]))
+    stations = {item["station"] + "|" + item["frame"]: item for item in
+                results.point["design"]["stator"]["stations"] + results.point["design"]["rotor"]["stations"]}
+    points = [("0", "stator inlet, total", float(inlet.s), float(inlet.T)),
+              ("1", "stator exit", stations["Stator exit (1)|absolute"]["s"], stations["Stator exit (1)|absolute"]["T"]),
+              ("2", "rotor exit", stations["Rotor exit (2)|relative"]["s"], stations["Rotor exit (2)|relative"]["T"])]
+    rotor = results.rotor_design
+    if rotor is not None:
+        relative = (fluid.get_state(jxp.PQ_INPUTS, rotor["P0_rel"], rotor["Q0_rel"]) if rotor["Q0_rel"] == rotor["Q0_rel"]
+                    else fluid.get_state(jxp.PT_INPUTS, rotor["P0_rel"], rotor["T0_rel"]))
+        points.insert(2, ("1r", "rotor relative total", float(relative.s), float(relative.T)))
+    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.0), gridspec_kw={"width_ratios": [1, 1]}, constrained_layout=True)
+    for ax, zoom in zip(axes, (False, True)):
+        ax.plot(s_liquid, T_dome, "k-", lw=1.0)
+        ax.plot(s_vapour, T_dome, "k-", lw=1.0)
+        isentrope = [float(inlet.s) / 1e3] * 2
+        ax.plot(isentrope, [points[0][3], points[-1][3]], ":", color="#5b6b72", lw=0.9)
+        for tag, label, s, T in points:
+            ax.plot(s / 1e3, T, "o", color=COLORS["rotor_1"] if tag.startswith(("1r", "2")) else COLORS["stator_1"],
+                    ms=4)
+            ax.annotate(tag, (s / 1e3, T), textcoords="offset points", xytext=(5, 2), fontsize=7.5)
+        ax.set_xlabel("Entropy s [kJ kg$^{-1}$ K$^{-1}$]")
+        ax.set_ylabel("Temperature T [K]")
+        if zoom:
+            s_values = [p[2] / 1e3 for p in points]
+            T_values = [p[3] for p in points]
+            ax.set_xlim(min(s_values) - 0.08, min(s_values) + 0.45)
+            ax.set_ylim(min(T_values) - 8, max(T_values) + 8)
+            ax.set_title("(b) Stage states near the saturated-liquid line", loc="left")
+        else:
+            ax.set_title("(a) Saturation dome and the stage isentrope", loc="left")
+    return save(fig, "state_diagram")
+
+
+def starting_chart(results, save):
+    """Isentropic and Kantrowitz contraction limits along the rotor relative isentrope, with the design point."""
+    import matplotlib.pyplot as plt
+    from turbo_moc.core import rotor_starting
+    rotor, check = results.rotor_design, results.starting
+    machs = np.linspace(1.05, max(2.0, check["M_inlet"] + 0.3), 14)
+    curves = rotor_starting.starting_curves(rotor, machs)
+    fig, ax = plt.subplots(figsize=(3.4, 2.75), constrained_layout=True)
+    ax.plot(machs, curves[:, 0], "k:", lw=1.1, label="isentropic limit")
+    ax.plot(machs, curves[:, 1], "k-", lw=1.1, label="Kantrowitz limit")
+    ax.plot(check["M_inlet"], check["throat_ratio"], "o", color=COLORS["rotor_1"], ms=5, label="rotor design")
+    ax.annotate(f"margin {check['margin']:.2f}", (check["M_inlet"], check["throat_ratio"]),
+                textcoords="offset points", xytext=(6, -12), ha="left", fontsize=7.5)
+    ax.set_xlabel("Relative inlet Mach number [-]")
+    ax.set_ylabel("Area ratio A$_t$/A$_1$ [-]")
+    ax.set_ylim(0, 1.05)
+    ax.legend(fontsize=7, frameon=False, loc="lower left")
+    return save(fig, "starting_chart")
+
+
+def render_annulus(results, view, field, cmap, limits):
+    """Midspan cylinder of both rows repeated over the full annulus, seen obliquely; blade sections are the gaps."""
+    import pyvista as pv
+    plotter = pv.Plotter(off_screen=True, window_size=(2000, 1700))
+    plotter.set_background("white")
+    for row in ROWS:
+        sectors = int(round(2 * np.pi / results.pitch[row]))
+        for k in range(sectors):
+            angle = np.degrees(k * results.pitch[row])
+            plotter.add_mesh(view.surfaces[row].rotate_z(angle, point=(0, 0, 0), inplace=False), scalars=field,
+                             cmap=cmap, clim=limits, show_scalar_bar=False, lighting=False)
+    z = np.concatenate([view.surfaces[row].points[:, 2] for row in ROWS])
+    focus = np.array([0.0, 0.0, 0.5 * (z.min() + z.max())])
+    plotter.camera.focal_point = focus
+    plotter.camera.position = focus + 4.2 * results.r_mid * np.array([0.0, -0.5, -0.87])
+    plotter.camera.up = (0.0, 0.0, 1.0)
+    image = cropped(plotter.screenshot(return_img=True))
+    plotter.close()
+    return image
+
+
+def annulus_fields(results, view, save):
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+    mach_max = max(float(np.max(view.surfaces[row].point_data["mach"])) for row in ROWS)
+    fig, axes = plt.subplots(1, 2, figsize=(TEXT_WIDTH_IN, 3.6), constrained_layout=True)
+    for ax, field, label, cmap, limits, title in (
+            (axes[0], "mach", "Mach number [-]", "turbo", (0, mach_max), "(a) Mach: stator absolute, rotor relative"),
+            (axes[1], "p_ratio", "p/P₀ [-]", "viridis", (0, 1), "(b) Static pressure")):
+        ax.imshow(render_annulus(results, view, field, cmap, limits))
+        ax.set_axis_off()
+        ax.set_title(title, loc="left")
+        fig.colorbar(ScalarMappable(Normalize(*limits), cmap), ax=ax, label=label, orientation="horizontal",
+                     fraction=0.05, pad=0.02)
+    return save(fig, "midspan_annulus")
+
+
 def make_all(results, figures_dir, options):
     """Draw every report figure; returns their relative paths and the blade-loading data."""
     import matplotlib
@@ -279,8 +383,12 @@ def make_all(results, figures_dir, options):
     view = Midspan(results, options["passages_2d"])
     paths = {"geometry": geometry(results, options, save), "midspan": midspan_fields(results, view, save),
              "schlieren": density_gradient(view, options["schlieren_percentile"], save)}
+    paths["annulus"] = annulus_fields(results, view, save)
     paths["loading"], loading = blade_loading(results, save)
     paths["pitchwise"] = stator_exit_pitchwise(results, save)
     if results.residuals is not None:
         paths["residuals"] = residual_history(results, save)
+    if results.rotor_design is not None:
+        paths["states"] = state_diagram(results, save)
+        paths["starting"] = starting_chart(results, save)
     return paths, loading

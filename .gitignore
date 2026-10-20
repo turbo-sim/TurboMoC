@@ -34,3 +34,8 @@ docs/_build/
 output/
 turbo_moc_output/
 
+# Confidential
+TurboExpo2027/
+examples/fluent_3D/
+examples/fluent_2D_stage/
+dev/

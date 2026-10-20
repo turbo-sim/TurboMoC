@@ -31,11 +31,21 @@ def main(config_file, plots_only=False):
     print("2/3 Figures and tables")
     options = workflow["report"]
     results = analysis.compute(output_dir)
+    results.starting = None
+    if results.rotor_design is not None:
+        from turbo_moc.core.rotor_starting import starting_check
+        from turbo_moc.core.rotor_starting import kantrowitz_ratio, relative_isentrope
+        results.starting = starting_check(results.rotor_design)
+        rotor = results.rotor_design
+        isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
+                                       rotor.get("Q0_rel", float("nan")))
+        results.starting["kantrowitz_ratio_cfd"] = kantrowitz_ratio(isentrope, results.rotor_in["M_rel"])
     paths, loading = figures.make_all(results, report_dir / "figures", options)
     (report_dir / "report.json").write_text(json.dumps({
         "stations": results.stations,
         "performance": {row[0]: {"cfd": row[2], "moc": row[3]} for row in results.performance},
-        "torque_passage": results.torque_passage, "power_W": results.power, "fluent_reports": results.reports,
+        "starting": results.starting, "torque_passage": results.torque_passage, "power_W": results.power,
+        "fluent_reports": results.reports,
         "blade_loading": loading}, indent=2, default=float), encoding="utf-8")
     pdf_file = document.write_documents(document.report_blocks(results, paths, options), report_dir)
     print(f"3/3 Report written: {report_dir / 'report.md'}" + (f" and {pdf_file.name}" if pdf_file else

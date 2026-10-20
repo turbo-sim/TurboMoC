@@ -16,7 +16,7 @@ ROTOR_DEFAULTS = {
     "fluid_name": "Novec649", "P0_rel": 5e5, "T0_rel": 400.0,
     "M_inlet": 1.5, "M_outlet": 1.5, "M_lower": 1.05, "M_upper": 2.0,
     "beta_inlet": 65.0, "num_points": 60, "le_te_ratio": 25.0,
-    "outlet_condition": "mach", "p_back": 1e5,
+    "outlet_condition": "mach", "p_back": 1e5, "incidence": 0.0,
 }
 ROTOR_OUTLET_CONDITIONS = ("mach", "pressure")
 SPEED_TYPES = {"actual": "Actual speed [rpm]", "blade_velocity_ratio": "Blade velocity ratio U/c₀ [-]",
@@ -123,6 +123,9 @@ def validate_rotor_configuration(config):
     _finite(design["p_back"], "rotor_design.p_back", minimum=0, strict=True)
     if abs(design["beta_inlet"]) >= 90:
         raise ValueError("rotor_design.beta_inlet must be strictly between -90 and 90 degrees.")
+    _finite(design["incidence"], "rotor_design.incidence")
+    if abs(design["incidence"]) >= 30:
+        raise ValueError("rotor_design.incidence must be strictly between -30 and 30 degrees.")
     if type(design["num_points"]) is not int or design["num_points"] < 10:
         raise ValueError("rotor_design.num_points must be an integer >= 10.")
     coupling = config["inlet_coupling"]
@@ -150,8 +153,15 @@ def validate_rotor_configuration(config):
 
 
 def vortex_parameters(inputs):
-    """Resolve the rotor exit target to the relative exit Mach number of the vortex solver."""
+    """Resolve the rotor exit target to the relative exit Mach number of the vortex solver.
+
+    ``incidence`` is the angle by which the cascade's accepted inflow exceeds its
+    suction-side inlet line (unique incidence, positive towards the tangential
+    direction): the blade is built at ``beta_inlet - incidence`` so that the flow
+    arriving at ``beta_inlet`` is the one this blade swallows.
+    """
     result = deepcopy(inputs)
+    result["beta_inlet"] = result["beta_inlet"] - result.pop("incidence", 0.0)
     condition = result.pop("outlet_condition", "mach")
     back_pressure = result.pop("p_back", None)
     if condition != "pressure":

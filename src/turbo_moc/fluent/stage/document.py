@@ -97,6 +97,24 @@ def mesh_table(results):
     return rows
 
 
+RELAXATION_LABELS = {"pressure": "pressure", "mom": "momentum", "density": "density", "k": "k", "omega": "ω"}
+
+
+def pseudo_time_rows(reports):
+    """Final pseudo-time scale and explicit relaxation factors, when the extraction recorded them."""
+    rows = []
+    if "time_scale_factor" in reports:
+        rows.append(["Pseudo-time scale factor", f"{reports['time_scale_factor']:g} (final)"])
+    controls = reports.get("p_v_controls") or {}
+    relaxation = {"pressure": controls.get("explicit_pressure_under_relaxation"),
+                  "mom": controls.get("explicit_momentum_under_relaxation"), **(reports.get("relaxation") or {})}
+    relaxation = {key: value for key, value in relaxation.items() if value is not None}
+    factors = [f"{label} {relaxation[key]:g}" for key, label in RELAXATION_LABELS.items() if key in relaxation]
+    if factors:
+        rows.append(["Explicit relaxation", ", ".join(factors)])
+    return rows
+
+
 def setup_table(results):
     methods = results.reports["methods"]
     schemes = methods["discretization_scheme"]
@@ -106,6 +124,7 @@ def setup_table(results):
         ["Turbulence", "SST k-ω" if results.reports["viscous"] == "k-omega" else results.reports["viscous"]],
         ["Discretization", f"{schemes['mom'].replace('-', ' ')} (momentum, density, k, ω); pressure "
                            f"{schemes['pressure']}; {methods['gradient_scheme'].replace('-', ' ')} gradients"],
+        *pseudo_time_rows(results.reports),
         ["Rotor speed", f"{abs(point['rpm']):.0f} rpm ({abs(results.omega):.1f} rad/s)"],
         ["Boundary conditions", f"P₀ = {results.P0 / 1e3:.1f} kPa at the inlet; "
                                 f"p = {point['rotor_exit_pressure'] / 1e3:.2f} kPa at the outlet"],
@@ -118,6 +137,61 @@ def setup_table(results):
         rows.append(["Iterations", f"{int(final['iter'])}"])
         rows.append(["Final residuals", ", ".join(f"{equation} {final[equation]:.0e}" for equation in equations)])
     return rows
+
+
+def design_conditions(results, figures):
+    """Inlet state, rotor starting and unique incidence: blocks for the design-conditions section."""
+    check, rotor_in = results.starting, results.rotor_in
+    state = results.state
+    incidence = rotor_in["beta"] - check["beta_inlet"]
+    rows = [
+        ["Stator inlet", f"P₀ = {results.P0 / 1e3:.1f} kPa, vapour quality {state['Q0']:.3f} "
+                         "(just inside the dome from the saturated liquid)"],
+        ["Rotor relative total", f"P₀,rel = {results.rotor_design['P0_rel'] / 1e3:.1f} kPa, " + (
+            f"vapour quality {results.rotor_design['Q0_rel']:.3f}" if results.rotor_design["Q0_rel"] == results.rotor_design["Q0_rel"]
+            else f"T₀,rel = {results.rotor_design['T0_rel']:.2f} K (single phase)")],
+        ["Starting (Kantrowitz)", f"A_t/A_1 = {check['throat_ratio']:.3f} against {check['kantrowitz_ratio']:.3f} "
+                                  f"at M_rel = {check['M_inlet']:.3f}: margin {check['margin']:.2f}, "
+                                  f"{'starts' if check['starts'] else 'does not start'}"],
+        ["Isentropic contraction limit", f"{check['isentropic_ratio']:.3f}"],
+        ["Leading edge", f"r/s = {check['leading_edge_radius_over_pitch']:.3f}"],
+        ["Relative axial Mach", f"{check['axial_mach']:.3f}: subsonic, so the inlet angle is fixed by the "
+                                "blade (unique incidence)" if check["axial_mach"] < 1 else
+                                f"{check['axial_mach']:.3f}: supersonic, no unique incidence"],
+        ["Rotor inlet, design", f"M_rel = {check['M_inlet']:.3f}, β = {check['beta_inlet']:.2f}°"],
+        ["Rotor inlet, CFD", f"M_rel = {rotor_in['M_rel']:.3f}, β = {rotor_in['beta']:.2f}° "
+                             f"(mass average, rotor side of the mixing plane)"],
+        ["Incidence, CFD − design", f"{incidence:+.2f}°"],
+        ["Starting at the CFD inlet Mach", f"Kantrowitz ratio {check['kantrowitz_ratio_cfd']:.3f} at "
+                                           f"M_rel = {rotor_in['M_rel']:.3f}: margin "
+                                           f"{check['throat_ratio'] / check['kantrowitz_ratio_cfd']:.2f}"],
+    ]
+    started = check["starts"]
+    notes = [
+        ("The rotor passage starts: its geometric throat (blade outline against its neighbour) exceeds the real-gas "
+         "Kantrowitz ratio by a factor " f"{check['margin']:.2f}, so a normal shock at the entrance can be swallowed."
+         if started else
+         "The rotor passage does not start: its geometric throat is " f"{100 * (1 - check['margin']):.0f} % below the "
+         "real-gas Kantrowitz ratio, so a normal shock at the entrance cannot be swallowed and the rotor can run "
+         "unstarted. A thinner leading edge or a pressure-side Mach number closer to the inlet Mach number widens it.")
+        + " The throat lies above the isentropic limit, so the started flow can pass it.",
+        "Unique incidence: with a subsonic relative axial Mach number, the inlet flow angle is set by the leading-"
+        "edge wave pattern. The vortex method assumes a sharp leading edge (inflow along the suction-side inlet "
+        "line); the CFD incidence above measures how far the finite leading edge and the bow shock move the flow "
+        "from that design angle.",
+        f"In the CFD the rotor accepts its inflow {incidence:+.1f}° from the design angle at M_rel = "
+        f"{rotor_in['M_rel']:.2f} instead of {check['M_inlet']:.2f}, while the stator exit pressure is "
+        f"{100 * (results.exit_['p'] / results.design_stations['Stator exit (1)|absolute']['p'] - 1):+.0f} % from "
+        "its design value: through the mixing plane the rotor's unique-incidence condition sets the stator exit "
+        "state, rather than the stator design setting the rotor inflow.",
+    ]
+    return [("h2", "Design conditions: two-phase inlet, starting and unique incidence"),
+            ("figure", [figures["states"], figures["starting"]],
+             "(Left) Temperature–entropy diagram with the stage states: 0 stator inlet total, 1 stator exit, 1r "
+             "rotor relative total, 2 rotor exit; the dotted line is the inlet isentrope. (Right) Contraction limits "
+             "along the rotor relative isentrope and the rotor's geometric throat ratio."),
+            ("table", "Design conditions and their CFD check.", ["Item", "Value"], None, rows, "keyvalue"),
+            ("bullets", notes)]
 
 
 ASSUMPTIONS = ("Assumptions: steady RANS with the rotor in a moving reference frame; circumferentially averaged mixing "
@@ -157,6 +231,7 @@ def report_blocks(results, figures, options):
          ["Station", "Frame", "CFD", "MoC", "CFD", "MoC", "CFD", "MoC", "CFD"],
          [("", 2), ("p [kPa]", 2), ("Mach [-]", 2), ("Angle [deg]", 2), ("V [m/s]", 1)], station_table(results),
          "numeric-2"),
+        *(design_conditions(results, figures) if getattr(results, "starting", None) else []),
         ("h2", "Geometry and mesh"),
         ("figure", [figures["geometry"]], f"Stage geometry. (a) Blading over {options['passages_3d']} passages per "
                                           "row, rendered from the Fluent surfaces; (b) meridional channel with the "
@@ -172,6 +247,9 @@ def report_blocks(results, figures, options):
         ("h2", "Flow field"),
         ("figure", [figures["midspan"]], f"Midspan (r = {results.r_mid * 1e3:.1f} mm) on the unwrapped cylinder. "
                                          "White line: M = 1; dashed line: mixing plane."),
+        ("figure", [figures["annulus"]], f"Midspan (r = {results.r_mid * 1e3:.1f} mm) over the full annulus: "
+                                       f"{results.blades['stator_1']} stator and {results.blades['rotor_1']} rotor "
+                                       "blades, the computed passages repeated by rotation."),
         ("figure", figures["schlieren"], "Numerical schlieren |∇ρ| at midspan, logarithmic grey scale between the 5th "
                                          f"and {options['schlieren_percentile']}th percentiles."),
         ("h2", "Blade loading and stator exit"),

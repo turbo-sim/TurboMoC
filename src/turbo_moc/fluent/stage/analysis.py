@@ -94,6 +94,12 @@ def read_json(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def rotor_design_result(output_dir):
+    """Vortex rotor result of the latest app session, with its relative stagnation state."""
+    results = sorted((output_dir / "jobs").glob("*/*/rotor_result.json"), key=lambda path: path.stat().st_mtime)
+    return read_json(results[-1]) if results else None
+
+
 def compute(output_dir):
     """Load the extracted data and compute stations, stage performance and the design comparison."""
     data_dir = output_dir / "report" / "data"
@@ -103,6 +109,7 @@ def compute(output_dir):
     arrays = dict(np.load(data_dir / "surfaces.npz"))
     design = point["design"]
     blades = design["num_blades"]
+    sectors = {row: blades[row] // int(setup.get("passages", {}).get(row, 1)) for row in ROWS}
     state = setup["inlet_state"]
     P0 = float(state["P0"])
     model = BarotropicClosure.from_file(output_dir / "barotropy" / "fluent_expressions_safe.json",
@@ -124,13 +131,13 @@ def compute(output_dir):
         "Rotor exit (2)": mass_averages(arrays, boundary(setup, "rotor_1", "outlet"), model, kinematics, True),
     }
     exit_, rotor_in, outlet = stations["Stator exit (1)"], stations["Rotor inlet (1)"], stations["Rotor exit (2)"]
-    flows = {key: abs(reports["mass_flow"][boundary(setup, row, name)]) for key, row, name in (
+    flows = {key: abs(reports["mass_flow"][boundary(setup, row, name)]) * sectors[row] for key, row, name in (
         ("inlet", "stator_1", "inlet"), ("stator_exit", "stator_1", "outlet"),
         ("rotor_inlet", "rotor_1", "inlet"), ("outlet", "rotor_1", "outlet"))}
     torque_passage = sum(reports["moment"]["rotor_1"][wall] for wall in ("blade", "hub"))
-    torque = torque_passage * blades["rotor_1"]
+    torque = torque_passage * sectors["rotor_1"]
     power = torque * omega
-    mass_flow = flows["outlet"] * blades["rotor_1"]
+    mass_flow = flows["outlet"]
     work = power / mass_flow
     euler = abs(omega) * (rotor_in["r_c_t"] - outlet["r_c_t"])
     drop_ts = model.head(P0) - model.head(outlet["p"])
@@ -141,7 +148,7 @@ def compute(output_dir):
                        for item in design["stator"]["stations"] + design["rotor"]["stations"]}
     performance = [
         ("Mass flow rate, full annulus", "kg/s", mass_flow, design["stator"]["mass_flow"], "relative", ".3f"),
-        ("Mass flow rate, one passage", "kg/s", flows["outlet"], None, None, ".4f"),
+        ("Mass flow rate, one rotor passage", "kg/s", flows["outlet"] / blades["rotor_1"], None, None, ".4f"),
         ("Torque, full rotor", "N m", abs(torque), None, None, ".2f"),
         ("Power", "kW", power / 1e3, design_stage.get("Power, annulus estimate [kW]"), "relative", ".2f"),
         ("Specific work (torque)", "kJ/kg", work / 1e3, design_stage.get("Specific work [kJ/kg]"), "relative", ".3f"),
@@ -174,14 +181,15 @@ def compute(output_dir):
         setup=setup, point=point, reports=reports, arrays=arrays, blades=blades, state=state, P0=P0, model=model,
         omega=omega, hub=surfaces["hub"], blade=surfaces["blade"], r_hub=r_hub, r_shroud=r_shroud,
         r_mid=0.5 * (r_hub + r_shroud), kinematics=kinematics, theta_ref=theta_ref,
-        pitch={row: 2 * np.pi / blades[row] for row in ROWS},
+        pitch={row: 2 * np.pi / sectors[row] for row in ROWS},
         interface=float(arrays[f"{boundary(setup, 'stator_1', 'outlet')}|vertices"][:, 2].mean()),
         stations=stations, exit_=exit_, rotor_in=rotor_in, outlet=outlet, flows=flows,
         torque_passage=torque_passage, power=power, performance=performance, station_rows=station_rows,
         design_stations=design_stations, residuals=residuals, gap=gap,
         y_plus={row: arrays[f"{boundary(setup, row, 'blade')}|face|y-plus"] for row in ROWS},
         mesh_report=read_json(output_dir / "mesh" / "mesh_report.json"),
-        midspan={row: polydata(arrays, midspan_surface(row)) for row in ROWS})
+        midspan={row: polydata(arrays, midspan_surface(row)) for row in ROWS},
+        rotor_design=rotor_design_result(output_dir))
 
 
 def radius_at(results, span):

@@ -213,7 +213,11 @@ def boundary_types(boundary_conditions):
 
 
 def configure_numerics(settings, options):
-    """Set coupled pseudo time stepping and normalized residual monitoring."""
+    """Set coupled pseudo time stepping and Fluent's default (scaled, unnormalized) residual monitoring.
+
+    Normalized residuals made Fluent 24.2 stop at the first renormalization
+    with "eval: unbound variable save-new-norms" in a reopened case.
+    """
     methods = settings.solution.methods
     methods.p_v_coupling.flow_scheme = "Coupled"
     methods.gradient_scheme = "least-square-cell-based"
@@ -239,15 +243,17 @@ def configure_numerics(settings, options):
     relax = (
         settings.solution.controls.pseudo_time_explicit_relaxation_factor.global_dt_pseudo_relax
     )
+    available = set(relax.get_state())
     for equation, value in (
         ("density", options["density_relaxation"]),
         ("k", options["turbulence_relaxation"]),
         ("omega", options["turbulence_relaxation"]),
     ):
-        relax[equation] = value
+        if equation in available:
+            relax[equation] = value
     monitor = settings.solution.monitor.residual
     monitor.options = {
-        "normalize": True,
+        "normalize": False,
         "print": True,
         "plot": False,
         "criterion_type": "absolute",

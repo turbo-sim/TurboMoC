@@ -14,8 +14,10 @@ ROWS = ("stator_1", "rotor_1")
 
 
 def run_jobs(project, actions, session, registry):
+    """Run the app jobs row by row; returns the blade sizing reported by each row's design job."""
     from turbo_moc.app import calculations
     from turbo_moc.app import workflow as flow
+    sizing = {}
     for action in actions:
         handle = calculations.start(session, project, "all", action, registry)
         while handle:
@@ -29,16 +31,44 @@ def run_jobs(project, actions, session, registry):
                 raise RuntimeError(log[-3000:])
             result = json.loads((flow.directory(handle) / "result.json").read_text(encoding="utf-8"))
             registry.setdefault(handle["row_id"], {})[action] = result["reference"]
+            if "blade_sizing" in result:
+                sizing[handle["row_id"]] = result["blade_sizing"]
             handle = calculations.advance(handle, registry, log)
+    return sizing
+
+
+def merge(target, overrides):
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(target.get(key), dict):
+            merge(target[key], value)
+        else:
+            target[key] = value
+    return target
 
 
 def stage_project(workflow):
     from turbo_moc.configuration import project as model
-    project = model.set_design_mode(model.default_project(workflow["geometry_type"]), "stator_rotor")
+    if "project_file" in workflow:
+        project = yaml.safe_load(Path(workflow["project_file"]).read_text(encoding="utf-8"))
+    else:
+        project = model.set_design_mode(model.default_project(workflow["geometry_type"]), "stator_rotor")
     rotor = next(row for row in project["rows"] if row["role"] == "rotor")
     rotor["geometry"]["inlet_coupling"] = {"mode": "stator_exit",
                                            "rotational_speed": {"type": "actual", "value": float(workflow["rpm"])}}
     rotor["geometry"]["axial_interspace_mm"] = float(workflow["axial_interspace_mm"])
+    if "fluid_name" in workflow:
+        project["machine"]["fluid_name"] = workflow["fluid_name"]
+    for row in project["rows"]:
+        merge(row, workflow.get("rows", {}).get(row["id"], {}))
+    return model.validate_project(model.normalize_project(project))
+
+
+def with_suggested_blade_counts(project, sizing):
+    """Use each row's natural blade count, so the passages keep the pitch/chord of their own design."""
+    from turbo_moc.configuration import project as model
+    for row in project["rows"]:
+        if row["id"] in sizing:
+            row["geometry"]["meridional_channel"]["num_blades"] = int(sizing[row["id"]]["suggested_num_blades"])
     return model.validate_project(model.normalize_project(project))
 
 
@@ -51,6 +81,12 @@ def prepare(workflow, output_dir):
     flow.OUTPUT.mkdir(parents=True, exist_ok=True)
     project = stage_project(workflow)
     registry = {}
+    if workflow.get("blade_counts") == "suggested":
+        sizing = run_jobs(project, ("nozzle",), uuid4().hex, registry)
+        project = with_suggested_blade_counts(project, sizing)
+        print("    blade counts:", {row["id"]: row["geometry"]["meridional_channel"]["num_blades"]
+                                    for row in project["rows"]})
+        registry = {}
     run_jobs(project, ("nozzle", "reference", "volume"), uuid4().hex, registry)
     data, _ = project_export.build_archive(project, registry)
     mesh_dir = output_dir / "mesh"
