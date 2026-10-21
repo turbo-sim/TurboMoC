@@ -63,9 +63,8 @@ jobs:
       - name: Run tests
         run: poetry run pytest
 
-  publish_to_pypi:
+  build:
     needs: [test_ubuntu, test_windows]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -81,13 +80,31 @@ jobs:
         with:
           poetry-version: '2.1.2'
 
-      - name: Install dependencies
-        run: poetry install --only=main
+      - name: Build distributions
+        run: poetry build --no-interaction
 
-      - name: Publish to PyPI
-        env:
-          TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-          TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-        run: |
-          poetry build
-          poetry publish --username "$TWINE_USERNAME" --password "$TWINE_PASSWORD" --no-interaction
+      - name: Upload distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish_to_pypi:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/turbo-moc
+    permissions:
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v8
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Publish to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1

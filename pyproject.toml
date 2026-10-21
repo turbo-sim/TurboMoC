@@ -64,10 +64,17 @@ addopts = "-p no:cacheprovider"
 norecursedirs = ["deprecated", "fluent"]
 
 
-# Rememeber to add --tags when publishing a new version
-# git push origin main --tags
-
-# Commands to update versioning
-# poetry run bump-my-version bump patch
-# poetry run bump-my-version bump minor
-# poetry run bump-my-version bump major
+# Version bumping and releasing (run from the repository root):
+# 1. Install development tools: poetry install --with dev
+# 2. Commit your changes first; bumping requires a clean working tree.
+# 3. Preview a bump: poetry run bump-my-version bump --dry-run --verbose patch
+# 4. Choose ONE increment (updates version files, commits, and creates a vX.Y.Z tag):
+#    poetry run bump-my-version bump patch
+#    poetry run bump-my-version bump minor
+#    poetry run bump-my-version bump major
+# 5. Release from main: git push origin main --follow-tags
+#    GitHub Actions builds the distributions and publishes the pushed release tag.
+# One-time PyPI setup: https://pypi.org/manage/project/turbo-moc/settings/publishing/
+# Add a GitHub Trusted Publisher: owner=turbo-sim, repository=TurboMoC,
+# workflow=publish_to_pipy.yml, environment=pypi (must match the workflow).
+# Publishing uses GitHub OIDC; no PyPI username/password or API-token secret is needed.
