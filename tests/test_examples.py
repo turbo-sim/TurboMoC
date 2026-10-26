@@ -42,12 +42,14 @@ def test_workflow_runners_resolve_local_files_from_another_directory(tmp_path, m
     import yaml
     from turbo_moc.meshing import mesh_2d as meshing_2d, mesh_3d as meshing_3d
     from turbo_moc.fluent import workflow_2d, workflow_3d
+    from turbo_moc.fluent.stage import setup as stage_setup
     monkeypatch.chdir(tmp_path)
     for family, module, runner in (
         ("gmsh_2D", meshing_2d, "run_mesh_generation.py"),
         ("gmsh_3D", meshing_3d, "run_mesh_generation.py"),
         ("fluent_2D", workflow_2d, "run_fluent_case.py"),
-        ("fluent_3D", workflow_3d, "run_fluent_case.py"),
+        ("fluent_3D/stator", workflow_3d, "run_fluent_case.py"),
+        ("fluent_3D/stage", stage_setup, "run_fluent_stage.py"),
     ):
         calls = []
         monkeypatch.setattr(module, "main", lambda *args: calls.append(args))

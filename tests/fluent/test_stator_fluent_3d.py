@@ -23,7 +23,7 @@ from turbo_moc.geometry.meridional_channel import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW_FILE = ROOT / "examples/fluent_3D/workflow_fluent_stator_3D.yaml"
+WORKFLOW_FILE = ROOT / "examples/fluent_3D/stator/workflow_fluent_stator_3D.yaml"
 CASES = ROOT / "examples/apps/cases"
 
 
@@ -32,7 +32,7 @@ def raw_workflow():
     raw = yaml.safe_load(WORKFLOW_FILE.read_text(encoding="utf-8"))
     for key in ("machine", "workflow", "rows"):
         raw.pop(key)
-    raw["design_file"] = "../gmsh_3D/workflow_gmsh_stator_3D.yaml"
+    raw["design_file"] = "../../gmsh_3D/workflow_gmsh_stator_3D.yaml"
     return raw
 
 

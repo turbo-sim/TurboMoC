@@ -91,6 +91,7 @@ def design_nozzle(
     tau_max: float = 90.0,
     tau_step: float = 1.0,
     n_tau_mln: int = 60,
+    throat_front_angle: float = 90.0,
     use_true_sauer_line: bool = False,
     backend: str = "HEOS",
     show_plot: bool = False,
@@ -207,6 +208,7 @@ def design_nozzle(
             y_t=y_t, n=n, rho_t=rho_t, P0=float(P0), Q0=float(q0_try), T0=T0_resolved,
             tau=tau, rho_d=rho_d, Noz_Mach=design_Noz_Mach, P_back=p_back,
             fluid_name=fluid_name, delta_flow=delta_flow, n_reflex=float("nan"),
+            throat_front_angle=throat_front_angle,
         )
 
         try:

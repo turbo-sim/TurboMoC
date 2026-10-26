@@ -188,8 +188,27 @@ def _arc_from_diameter(L, T, interior_ref, num_points=40):
     return center[0] + R * np.cos(angles), center[1] + R * np.sin(angles)
 
 
+def _wedge_from_gap(L, T, direction, half_angle_rad, num_points=40):
+    """
+    Sharp leading-edge closure: a symmetric wedge on the gap L-T, pointing
+    upstream along ``direction`` (the inlet flow direction) with the given
+    half-angle. Returned from T to L through the tip with ``num_points``
+    points, like the semicircle it replaces, so the outline keeps its layout.
+    """
+    L = np.asarray(L, dtype=float)
+    T = np.asarray(T, dtype=float)
+    unit = np.asarray(direction, dtype=float) / np.linalg.norm(direction)
+    half_gap = 0.5 * np.linalg.norm(T - L)
+    tip = 0.5 * (L + T) - unit * half_gap / np.tan(half_angle_rad)
+    count = max(num_points // 2 + 1, 2)
+    to_tip = T + np.linspace(0.0, 1.0, count)[:, None] * (tip - T)
+    to_wall = tip + np.linspace(0.0, 1.0, num_points - count + 1)[1:, None] * (L - tip)
+    points = np.vstack([to_tip, to_wall])
+    return points[:, 0], points[:, 1]
+
+
 def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
-                        le_te_ratio, num_points):
+                        le_te_ratio, num_points, le_wedge_half_angle=None):
     """
     Close the pressure (`lower`) and suction+pitch (`upper`) open walls
     into a finite solid blade with rounded leading/trailing edges, using
@@ -205,6 +224,11 @@ def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
     whatever that SAME translate produces at the other end -- it is a
     consequence, not an independently chosen target, and will differ from
     r_TE whenever beta_inlet != beta_outlet (a reacting blade).
+
+    With ``le_wedge_half_angle`` [deg] the leading edge is closed by a sharp
+    symmetric wedge on the same gap instead of the semicircle, so that a
+    supersonic inflow meets weak attached shocks rather than a detached bow
+    shock; ``le_radius`` is then zero.
 
     Returns (closed_x, closed_y, diagnostics) where diagnostics has
     translate/le_radius/te_radius.
@@ -245,6 +269,10 @@ def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
     le_x, le_y = _arc_from_diameter(L0, T_LE, interior_ref, num_points=num_points)
     te_x, te_y = _arc_from_diameter(L1, T_TE, interior_ref, num_points=num_points)
     le_radius = float(0.5 * np.linalg.norm(T_LE - L0))
+    if le_wedge_half_angle is not None:
+        wedge_x, wedge_y = _wedge_from_gap(L0, T_LE, u_LE, np.radians(le_wedge_half_angle), num_points)
+        le_x, le_y = wedge_x[::-1], wedge_y[::-1]
+        le_radius = 0.0
     te_radius = float(0.5 * np.linalg.norm(T_TE - L1))
 
     upper_rev_x = upper_x[::-1]
@@ -475,6 +503,7 @@ def design_rotor_vortex_blade(
     r_star=None,
     num_points=60,
     le_te_ratio=25.0,
+    le_wedge_half_angle=None,
 ):
     """
     Design a supersonic rotor blade section by the vortex-flow method,
@@ -527,6 +556,9 @@ def design_rotor_vortex_blade(
         then whatever that same shift produces at the other end (equal to
         the TE radius only for the pure-impulse, beta_inlet==beta_outlet
         case) -- see `_close_blade_le_te`'s docstring.
+    le_wedge_half_angle : float or None
+        Close the leading edge with a sharp wedge of this half-angle [deg]
+        instead of the semicircle (the trailing edge stays rounded).
 
     Returns
     -------
@@ -640,9 +672,10 @@ def design_rotor_vortex_blade(
     # circle-through-two-tangent-points overconstraint).
     blade_x, blade_y, le_te_diag = _close_blade_le_te(
         blade_lower, blade_upper, pitch * scale, beta_inlet_rad, beta_outlet_rad,
-        le_te_ratio=le_te_ratio, num_points=num_points,
+        le_te_ratio=le_te_ratio, num_points=num_points, le_wedge_half_angle=le_wedge_half_angle,
     )
 
+    spacing = pitch * scale + le_te_diag["translate"]
     return {
         "pressure": pressure_packed,
         "suction": suction_packed,
@@ -663,9 +696,10 @@ def design_rotor_vortex_blade(
         "nu_outlet_deg": float(np.degrees(nu_outlet)),
         "nu_lower_deg": float(np.degrees(nu_lower)),
         "nu_upper_deg": float(np.degrees(nu_upper)),
-        "pitch": pitch * scale,
+        "pitch": spacing,
+        "vortex_pitch": pitch * scale,
         "chord": chord * scale,
-        "solidity": solidity,
+        "solidity": chord * scale / spacing,
         "units": "m" if r_star is not None else "r*",
         "method": "goldman_1968_tn_d4421",
         "num_points": int(num_points),

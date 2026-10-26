@@ -1137,7 +1137,7 @@ The existing [two-dimensional Fluent workflow](../src/turbo_moc/fluent/workflow_
 
 Thus three steps have different meanings: exporting mesh metadata, importing a mesh into a solver, and configuring that solver's periodic boundary condition. A mesh file alone is not a complete CFD case.
 
-The three-dimensional exporter supplies audited connectivity, boundary names and periodic metadata (rotational or translational) intended for the Fluent import workflow. Automated three-dimensional Fluent setup has not been implemented; [fluent_3D/](../examples/fluent_3D/readme.md) remains a placeholder. Periodic pairing and the imported cell/boundary zones still need target-solver acceptance checks before a three-dimensional simulation can be treated as configured.
+The three-dimensional exporter supplies audited connectivity, boundary names and periodic metadata (rotational or translational) intended for the Fluent import workflow. Automated three-dimensional Fluent setup has not been implemented; [fluent_3D/](../examples/fluent_3D/stator/readme.md) remains a placeholder. Periodic pairing and the imported cell/boundary zones still need target-solver acceptance checks before a three-dimensional simulation can be treated as configured.
 
 ## 11. Interpreting the app views and numerical assumptions
 

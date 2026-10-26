@@ -37,6 +37,8 @@ def _spline(points, tangents=None):
 def _boundary_splines(result, points):
     """Retain the pressure/TE/stub/suction/stub/LE joins from the solver.
 
+    A sharp (wedge) leading edge is kept as two straight segments meeting at its tip.
+
     Fitting the entire closed contour as one spline can ring at the joins.
     Separate interpolants preserve the solver's explicitly constructed edges
     and allow Gmsh to share exactly the same endpoint at each join.
@@ -51,11 +53,18 @@ def _boundary_splines(result, points):
     directions = ((incoming, outgoing), (outgoing, -outgoing),
                   (-outgoing, -outgoing), (-outgoing, -incoming),
                   (-incoming, -incoming), (-incoming, incoming))
+    sharp = result["blade"].get("le_radius", 1.0) == 0.0
     splines, start = [], 0
-    for count, tangents in zip(lengths, directions):
-        spline = _spline(points[start:start + count], tangents)
-        if spline is not None:
-            splines.append(spline)
+    for index, (count, tangents) in enumerate(zip(lengths, directions)):
+        segment = points[start:start + count]
+        if sharp and index == len(lengths) - 1:
+            tip = int(np.argmin(segment @ incoming))
+            splines.extend(make_interp_spline(np.linspace(0, 1, len(part)), part, k=1)
+                           for part in (segment[:tip + 1], segment[tip:]))
+        else:
+            spline = _spline(segment, tangents)
+            if spline is not None:
+                splines.append(spline)
         start += count - 1
     return splines
 

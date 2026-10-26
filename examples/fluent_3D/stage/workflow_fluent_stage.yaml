@@ -1,0 +1,42 @@
+# Axial stator + rotor stage from the app defaults, rotor coupled to the stator exit.
+output_dir: output
+geometry_type: axial
+rpm: 2000.0                      # Rotor speed; keeps the rotor relative inlet supersonic
+axial_interspace_mm: 10.0        # Stator TE to rotor LE gap (app default 2 mm); the mixing plane sits halfway
+
+barotropic:
+  calculation_type: equilibrium
+  efficiency: 1.0
+  pressure_ratio: 10.0           # Model range: stator inlet pressure / 10, below the rotor exit pressure
+  polynomial_degree: 8
+  ODE_solver: LSODA
+  ODE_tolerance: 1.0e-9
+  save_figures: true
+
+fluent:
+  product_version: "24.2"
+  processor_count: 8
+  start_timeout: 180
+  ui_mode: gui
+  case_filename: stage_fluent.cas.h5
+  material_name: barotropic_fluid
+  turbulence_intensity: 0.05
+  turbulence_viscosity_ratio: 10.0
+  density_relaxation: 1.0
+  turbulence_relaxation: 0.5
+  solution_strategy:
+    - {iterations: 1000, time_scale_factor: 0.5, order: second}
+  high_order_relaxation_factor: 0.25
+  residual_equations:
+    continuity: 1.0e-6
+    x-velocity: 1.0e-6
+    y-velocity: 1.0e-6
+    z-velocity: 1.0e-6
+    k: 1.0e-6
+    omega: 1.0e-6
+
+report:
+  dpi: 200
+  passages_3d: 5                 # Passages per row in the 3D geometry view
+  passages_2d: 2                 # Pitches shown in the unwrapped midspan plots
+  schlieren_percentile: 99.5     # Upper colour limit of the density-gradient plots (log scale)

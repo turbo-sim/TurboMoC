@@ -1395,6 +1395,11 @@ def RotVec(vec, angle_deg):
 #
 # -----------------------------------------------------------------------------#
 
+def segment_has_length(p_prev, p_cur, tolerance=1e-12):
+    scale = max(1.0, abs(float(p_prev.x)), abs(float(p_prev.y)), abs(float(p_cur.x)), abs(float(p_cur.y)))
+    return DistCalc(p_prev.x, p_prev.y, p_cur.x, p_cur.y) > tolerance * scale
+
+
 def segment_mass_flow(p_prev, p_cur, delta=0.0):
     seg_len = DistCalc(p_prev.x, p_prev.y, p_cur.x, p_cur.y)
     rot_vec = RotVec(MakeVec(p_prev.x, p_prev.y, p_cur.x, p_cur.y), -90)

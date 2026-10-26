@@ -8,10 +8,10 @@ from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html, no_update
 from turbo_moc.configuration import project as projects
 from turbo_moc.meshing.mesh_3d import BOUNDARIES
 from turbo_moc.app import inspection_panel
+from turbo_moc.visualization import style
 
 
-COLORS = {"blade": "#477db3", "hub": "#a6b3b8", "shroud": "#a6b3b8",
-          "inlet": "#c94f4f", "outlet": "#c94f4f", "periodic_left": "#4d9966", "periodic_right": "#4d9966"}
+COLORS = dict(style.SURFACE_COLORS)
 
 
 def geometry_family(definition, fallback):
@@ -51,7 +51,7 @@ def limit(row, pane, data=None):
 
 def defaults(row):
     # Use the physical role, not the row ID or stage number, for blade colors.
-    colors = {**COLORS, "blade": "#ef8c26" if row["role"] == "rotor" else COLORS["blade"]}
+    colors = {**COLORS, "blade": style.surface_color("blade", row["role"])}
     return {"copies": min(limit(row, "geometry"), row["mesh"]["matplotlib"]["num_blades"]),
             "surfaces": [name for name, chosen in row["mesh"]["pyvista"]["surfaces"].items() if chosen],
             "colors": colors, "edges": row["mesh"]["pyvista"]["show_mesh_edges"]}

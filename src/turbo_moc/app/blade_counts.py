@@ -16,9 +16,9 @@ def native_passage(config, solution, *, template=None):
         if not solution.get("converged"):
             raise ValueError("A converged stator solution is required for natural blade sizing.")
         if template is None:
-            from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+            from turbo_moc.geometry.stator_blade import parametrize_stator
             wall = solution["wall_final"]
-            template = parametrize_stator_blade(wall["x"], wall["y"], **config["blade_geometry"])
+            template = parametrize_stator(wall["x"], wall["y"], **config["blade_geometry"])
         pitch = float(template["pitch"])
         chord = float(np.ptp(planar.blade_contour(template)[:, 1]))
     if not all(isfinite(x) and x > 0 for x in (pitch, chord)):

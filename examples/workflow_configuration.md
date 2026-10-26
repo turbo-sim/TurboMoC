@@ -19,7 +19,7 @@ No renaming to `nozzle`, `blade`, or `passage`, flattening, or manual transfer o
 | `gmsh_2D` | `linear_stator.yaml` | Scaled 2D reference passage and CGNS |
 | `gmsh_3D` | `axial_stator.yaml` | Reference mesh, swept physical volume and CGNS |
 | `fluent_2D` | Same project as Gmsh 2D | Physical linear-cascade mesh, barotropic model and optional Fluent run |
-| `fluent_3D` | Same project as Gmsh 3D | Physical volume mesh, barotropic model and optional Fluent run |
+| `fluent_3D/stator` | Same project as Gmsh 3D | Physical volume mesh, barotropic model and optional Fluent run |
 
 Fluent 2D accepts linear cascades only. Gmsh 2D can also construct an axial or radial row's conformal reference section, but that chart is not a physical Cartesian annular passage; use Fluent 3D for those geometries. Planar workflow coordinates are pitchwise x and negative-streamwise y, in millimetres before CGNS scaling. App-exported linear CGNS uses a rotated physical coordinate convention; lengths and geometry are equivalent.
 

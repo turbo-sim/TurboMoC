@@ -104,7 +104,8 @@ def validate_workflow(workflow, config_file):
             "The stator template requires planar MoC flow (delta_flow: 0)."
         )
     p0 = positive(solver_parameters(nozzle)["P0"], "method_of_characteristics.P0")
-    if positive(nozzle.get("p_back", np.nan), "method_of_characteristics.p_back") >= p0:
+    from turbo_moc.configuration.fluid_inputs import exit_pressure
+    if positive(exit_pressure(nozzle) if "p_back" in nozzle else np.nan, "method_of_characteristics.p_back") >= p0:
         raise ValueError("The stator expansion requires p_back < P0.")
     cgns = config["mesh"]["cgns"]
     if not cgns["enabled"] or not np.isclose(

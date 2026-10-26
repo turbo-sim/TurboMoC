@@ -71,7 +71,8 @@ def _run_job(request_path, request):
                 # an indeterminate indicator while it builds its fluid table
                 # and marches the transition arcs, rather than inventing %s.
                 progress("Rotor: thermodynamic table and vortex transition arcs")
-                inputs = solver_parameters(config["rotor_design"], rotor=True)
+                from turbo_moc.configuration.rotor import vortex_parameters
+                inputs = vortex_parameters(solver_parameters(config["rotor_design"], rotor=True))
                 rotor = design_rotor_vortex_blade(**inputs)
                 rotor.update(P0_rel=inputs["P0_rel"], T0_rel=inputs["T0_rel"],
                              Q0_rel=inputs.get("Q0_rel", float("nan")))
@@ -97,6 +98,32 @@ def _run_job(request_path, request):
                     from turbo_moc.app.blade_counts import native_passage, sizing
                     template = flow.get_stator_template(config, handle, nozzle)
                     result["blade_sizing"] = sizing(config, native_passage(config, nozzle, template=template))
+        elif action == "bladegen":
+            if nozzle_only:
+                raise ValueError("BladeGen export is available for stator and rotor rows only.")
+            from turbo_moc.geometry.bladegen_export import export_bladegen
+            design = flow.get_design(config, refs["nozzle"])
+            transform = None
+            if config.get("assembly"):
+                transform = mesh._assembly_transform(config["assembly"], design.meridional_channel.is_linear)
+            progress("Write BladeGen files for TurboGrid", 0.5)
+            report = export_bladegen(design, folder, row_id=row_id, role=role, transform=transform)
+            result = {"reference": handle, "files": report["files"]}
+        elif action == "cad":
+            nozzle = flow.load_nozzle(refs["nozzle"], config)
+            if nozzle_only:
+                from turbo_moc.geometry.nozzle_cad import export_nozzle
+                report = export_nozzle(nozzle, config["method_of_characteristics"], config["mesh"]["nozzle"], folder,
+                                       progress=progress)
+            else:
+                from turbo_moc.geometry.cad_export import export_row
+                design = flow.get_design(config, refs["nozzle"])
+                transform = None
+                if config.get("assembly"):
+                    transform = mesh._assembly_transform(config["assembly"], design.meridional_channel.is_linear)
+                report = export_row(design, config["mesh"]["cad"], folder, row_id=row_id, role=role,
+                                    transform=transform, progress=progress)
+            result = {"reference": handle, "files": report["files"]}
         elif action in ("reference", "volume") and nozzle_only:
             from turbo_moc.meshing import nozzle_mesh
             nozzle = flow.load_nozzle(refs["nozzle"], config)

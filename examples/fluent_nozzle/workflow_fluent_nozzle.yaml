@@ -1,0 +1,72 @@
+# Nozzle-only MoC design, structured 2D mesh, barotropic model and an open Fluent case.
+output_dir: output
+fluid_name: CO2
+method_of_characteristics:
+  inlet_property_pair: PT_INPUTS
+  inlet_property_1: 12000000.0   # Stagnation pressure [Pa]
+  inlet_property_2: 303.15       # Stagnation temperature [K]
+  outlet_condition: pressure
+  p_back: 3000000.0              # Exit static pressure [Pa]
+  exit_mach: 2.0
+  solver: conventional
+  use_true_sauer_line: false     # Flashing (subcooled-liquid) inlet: flat post-jump throat front
+  delta_flow: 0.0                # 0 planar, 1 axisymmetric
+  y_t: 0.01
+  n: 15
+  rho_t: 0.2
+  rho_d: 0.1
+  tau_max: 90.0
+  tau_step: 1.0
+mesh:
+  convergent_length: 0.04
+  planar_depth: 0.02
+  wall_thickness: 0.002
+  axial_cells: 240
+  radial_cells: 70
+  wall_growth_ratio: 1.1
+  circumferential_cells: 64
+  depth_cells: 16
+  boundary_types:
+    inlet: BCInflowSubsonic
+    outlet: BCOutflowSupersonic
+    wall: BCWallViscous
+    axis: BCSymmetryPlane
+    side: BCWallViscous
+
+reporting:
+  level: INFO
+  filename: workflow.log
+
+barotropic:
+  # Blending smooths the speed-of-sound jump at the flash point (vapor quality 0).
+  calculation_type: blending       # equilibrium, metastable or blending
+  blending_onset: 0.0              # Vapor quality where blending starts
+  blending_width: 0.05             # Vapor-quality width of the equilibrium/metastable blend
+  HEOS_solver: hybr
+  efficiency: 1.0
+  pressure_ratio: 6.0            # Model range: inlet pressure / 6, below the 3 MPa back pressure
+  polynomial_degree: 8
+  ODE_solver: LSODA
+  ODE_tolerance: 1.0e-9
+  save_figures: true
+
+fluent:
+  product_version: "24.2"
+  processor_count: 4
+  start_timeout: 120
+  ui_mode: gui                   # Fluent stays open for inspection; the script does not solve
+  case_filename: nozzle_fluent.cas.h5
+  material_name: barotropic_fluid
+  turbulence_intensity: 0.05
+  turbulence_viscosity_ratio: 10.0
+  density_relaxation: 1.0
+  turbulence_relaxation: 0.5
+  solution_strategy:
+    - {iterations: 300, time_scale_factor: 0.5, order: first}
+  high_order_relaxation_factor: 0.25
+  residual_equations:
+    continuity: 1.0e-6
+    x-velocity: 1.0e-6
+    y-velocity: 1.0e-6
+    k: 1.0e-6
+    omega: 1.0e-6

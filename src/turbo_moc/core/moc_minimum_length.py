@@ -18,7 +18,7 @@ import time
 import json
 import numpy as np
 from jax import numpy as jnp
-from turbo_moc.core.thermo_characteristics import InternalPoint, FluidManager, MassFlowCalc, segment_mass_flow, reflex_length, rotation_around_center, jitted_calculate_static_properties, DistCalc, RotVec, MakeVec, vecDotVec
+from turbo_moc.core.thermo_characteristics import InternalPoint, FluidManager, MassFlowCalc, segment_mass_flow, segment_has_length, reflex_length, rotation_around_center, jitted_calculate_static_properties, DistCalc, RotVec, MakeVec, vecDotVec
 from turbo_moc.reporting import StageProgress, format_pressure
 import matplotlib.pyplot as plt
 import jaxprop as jxp
@@ -674,6 +674,8 @@ class MOCSolverMLN:
         # more costly here, not less.
         mass_cumulative = 0.0
         for i in range(1, len(self.IVP)):
+            if not segment_has_length(self.IVP[i - 1], self.IVP[i]):
+                continue
             mass_cumulative = mass_cumulative + segment_mass_flow(self.IVP[i - 1], self.IVP[i], self.delta_flow)
 
             Ref_P = (self.IVP[i],)

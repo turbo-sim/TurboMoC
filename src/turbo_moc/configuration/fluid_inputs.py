@@ -87,6 +87,17 @@ def outlet_parameters(parameters):
     return result
 
 
+def exit_pressure(parameters):
+    validate_outlet_inputs(parameters)
+    if parameters.get("outlet_condition", "pressure") != "mach":
+        return float(parameters["p_back"])
+    from turbo_moc.api import _inlet_state, pressure_for_mach
+    resolved = solver_parameters(parameters)
+    fluid = jxp.Fluid(resolved["fluid_name"], backend=resolved.get("backend", "HEOS"))
+    state_0 = _inlet_state(fluid, resolved["P0"], resolved.get("T0"), resolved.get("Q0"))
+    return pressure_for_mach(fluid, state_0, float(parameters["exit_mach"]))
+
+
 def solver_parameters(parameters, *, rotor=False):
     """Resolve any selected pair to PT or PQ, preserving two-phase quality."""
     result = deepcopy(parameters)

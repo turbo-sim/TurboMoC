@@ -23,7 +23,7 @@ OUTPUT = Path("output").resolve()
 INTEGER_KEYS = {"n", "n_cp", "num_baseline_points", "num_curve_points", "num_points", "number_of_points",
                 "num_blades", "curvature_elements", "algorithm", "recombination_algorithm",
                 "smoothing_steps", "span_layers", "verbosity", "axial_cells", "radial_cells",
-                "circumferential_cells", "depth_cells"}
+                "circumferential_cells", "depth_cells", "span_sections", "linear_blades"}
 
 
 def digest(value):
@@ -77,8 +77,9 @@ def keys(config, nozzle_reference=None):
                      config["mesh"]["numerics"]["span_stretch"]])
     # Retain the original stage name in saved references; for a rotor this
     # stage contains its vortex solution, not a fictitious nozzle computation.
+    cad = digest([geometry, config["mesh"].get("cad"), config["mesh"].get("nozzle")])
     return {"nozzle": digest([SOURCE_REVISION, "rotor" if rotor else "stator", solver_inputs]), "geometry": geometry,
-            "reference": reference, "volume": volume}
+            "reference": reference, "volume": volume, "cad": cad, "bladegen": geometry}
 
 
 def resolved_configuration(project, row_id, registry):
@@ -159,10 +160,10 @@ def get_stator_template(config, nozzle_reference, nozzle=None):
         template = cache.get(("template", template_key))
         if template is not None:
             return geo.decode(template)
-        from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+        from turbo_moc.geometry.stator_blade import parametrize_stator
         nozzle = load_nozzle(nozzle_reference, config) if nozzle is None else nozzle
         wall = nozzle["wall_final"]
-        template = parametrize_stator_blade(wall["x"], wall["y"], **config["blade_geometry"])
+        template = parametrize_stator(wall["x"], wall["y"], **config["blade_geometry"])
         cache.set(("template", template_key), geo.encode(template))
         return template
     finally:

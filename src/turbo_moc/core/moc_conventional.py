@@ -32,6 +32,7 @@ class MOCSolver:
         self.delta_flow = config['delta_flow']
         self.n_reflex = config['n_reflex']
         self.P_back = config.get('P_back', None)  # target exit static pressure
+        self.throat_front_angle = float(config.get('throat_front_angle', 90.0))
         
         self.IN = {'NozzleType': 'AXI', 'n_ref': self.n_reflex} # Configuration dict for MassFlowCalc
        
@@ -171,7 +172,7 @@ class MOCSolver:
             p = InternalPoint(self.fluid_manager) 
             
             # --- GEOMETRY ---
-            p.x = 0.0 # Straight line at throat
+            p.x = (self.y_t - y_val) / np.tan(np.radians(self.throat_front_angle))
             p.y = y_val
             
             # --- PHYSICS ---
@@ -534,6 +535,8 @@ class MOCSolver:
             # hardcoded planar assumption) rather than re-deriving it.
             mass_cumulative = 0.0
             for i in range(1, len(final_IVP_line)):
+                if not segment_has_length(final_IVP_line[i - 1], final_IVP_line[i]):
+                    continue
                 mass_cumulative = mass_cumulative + segment_mass_flow(
                     final_IVP_line[i - 1], final_IVP_line[i], self.delta_flow)
 

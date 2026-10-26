@@ -15,6 +15,7 @@ from turbo_moc.configuration.row import normalize, validate_configuration, VIEW_
 from turbo_moc.configuration.rotor import default_axial_interspace_mm, normalize_rotor_geometry, validate_rotor_configuration
 from turbo_moc.configuration.fluid_inputs import INLET_FIELDS, inlet_values
 from turbo_moc.geometry.nozzle import NOZZLE_DEFAULTS
+from turbo_moc.geometry.cad_export import CAD_DEFAULTS
 
 
 GEOMETRY_SECTIONS = (
@@ -112,6 +113,15 @@ def normalize_project(config):
         rows = project.get("rows", [])
         if not isinstance(rows, list):
             raise ValueError("rows must be an ordered list.")
+        machine = project.get("machine")
+        if isinstance(machine, dict) and machine.get("design_mode") == "nozzle":
+            machine.setdefault("geometry_type", "axial")
+            template, workflow = _stator_template(machine["geometry_type"])
+            project.setdefault("workflow", workflow)
+            for row in rows:
+                if isinstance(row, dict) and row.get("role") == "stator":
+                    row["geometry"] = {**template["geometry"], **(row.get("geometry") or {})}
+                    row["mesh"] = {**template["mesh"], **(row.get("mesh") or {})}
         for row in rows:
             if not isinstance(row, dict):
                 raise ValueError("Each blade row must be a mapping.")
@@ -136,12 +146,18 @@ def normalize_project(config):
                 row["geometry"] = {name: value for name, value in flat.items()
                                    if name not in ("mesh", "workflow")}
                 row["mesh"] = flat["mesh"]
-        if isinstance(project.get("machine"), dict) and project["machine"].get("design_mode") == "nozzle":
-            for row in rows:
-                inputs = row.get("geometry", {}).get("method_of_characteristics") if row.get("role") == "stator" else None
-                if isinstance(inputs, dict):
-                    inputs.setdefault("outlet_condition", "pressure")
-                    inputs.setdefault("exit_mach", 2.0)
+        nozzle_only = isinstance(project.get("machine"), dict) and project["machine"].get("design_mode") == "nozzle"
+        for row in rows:
+            if isinstance(row.get("mesh"), dict):
+                cad = row["mesh"].setdefault("cad", {})
+                if isinstance(cad, dict):
+                    for name, value in CAD_DEFAULTS.items():
+                        cad.setdefault(name, value)
+            inputs = row.get("geometry", {}).get("method_of_characteristics") if row.get("role") == "stator" else None
+            if isinstance(inputs, dict):
+                inputs.setdefault("outlet_condition", "pressure")
+                inputs.setdefault("exit_mach", 2.0)
+            if nozzle_only:
                 if isinstance(inputs, dict) and isinstance(row.get("mesh"), dict):
                     settings = row["mesh"].setdefault("nozzle", {})
                     for name, value in deepcopy(NOZZLE_DEFAULTS).items():
@@ -281,7 +297,8 @@ _DEFAULT_STATOR_ROW = {'id': 'stator_1',
                                      'hub_chord': 20.0,
                                      'tip_chord': 20.0,
                                      'num_blades': 31},
-              'blade_geometry': {'metal_angle_in': 0.0,
+              'blade_geometry': {'parametrization': 'full',
+                                 'metal_angle_in': 0.0,
                                  'metal_angle_out': 65.0,
                                  'r_trailing': 0.5,
                                  'inlet_opening_ratio': 1.3,
@@ -343,6 +360,15 @@ _DEFAULT_STATOR_ROW = {'id': 'stator_1',
                                       'hub': 'BCWallViscous',
                                       'shroud': 'BCWallViscous'}}}}
 _DEFAULT_WORKFLOW = {'save_figures': True, 'show_gmsh': True, 'show_pyvista': True, 'log_level': 'INFO'}
+
+
+def nozzle_case(project):
+    row = next(row for row in active_rows(project) if row["role"] == "stator")
+    return {"machine": {"design_mode": "nozzle", "fluid_name": project["machine"]["fluid_name"]},
+            "rows": [{"id": row["id"], "role": "stator",
+                      "geometry": {"method_of_characteristics": row["geometry"]["method_of_characteristics"]},
+                      "mesh": {"nozzle": row["mesh"]["nozzle"]}}],
+            "workflow": project["workflow"]}
 
 
 def _stator_template(family):
@@ -425,11 +451,6 @@ def set_design_mode(project, mode):
         else:
             result["rows"].append(template)
     result["machine"]["design_mode"] = mode
-    if mode != "nozzle":
-        for row in result["rows"]:
-            inputs = row["geometry"].get("method_of_characteristics")
-            if row["role"] == "stator" and isinstance(inputs, dict) and "outlet_condition" in inputs:
-                inputs["outlet_condition"] = "pressure"
     return normalize_project(result)
 
 

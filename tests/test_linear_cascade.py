@@ -13,7 +13,7 @@ from turbo_moc.geometry.linear_cascade import LinearCascadeDefinition, LinearCas
 from turbo_moc.geometry.meridional_channel import validate_machine
 from turbo_moc.meshing import mesh_3d as mesh
 from turbo_moc.meshing.quality import analyze_volume
-from turbo_moc.geometry.stator_blade import parametrize_stator_blade
+from turbo_moc.geometry.stator_blade import parametrize_stator
 from turbo_moc.io.cgns_adf import read_adf
 
 
@@ -76,7 +76,7 @@ def test_invalid_linear_dimensions(name, value):
 
 def test_linear_chord_preserves_template_pitch_and_one_placement(linear_case, monkeypatch):
     nozzle, config = linear_case
-    template = parametrize_stator_blade(**{
+    template = parametrize_stator(**{
         "wall_x": nozzle["wall_final"]["x"], "wall_y": nozzle["wall_final"]["y"],
         **config["blade_geometry"],
     })

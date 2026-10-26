@@ -13,7 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def content(family, dimension):
-    path = ROOT / f"examples/{family}_{dimension}/workflow_{family}_stator_{dimension}.yaml"
+    folder = ROOT / f"examples/{family}_{dimension}"
+    if (folder / "stator").is_dir():
+        folder = folder / "stator"
+    path = folder / f"workflow_{family}_stator_{dimension}.yaml"
     return yaml.safe_load(path.read_text(encoding="utf-8")), path
 
 

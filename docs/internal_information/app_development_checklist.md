@@ -25,11 +25,11 @@
 
 ## 1. App design controls and diagnostics
 
-- [ ] **A01 — Add a nozzle design mode.** Expose standalone nozzle design in the app's design-mode selector, with appropriate inputs, geometry and flow diagnostics, and saved-case support.
-- [ ] **A02 — Enable stator control-point editing.** Allow users to move the stator's control points and inspect the resulting blade geometry. Define which points are editable and how edits preserve geometric constraints and invalidate dependent results.
+- [x] **A01 — Add a nozzle design mode.** Expose standalone nozzle design in the app's design-mode selector, with appropriate inputs, geometry and flow diagnostics, and saved-case support.
+- [x] **A02 — Enable stator control-point editing.** Allow users to move the stator's control points and inspect the resulting blade geometry. Define which points are editable and how edits preserve geometric constraints and invalidate dependent results.
 - [ ] **A03 — Evaluate a pinned reference design.** **Decision:** determine whether retaining a previous geometry as a reference overlay materially helps design comparison. If useful, define what is pinned, how it is displayed, and when it is cleared.
-- [ ] **A04 — Restore symmetric and asymmetric blading options.** Identify the intended blade families and the previous behavior, then expose the relevant symmetry choice in the current workflow.
-- [ ] **A05 — Add a collapsible design-statistics panel.** Place a summary at the bottom of the geometry page with performance estimates from the stator MoC and rotor vortex methods. Include a table of velocity vectors and thermodynamic properties at each flow station; evaluate velocity-triangle plots and other useful distributions. Show units, reference frames, assumptions, and whether results are current.
+- [x] **A04 — Restore symmetric and asymmetric blading options.** Identify the intended blade families and the previous behavior, then expose the relevant symmetry choice in the current workflow.
+- [x] **A05 — Add a collapsible design-statistics panel.** Place a summary at the bottom of the geometry page with performance estimates from the stator MoC and rotor vortex methods. Include a table of velocity vectors and thermodynamic properties at each flow station; evaluate velocity-triangle plots and other useful distributions. Show units, reference frames, assumptions, and whether results are current.
 
 ## 2. Blade parametrization and meridional geometry
 
@@ -43,8 +43,8 @@
 
 - [x] **C01 — Warn when rotor inlet angles become invalid at high rotational speed.** When excessive speed produces a negative rotor inlet relative angle (`beta_in`), show an explicit warning instead of allowing a silent solver failure, following the existing Mach-number constraint warning pattern. Marked complete in the source; verify current coverage if this area is changed.
 - [ ] **C02 — Reconcile backpressure, mass flow, and rotational-speed definitions.** Document how mass flow is estimated and how angular speed, specific speed, and blade velocity ratio are calculated. **Decision:** determine whether an explicit final rotor-exit static pressure should define the stage expansion and its performance parameters. Evaluate the existing use of backpressure and whether an inlet Mach number plus frame transformations can determine the required pressure under stated assumptions. Distinguish stator backpressure, rotor-inlet pressure, and final rotor-exit pressure.
-- [ ] **C03 — Offer alternative stator exit-condition inputs.** **Decision:** assess an exit-target selector with “Backpressure” and “Isentropic Mach number” modes.  Define the thermodynamic reference state and absolute/relative frame, and ensure only one exit target is active at a time.
-- [ ] **C03 — Offer alternative rotor exit-condition inputs.** **Decision:** assess an exit-target selector with “Backpressure” and “Isentropic Mach number” modes.  Define the thermodynamic reference state and absolute/relative frame, and ensure only one exit target is active at a time.
+- [x] **C03 — Offer alternative stator exit-condition inputs.** **Decision:** assess an exit-target selector with “Backpressure” and “Isentropic Mach number” modes.  Define the thermodynamic reference state and absolute/relative frame, and ensure only one exit target is active at a time.
+- [x] **C03 — Offer alternative rotor exit-condition inputs.** **Decision:** assess an exit-target selector with “Backpressure” and “Isentropic Mach number” modes.  Define the thermodynamic reference state and absolute/relative frame, and ensure only one exit target is active at a time.
 
 ## 4. Mesh sizing, wall layers, and quality inspection
 
@@ -56,9 +56,12 @@
 
 ## 5. CAD export, visualization, and CFD post-processing
 
-- [ ] **E01 — Generate and export STEP geometry.** Support a single flow-domain export and a full disk-and-blade assembly suitable for downstream manufacturing or 3D-print preparation. Specify units, solid validity, and whether the assembly is exported as separate parts or fused geometry; distinguish the fluid domain from the printable solid.
-- [ ] **E02 — Harmonize 3D visualization in scripts and the app.** Use a consistent PyVista/VTK data and plotting approach, with matching geometry, mesh boundaries, scalar conventions, and camera orientation where practical. Account for the difference between desktop and browser rendering.
+- [x] **E01 — Generate and export STEP geometry.** Support a single flow-domain export and a full disk-and-blade assembly suitable for downstream manufacturing or 3D-print preparation. Specify units, solid validity, and whether the assembly is exported as separate parts or fused geometry; distinguish the fluid domain from the printable solid.
+- [x] **E02 — Harmonize 3D visualization in scripts and the app.** Use a consistent PyVista/VTK data and plotting approach, with matching geometry, mesh boundaries, scalar conventions, and camera orientation where practical. Account for the difference between desktop and browser rendering.
 - [ ] **E03 — Produce CFD reports from Fluent and CFX results.** Build independent post-processing scripts that read supported case/data files or documented exported datasets and generate a simulation report, potentially using PyVista. The original mention of a “tab” is superseded by its explicit instruction to keep this work outside the app. Define supported formats and report contents before implementation.
+- [x] **E04 — Export BladeGen geometry for TurboGrid meshing.** Write the stator and rotor blades in the ANSYS BladeGen `.inf` + `.curve` format (profile, hub and shroud curves) from the current app's design object, so each row can be meshed in TurboGrid. Start from the legacy exporter `legacy/geometry/turbogrid.py`, which uses the older annular wrap and constant-radius endwalls, and use the current meridional mapping instead, so the exported blade matches the app's geometry and meshes. Include flared/curved hub and shroud curves, span station placement, units, axis and rotation conventions, and the blade count. Verify that TurboGrid loads the files and produces a valid mesh for an axial, a radial and a stator+rotor case.
+- [ ] **E05 — Check the STEP export in SolidWorks (user).** Import the fluid domain, blade, and disk-and-blade files (separate parts and fused) for an axial, a radial and a stator+rotor case. Confirm millimetre units, one valid solid per body, the named parts of the assembly, and that the stator and rotor files open in place in the machine frame. Report any import repairs or warnings.
+- [ ] **E06 — Check the BladeGen export in TurboGrid (user).** After E04, load the `.inf` + `.curve` files in TurboGrid for each row and confirm the blade, hub and shroud, blade count and orientation, and that a valid mesh can be generated.
 
 ## 6. Configuration and workflow consistency
 
