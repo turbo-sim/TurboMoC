@@ -14,7 +14,7 @@ For a first run, keep the example settings and follow this sequence:
 
 1. Start the app and click **Load configuration**. Choose `examples/apps/cases/stator_rotor.yaml`.
 2. Leave **Calculate → All rows** and **Configure display > Blade rows > All rows**.
-3. In **Geometry generation**, click **Compute blade design**. Wait for both rows to finish.
+3. In **Geometry generation**, click **Generate geometry**. Wait for both rows to finish.
 4. Open **Mesh generation** and click **Generate 2D mesh**. Inspect the blade surfaces and trailing edges.
 5. Click **Generate 3D mesh**. Inspect the volume mesh and **Mesh quality report**.
 6. Click **Export project (.zip)**. Keep the archive together with your design records.
@@ -150,7 +150,7 @@ Keep matching hub radii and blade heights for this axial pair. The interface con
 ## 5. Compute and inspect the blade design
 
 1. Set **Calculate → All rows** and **Configure display > Blade rows > All rows**.
-2. Click **Compute blade design** once.
+2. Click **Generate geometry** once.
 3. Follow the job status and progress bar. The stator runs first; its result supplies the coupled rotor inlet.
 4. Expand **Terminal · live activity** for calculation details or to investigate an error.
 

@@ -55,11 +55,11 @@ clearance-maximizing tangential shift remain in use; no additional YAML fields
 are needed. The [construction example](../../../examples/moc_design/rotor_flow_domain_construction.py)
 plots the package geometry, its control points and extension joins.
 
-The **Calculate** dropdown selects All rows, Stator or Rotor independently of
-plot visibility and report selection. Calculate and Show are below Load/Save
-configuration in the left sidebar and apply to both workspaces.
+The **Calculate** checkbox menu selects All rows, Stator or Rotor independently of
+plot visibility and report selection. It sits beside the three calculation buttons
+in the main toolbar and applies to both workspaces. Clearing all rows disables calculation.
 Selection does not change machine execution order.
-The single **Compute blade design** button runs the stator MoC before the rotor
+The single **Generate geometry** button runs the stator MoC before the rotor
 vortex method when both are selected. Each successful result is published before
 the next row starts, so a coupled rotor consumes the newly computed stator exit.
 **Generate 2D mesh** and **Generate 3D mesh** run the selected rows sequentially,
@@ -286,7 +286,7 @@ axis and `uirevision` changes, retained the same two internal canvases and
 exactly two GL contexts with no errors or warnings. These display changes
 leave scientific meshes and exported connectivity untouched.
 
-Every **Compute blade design** action solves the selected profiles afresh. A successful stator job writes
+Every **Generate geometry** action solves the selected profiles afresh. A successful stator job writes
 `moc_result.json`; downstream stages read only the explicitly selected job.
 There is no MoC cache lookup or reuse policy. The fitted-template and derived
 geometry stores retain rapid design iteration for that selected result. A new

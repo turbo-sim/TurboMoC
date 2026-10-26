@@ -9,8 +9,8 @@ from turbo_moc.meshing import inspection
 from turbo_moc.meshing.mesh_3d import BOUNDARIES
 
 
-DEFAULTS = {"mode": "surface", "method": "worst", "metric": "skewness", "n": 100,
-    "threshold": .8, "layer": 1, "context": list(BOUNDARIES)}
+DEFAULTS = {"mode": "surface", "method": "worst", "metric": "orthogonality", "n": 100,
+    "threshold": .2, "layer": 1, "context": list(BOUNDARIES)}
 METRICS = inspection.METRIC_LABELS
 
 
@@ -43,7 +43,8 @@ def controls(row, appearance, saved=None):
                 html.Div([
                     control("Select cells", dropdown("method", [("worst", "Worst N"), ("threshold", "Threshold")])),
                     html.Div(control("Number of cells", number("n", min=1, step=1)), id=identifier("n-fields", row)),
-                    html.Div(control("Skewness ≥", number("threshold", min=0, max=1, step="any"), "threshold"),
+                    html.Div(control(METRICS[settings["metric"]] + (" ≤" if settings["metric"] == "orthogonality" else " ≥"),
+                        number("threshold", min=0, max=1, step="any"), "threshold"),
                         id=identifier("threshold-fields", row)),
                 ], id=identifier("filter-fields", row)),
                 html.Div([

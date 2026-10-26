@@ -6,7 +6,7 @@ from dash import dcc, html
 
 from turbo_moc.app import workflow as flow, plots
 
-METRICS = ("skewness", "orthogonality", "aspect_ratio")
+METRICS = ("orthogonality", "skewness", "aspect_ratio")
 METRIC_LABELS = {"skewness": "Skewness", "orthogonality": "Orthogonality", "aspect_ratio": "Edge aspect ratio"}
 SICN_LABEL = "Minimum signed inverse condition number (SICN)"
 SICN_TIP = ("Gmsh's minimum signed inverse condition number measures cell shape quality. "

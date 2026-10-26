@@ -108,7 +108,8 @@ def test_volume_camera_family_preserves_saved_artifact(saved_family, project_fam
 def test_dropdown_scopes_and_report_are_independent(monkeypatch):
     app = application.create_app(CASES / "stator_rotor.yaml")
     layout = components(app.server.test_client().get("/_dash-layout").get_json())
-    assert layout["calculation-scope"]["value"] == "all"
+    assert layout["calculation-scope"]["value"] == ["stator_1", "rotor_1"]
+    assert layout["calculation-rows"]["value"] == ["all", "stator_1", "rotor_1"]
     assert layout["mesh-display-row"]["value"] == ["all", "stator_1", "rotor_1"]
     assert layout["report-scope"]["value"] == "all"
     assert "geometry-display-panel" in layout and "mesh-display-panel" in layout
@@ -116,7 +117,8 @@ def test_dropdown_scopes_and_report_are_independent(monkeypatch):
                for pane in ("geometry", "mesh"))
     sidebar = components(layout["sidebar"]["children"])
     assert "calculation-scope" in sidebar and "plot-scope" not in sidebar
-    assert "Display selection is independent" in str(sidebar["interspace-note"]["children"])
+    assert "calculation-controls" not in sidebar
+    assert sidebar["interspace-note"]["style"] == {"display": "none"}
     for pane in ("geometry", "mesh"):
         scene_callback = next(v for k, v in app.callback_map.items() if k.startswith(f"..{pane}-scene.children"))
         assert any(item["id"] == "plotted-rows" for item in scene_callback["inputs"])
@@ -131,10 +133,15 @@ def test_dropdown_scopes_and_report_are_independent(monkeypatch):
     assert response["plotted-rows"]["value"] == ["rotor_1"]
     assert response["geometry-display-row"]["value"] == ["rotor_1"]
     assert response["mesh-display-row"]["value"] == ["rotor_1"]
-    callback = next(v["callback"].__wrapped__ for k, v in app.callback_map.items()
-                    if k.startswith("..calculation-scope.options"))
-    changed = callback(projects.set_design_mode(project, "stator"), "rotor_1", "rotor_1")
-    assert changed[1] == changed[3] == "all"
+    changed = call(app, "..calculation-scope.options", "base-project.data", {
+        ("base-project", "data"): projects.set_design_mode(project, "stator"),
+        ("calculation-scope", "value"): ["rotor_1"],
+        ("calculation-scope", "options"): layout["calculation-scope"]["options"]})
+    assert changed["calculation-scope"]["value"] == ["stator_1"]
+    assert changed["calculation-rows"]["value"] == ["all", "stator_1"]
+    report_scope = next(v["callback"].__wrapped__ for k, v in app.callback_map.items()
+                        if k.startswith("..report-scope.options"))
+    assert report_scope(projects.set_design_mode(project, "stator"), "rotor_1")[1] == "all"
     report_callback = next(v for k, v in app.callback_map.items() if k.startswith("..volume-data.data"))
     assert not any(i["id"] in ("plotted-rows", "selected-row", "calculation-scope")
                    for i in report_callback["inputs"])

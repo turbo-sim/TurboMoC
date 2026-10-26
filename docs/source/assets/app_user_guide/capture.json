@@ -2,31 +2,11 @@
   "captured_on": "2026-10-13",
   "configuration": "examples/apps/cases/stator_rotor.yaml",
   "configuration_sha256": "300fc469bcad9a29d3c39c492e8361e700fe695857827fb2b9343e698eaae44b",
-  "app_source_revision": "af7cb86880275b2039c5a8a1255225a2d46ff7e967e520c0639428c7074d4ad1",
-  "method": "Fresh app workers for both blade designs, both reference meshes, and both volume meshes; current app rendered in Chromium with guide annotations overlaid before screenshots.",
+  "app_source_revision": "2e648f3829a1923532091540078349da9ff41d8e14deba9e5faa8d45cadf48b4",
+  "numerical_source_revision": "af7cb86880275b2039c5a8a1255225a2d46ff7e967e520c0639428c7074d4ad1",
+  "method": "Current app rendered in Chromium with guide annotations overlaid before screenshots. Original tutorial numerical artifacts retained for the toolbar-only update; scientific source unchanged. Screenshot harness uses the original numerical cache identity so the documented case stays consistent.",
   "presentation": "Camera, zoom, visibility, plot ranges, and readable axis ticks chosen for each task. Mesh coordinates, connectivity, quality values, histogram bins, and counts unchanged.",
   "rows": {
-    "stator_1": {
-      "volume_cells": 211400,
-      "volume_nodes": 221520,
-      "min_sicn": 0.060027290459836034,
-      "metrics": {
-        "skewness": {
-          "min": 0.0029234942377616194,
-          "max": 0.6334752997712514
-        },
-        "orthogonality": {
-          "min": 0.7273169387578163,
-          "max": 0.9999996673352936
-        },
-        "aspect_ratio": {
-          "min": 1.01167536752317,
-          "max": 41.61572311699059
-        }
-      },
-      "skewness_above_0_8": 0,
-      "orthogonality_below_0_2": 0
-    },
     "rotor_1": {
       "volume_cells": 132950,
       "volume_nodes": 147914,
@@ -46,6 +26,27 @@
         }
       },
       "skewness_above_0_8": 9,
+      "orthogonality_below_0_2": 0
+    },
+    "stator_1": {
+      "volume_cells": 211400,
+      "volume_nodes": 221520,
+      "min_sicn": 0.060027290459836034,
+      "metrics": {
+        "skewness": {
+          "min": 0.0029234942377616194,
+          "max": 0.6334752997712514
+        },
+        "orthogonality": {
+          "min": 0.7273169387578163,
+          "max": 0.9999996673352936
+        },
+        "aspect_ratio": {
+          "min": 1.01167536752317,
+          "max": 41.61572311699059
+        }
+      },
+      "skewness_above_0_8": 0,
       "orthogonality_below_0_2": 0
     }
   },
@@ -76,31 +77,31 @@
       "file": "01-load-and-navigate.png",
       "width_px": 2550,
       "height_px": 1352,
-      "sha256": "cb03f270c91003d5c0931a798d474eb31d131a043be75b791d290ce38eb45dff"
+      "sha256": "45d5f49fcb5b8e57fe6e6c596e7d1894f1330694894a283039aeb9b25c48330f"
     },
     {
       "file": "02-stator-settings.png",
       "width_px": 932,
       "height_px": 765,
-      "sha256": "6503aa80b951abec8d67901172cf0a2266f1d229b519ce0d7e13fd981b4ab662"
+      "sha256": "710edfbb04c49ae0c305bda0a2bb8d38e66ed5a925336dd7a0bafcc588a74656"
     },
     {
       "file": "15-flow-domain.png",
       "width_px": 932,
       "height_px": 1512,
-      "sha256": "6e4335ca5be60dab6fc2e19f6d74782c8a48352ecc916077ec0bf5dc9004acd5"
+      "sha256": "e29a059b170027579157e518c0063f229c698b99653082ad03b3511883304da1"
     },
     {
       "file": "03-rotor-settings.png",
       "width_px": 932,
       "height_px": 1602,
-      "sha256": "b2de7a63e8f08cdfda5118a217b4e6fb9cd9f2e7674c612fc21fc10925ac002c"
+      "sha256": "7a4e75f0995d003dbec38be3681713cf9cbac6760c5d7f634bbad10e241e6195"
     },
     {
       "file": "04-stage-geometry.png",
       "width_px": 1895,
       "height_px": 1370,
-      "sha256": "95a0ce5bd653b276f48fa0333fbda5463f49b264eb87937e95fc8f6dd959f9a8"
+      "sha256": "d7d82dec6483efd4101cf640c215b0f53bf036764bfae69086beb46cb56ac096"
     },
     {
       "file": "05-section-mesh.png",
@@ -124,55 +125,55 @@
       "file": "08-volume-mesh.png",
       "width_px": 1895,
       "height_px": 1370,
-      "sha256": "08890997d68bc0fa0dca2463e319c9f0dcf63442e52f28ffb98b93bd2f93033e"
+      "sha256": "65b8ff87a77fb45d6506c0cd1330adf182a2bad3a38a3f6aa142291c2a98cdf7"
     },
     {
       "file": "11-quality-filter.png",
       "width_px": 1895,
       "height_px": 1370,
-      "sha256": "31c7e2d15cab2f5505668502255fddf01989096ec406ab01822b7e7636d3d7df"
+      "sha256": "922005e207809edc58e9563eeffcf69e63381dc9dd6afd72b421453b516bbbb9"
     },
     {
       "file": "13-quality-threshold.png",
       "width_px": 1895,
       "height_px": 1370,
-      "sha256": "13d351f97a8489a50173db959cede69b670426a54a7858bb7b874158397ee1da"
+      "sha256": "39190bf510d91ca0412f518a04f050f6efe3dc22939cd844dcbdda6a1fecbd32"
     },
     {
       "file": "12-spanwise-layer.png",
       "width_px": 1895,
       "height_px": 1370,
-      "sha256": "c34eb025344c27fb08c727ae43e0a72a1a53924d9fa99f736ce5a60a510011a1"
+      "sha256": "c4cc252bb146fe14882e459659af9720ffa70dd1cfd4be1da628d1b022bbb0bf"
     },
     {
       "file": "16-spanwise-detail.png",
       "width_px": 1895,
       "height_px": 1370,
-      "sha256": "e9cb50791ca042e7e02e13e121fe4dfcb57f4056b76203361af7b205b1eb359e"
+      "sha256": "061f9228eeb112fc4625839df7b1fdd64f4777235d520b7be13205b57afe4fbf"
     },
     {
       "file": "17-hub-layer.png",
       "width_px": 1895,
       "height_px": 1370,
-      "sha256": "651fdeae1849a2d84dbf06ff8629036e8e190f87caf4d0fcd3b9bbb7fcca1dd2"
+      "sha256": "ee695b8c4d42be38932e46d3759f1b2eec9e9c31b702c216bba1324dbeb2e2f8"
     },
     {
       "file": "09-mesh-quality.png",
       "width_px": 1895,
       "height_px": 1599,
-      "sha256": "29e268f9095268dcece3f73a002fef6c2c6b10f937cef3dddf96e6f0712e4a9c"
+      "sha256": "3cbc71cc966c78c8c6525c4770f34aec36a3de1ec1f4c40f5da334cf549cb705"
     },
     {
       "file": "14-row-quality.png",
       "width_px": 1895,
       "height_px": 1383,
-      "sha256": "d07e27699f7a5016ba58156bb587c955159b9241d1ead86906cc65d2cd06584e"
+      "sha256": "d4fc3505e21c1466afff2971e95791f8f3c995638267128ad0181c83f273828e"
     },
     {
       "file": "10-export.png",
       "width_px": 2550,
       "height_px": 1464,
-      "sha256": "612f2db454a3fae3ad4d46a09c6f0d8fe69f9c28f2690961f7c66befc0d3fae3"
+      "sha256": "bccccec99d25600d0205f2fde50a26ec30ddf4e6e5a432136486d7b59786eb50"
     }
   ]
 }
