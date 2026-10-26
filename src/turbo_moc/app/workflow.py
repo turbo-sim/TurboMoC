@@ -11,6 +11,7 @@ from copy import deepcopy
 from uuid import uuid4
 
 import diskcache
+import numpy as np
 import yaml
 from flask import current_app, has_app_context
 
@@ -172,6 +173,30 @@ def get_stator_template(config, nozzle_reference, nozzle=None):
         return template
     finally:
         cache.close()
+
+
+def stator_control_points_csv(config, nozzle_reference, label="stator"):
+    """CSV of the stator blade B-spline: control points with the applied control-point offsets, in MoC wall
+    units (the editor's frame) and as placed in the design (blade-to-blade section, the design's units), plus
+    degree and knots (shared by both) in the header."""
+    template = get_stator_template(config, nozzle_reference)
+    native = np.asarray(template["control_points"], dtype=float)
+    blade = get_design(config, nozzle_reference).blade
+    placed = np.asarray(blade["control_points"], dtype=float)
+    knots = np.asarray(template["knots"], dtype=float)
+    offsets = {int(key): float(value) for key, value in (template.get("control_point_offsets") or {}).items()}
+    from turbo_moc.geometry.stator_blade import editable_control_points
+    editable = set(editable_control_points(template))
+    lines = [f"# {label} blade B-spline control points (TurboMoC)",
+             f"# degree {len(knots) - len(native) - 1}, {len(native)} control points, "
+             f"{len(offsets)} moved by the control-point editor",
+             "# knots " + " ".join(f"{value:.12g}" for value in knots),
+             f"# x, y: MoC wall units; x_placed, y_placed: blade-to-blade section as placed in the design "
+             f"[{blade.get('units', 'mm')}]; offset: normal displacement applied [wall units]",
+             "index,x,y,x_placed,y_placed,editable,offset"]
+    lines += [f"{i},{x:.12g},{y:.12g},{xm:.12g},{ym:.12g},{int(i in editable)},{offsets.get(i, 0.0):.12g}"
+              for i, ((x, y), (xm, ym)) in enumerate(zip(native, placed))]
+    return "\n".join(lines) + "\n"
 
 
 def get_design(config, nozzle_reference):

@@ -790,8 +790,11 @@ def create_app(config_file=None, output_dir=None):
                         ], id="nozzle-views", style={"display": "none"}),
                         html.Div([html.Div([
                         html.Details([html.Summary("Blade-to-blade and meridional channel geometry"),
-                            html.Div(html.Button("Modify stator control points", id="cp-edit-open", n_clicks=0,
-                                disabled=True), className="plot-toolbar", id="cp-toolbar", style={"display": "none"}),
+                            html.Div([html.Button("Modify stator control points", id="cp-edit-open", n_clicks=0,
+                                disabled=True),
+                                html.Button("Download control points (.csv)", id="cp-download", n_clicks=0,
+                                    disabled=True), dcc.Download(id="cp-download-file")],
+                                className="plot-toolbar", id="cp-toolbar", style={"display": "none"}),
                             html.Div(id="geometry-errors"),
                             html.Div([
                             html.Div([dcc.Graph(id="design-section", figure=empty("Selected blade row"),
@@ -1373,23 +1376,35 @@ def create_app(config_file=None, output_dir=None):
         return stator, config, nozzle
 
     @app.callback(Output("cp-edit-open", "disabled"), Output("cp-edit-open", "title"), Output("cp-toolbar", "style"),
+        Output("cp-download", "disabled"), Output("cp-download", "title"),
         Input("config", "data"), Input("row-references", "data"))
     def control_points_ready(state, registry):
         hidden = {"display": "none"}
         if not state or not state.get("project") or nozzle_mode(state["project"]) or not any(
                 row["role"] == "stator" for row in project_model.active_rows(state["project"])):
-            return True, "", hidden
+            return True, "", hidden, True, ""
         if not state.get("valid"):
-            return True, "Correct the invalid settings first.", {}
+            return True, "Correct the invalid settings first.", {}, True, "Correct the invalid settings first."
         try:
             stator, config, _ = editor_row(state, registry)
         except (ValueError, OSError, RuntimeError, KeyError):
-            return True, "Compute the stator blade design first.", {}
+            return True, "Compute the stator blade design first.", {}, True, "Compute the stator blade design first."
         try:
             flow.get_design(config, registry[stator["id"]]["nozzle"])
         except (ValueError, OSError, RuntimeError, KeyError):
-            return True, "", hidden
-        return False, "Move the stator blade's B-spline control points along their normals.", {}
+            return True, "", hidden, True, ""
+        return (False, "Move the stator blade's B-spline control points along their normals.", {}, False,
+                "Stator B-spline control points, knots and degree, including the applied control-point edits.")
+
+    @app.callback(Output("cp-download-file", "data"), Input("cp-download", "n_clicks"), State("config", "data"),
+        State("row-references", "data"), prevent_initial_call=True)
+    def download_control_points(clicks, state, registry):
+        # Read from the applied configuration, so edits made with the control-point editor are included once applied
+        if not clicks or not state or not state.get("valid"):
+            return no_update
+        stator, config, _ = editor_row(state, registry)
+        text = flow.stator_control_points_csv(config, registry[stator["id"]]["nozzle"], row_label(stator))
+        return dcc.send_string(text, f"{stator['id']}_control_points.csv")
 
     @app.callback(Output("cp-session", "data"), Output("cp-sliders", "children"), Output("cp-info", "children"),
         Output("blade-views-body", "style"), Output("cp-editor", "style"), Output("export-panels", "style"),

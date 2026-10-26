@@ -102,6 +102,28 @@ def starting_check(rotor):
             "leading_edge_radius_over_pitch": rotor["blade"]["le_radius"] / rotor["pitch"]}
 
 
+def design_for_margin(target_margin, M_lower, M_upper_bracket, **design):
+    """Starting-constrained vortex design: the M_upper whose exact vortex passage, at its own natural pitch,
+    has ``target_margin`` (throat over Kantrowitz ratio, with the delta* correction when ``boundary_layer`` is
+    given). Replaces widening the spacing after the design, which breaks the vortex and its wave cancellation.
+
+    ``design`` holds the other `design_rotor_vortex_blade` arguments by keyword (fluid_name, P0_rel, T0_rel,
+    M_inlet, M_outlet, beta_inlet, Q0_rel, edges, boundary_layer). The bracket on M_upper must enclose the
+    target (at 200 C, fixed M_lower, the margin rises with M_upper). Returns the blade with its starting check under ``"starting"``.
+    """
+    from turbo_moc.core.vortex_blade import design_rotor_vortex_blade
+
+    def blade(m_upper):
+        result = design_rotor_vortex_blade(M_lower=M_lower, M_upper=m_upper, **design)
+        check = starting_check(dict(result, P0_rel=design["P0_rel"], T0_rel=design["T0_rel"],
+                                    Q0_rel=design.get("Q0_rel", float("nan"))))
+        return result, check
+
+    m_upper = brentq(lambda m: blade(m)[1]["margin"] - target_margin, *M_upper_bracket, xtol=1e-4)
+    result, check = blade(m_upper)
+    return dict(result, starting=check)
+
+
 def starting_curves(rotor, machs):
     """Isentropic and Kantrowitz ratios along the rotor's relative isentrope, for the starting chart."""
     isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
