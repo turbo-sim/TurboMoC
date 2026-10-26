@@ -73,7 +73,11 @@ def _run_job(request_path, request):
                 progress("Rotor: thermodynamic table and vortex transition arcs")
                 from turbo_moc.configuration.rotor import vortex_parameters
                 inputs = vortex_parameters(solver_parameters(config["rotor_design"], rotor=True))
+                blade_type = inputs.pop("blade_type", "vortex")
                 rotor = design_rotor_vortex_blade(**inputs)
+                if blade_type == "impulse_constant_passage":
+                    from turbo_moc.core.impulse_blade import constant_passage_blade
+                    rotor = constant_passage_blade(rotor, **inputs)
                 rotor.update(P0_rel=inputs["P0_rel"], T0_rel=inputs["T0_rel"],
                              Q0_rel=inputs.get("Q0_rel", float("nan")))
                 flow.write_json(folder / "rotor_result.json", rotor)
@@ -96,8 +100,11 @@ def _run_job(request_path, request):
                 result = {"reference": handle}
                 if nozzle.get("converged") and not nozzle_only:
                     from turbo_moc.app.blade_counts import native_passage, sizing
-                    template = flow.get_stator_template(config, handle, nozzle)
-                    result["blade_sizing"] = sizing(config, native_passage(config, nozzle, template=template))
+                    from turbo_moc.geometry.stator_boundary_layer import displaced_nozzle
+                    # Size and cache the blade on the wall the design uses (boundary-layer corrected if configured)
+                    designed = displaced_nozzle(nozzle, config)
+                    template = flow.get_stator_template(config, handle, designed)
+                    result["blade_sizing"] = sizing(config, native_passage(config, designed, template=template))
         elif action == "bladegen":
             if nozzle_only:
                 raise ValueError("BladeGen export is available for stator and rotor rows only.")

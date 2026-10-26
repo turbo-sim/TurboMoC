@@ -45,6 +45,8 @@ def surface_arrays(field_data, surface, wall):
     for location, node_value, fields in (("node", True, FIELDS),
                                          ("face", False, FIELDS + (("y-plus",) if wall else ()))):
         for field in fields:
+            if field == "y-plus" and field not in field_data.scalar_fields.allowed_values():
+                continue  # Inviscid case: no wall units
             arrays[f"{surface}|{location}|{field}"] = np.asarray(field_data.get_field_data(ScalarFieldDataRequest(
                 field_name=field, surfaces=[surface], node_value=node_value))[surface], dtype=float)
     return arrays
@@ -52,13 +54,14 @@ def surface_arrays(field_data, surface, wall):
 
 def fluent_reports(settings, setup):
     definitions = settings.solution.report_definitions
+    walls = set(settings.setup.boundary_conditions.wall.keys())
     flow_surfaces = [boundary(setup, row, name) for row in ROWS for name in ("inlet", "outlet")]
     definitions.surface.create(name="report_mass_flow")
     mass_flow = definitions.surface["report_mass_flow"]
     mass_flow.report_type = "surface-massflowrate"
     mass_flow.surface_names = flow_surfaces
     mass_flow.per_surface = True
-    moments = {}
+    moments, zone_lists = {}, {}
     for row in ROWS:
         name = f"report_moment_{row}"
         definitions.moment.create(name=name)
@@ -66,14 +69,28 @@ def fluent_reports(settings, setup):
         moment.report_output_type = "Moment"
         moment.mom_center = [0.0, 0.0, 0.0]
         moment.mom_axis = [0.0, 0.0, 1.0]
-        moment.zones = [boundary(setup, row, wall) for wall in WALLS]
+        moment.zones = [boundary(setup, row, wall) for wall in WALLS if boundary(setup, row, wall) in walls]
+        zone_lists[name] = list(moment.zones())
         moment.per_zone = True
         moments[row] = name
-    values = definitions.compute(report_defs=["report_mass_flow", *moments.values()])
-    values = {key: value[0] for item in values for key, value in item.items()}
+    raw = definitions.compute(report_defs=["report_mass_flow", *moments.values()])
+    values = {key: value[0] for item in raw for key, value in item.items()}
+
+    def moment(name, zone):
+        # Slip endwalls are symmetry zones: no moment there. Any other missing wall is an error, not a zero.
+        if zone not in walls:
+            return 0.0
+        for key in (f"{name}({zone})", f"{name}({zone.split('.')[-1]})"):
+            if key in values:
+                return values[key]
+        if name in values and sum(other in walls for other in zone_lists[name]) == 1:
+            return values[name]  # One wall zone (the blade): Fluent reports only the total
+        raise KeyError(f"No moment for {zone} in {sorted(values)}")
+
     return {"mass_flow": {surface: values[f"report_mass_flow({surface})"] for surface in flow_surfaces},
-            "moment": {row: {wall: values[f"{name}({boundary(setup, row, wall)})"] for wall in WALLS}
-                       for row, name in moments.items()}}
+            "moment": {row: {wall: moment(name, boundary(setup, row, wall)) for wall in WALLS}
+                       for row, name in moments.items()},
+            "report_keys": sorted(values)}
 
 
 def mesh_quality(solver):

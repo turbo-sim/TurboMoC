@@ -1,6 +1,7 @@
 """Design the stage with the app pipeline and open a configured, unsolved 3D Fluent case."""
 
 import json
+import sys
 from pathlib import Path
 
 import yaml
@@ -105,6 +106,13 @@ def main(config_file):
         print(f"    Solved case and data saved: {case_file}")
         if options["ui_mode"] == "no_gui":
             solver.exit()
+    elif options["ui_mode"] == "no_gui":
+        from .planar import close_fluent
+        close_fluent(solver, fluent_dir)
     else:
         print("    Fluent is open: check the setup, initialize (hybrid) and run the calculation.")
     return case_file
+
+
+if __name__ == "__main__":
+    main(sys.argv[1])

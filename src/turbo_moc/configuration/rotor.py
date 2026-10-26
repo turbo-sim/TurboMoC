@@ -18,6 +18,11 @@ ROTOR_DEFAULTS = {
     "beta_inlet": 65.0, "num_points": 60, "le_te_ratio": 25.0,
     "outlet_condition": "mach", "p_back": 1e5, "incidence": 0.0,
 }
+# Optional edge closure and boundary-layer correction settings passed through to design_rotor_vortex_blade.
+ROTOR_OPTIONAL = {"le_ellipse_ratio", "te_ellipse_ratio", "le_wedge_half_angle", "le_round_tip", "boundary_layer",
+                  "blade_type"}
+# blade_type "impulse_constant_passage" swaps the vortex geometry for the matched Baines baseline (core.impulse_blade).
+BLADE_TYPES = ("vortex", "impulse_constant_passage")
 ROTOR_OUTLET_CONDITIONS = ("mach", "pressure")
 SPEED_TYPES = {"actual": "Actual speed [rpm]", "blade_velocity_ratio": "Blade velocity ratio U/c₀ [-]",
                "specific": "Specific speed [-]"}
@@ -106,7 +111,7 @@ def validate_rotor_configuration(config):
     validate_machine(config["meridional_channel"])
     design = config["rotor_design"]
     paired_fields = (set(ROTOR_DEFAULTS) - {"P0_rel", "T0_rel"}) | set(INLET_FIELDS)
-    if not isinstance(design, dict) or set(design) not in (set(ROTOR_DEFAULTS), paired_fields):
+    if not isinstance(design, dict) or set(design) - ROTOR_OPTIONAL not in (set(ROTOR_DEFAULTS), paired_fields):
         raise ValueError(f"rotor_design requires {tuple(ROTOR_DEFAULTS)}.")
     if not isinstance(design["fluid_name"], str) or not design["fluid_name"].strip():
         raise ValueError("rotor_design.fluid_name must be a non-empty fluid name.")
@@ -118,6 +123,8 @@ def validate_rotor_configuration(config):
     for name in ("M_inlet", "M_outlet", "M_lower", "M_upper"):
         _finite(design[name], f"rotor_design.{name}", minimum=1, strict=True)
     _finite(design["beta_inlet"], "rotor_design.beta_inlet")
+    if design.get("blade_type", "vortex") not in BLADE_TYPES:
+        raise ValueError(f"rotor_design.blade_type must be one of {BLADE_TYPES}.")
     if design["outlet_condition"] not in ROTOR_OUTLET_CONDITIONS:
         raise ValueError("rotor_design.outlet_condition must be mach or pressure.")
     _finite(design["p_back"], "rotor_design.p_back", minimum=0, strict=True)

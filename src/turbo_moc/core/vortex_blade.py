@@ -12,8 +12,8 @@ listing (its Main Program's transition-arc marching loops, Eqs. 6/7/9/10/13,
 and the GSTAR/CSTAR/SIGMA geometric-parameter calculations), NOT a
 reimplementation from the paper's prose or from Paniagua (2014)'s shorter,
 closed-form-looking Eqs. 11-19 -- those turned out to describe something
-different from what they appear to (see "History" below). Validated to 4
-decimal places against the report's own worked example (Table II: BETAN=65,
+different from what they appear to (see "History" below). Validated (with the
+FORTRAN's averaged Mach-line slope) to 4 decimal places against the report's own worked example (Table II: BETAN=65,
 VIN=39, VOUT=35, VLOW=18, VUP=59, GAM=1.4 -> BETAT=-68.7395 deg,
 GSTAR=0.5544, CSTAR=1.6281, individual transition-arc coordinates matching
 point-for-point) before any real-gas generalization was attempted.
@@ -188,27 +188,69 @@ def _arc_from_diameter(L, T, interior_ref, num_points=40):
     return center[0] + R * np.cos(angles), center[1] + R * np.sin(angles)
 
 
-def _wedge_from_gap(L, T, direction, half_angle_rad, num_points=40):
+def _wedge_from_gap(L, T, direction, half_angle_rad, num_points=40, tip_radius=0.0):
     """
-    Sharp leading-edge closure: a symmetric wedge on the gap L-T, pointing
+    Wedge leading-edge closure: a symmetric wedge on the gap L-T, pointing
     upstream along ``direction`` (the inlet flow direction) with the given
     half-angle. Returned from T to L through the tip with ``num_points``
     points, like the semicircle it replaces, so the outline keeps its layout.
+
+    With ``tip_radius`` > 0 the tip is a circular arc of that radius tangent
+    to both flanks. Also returns the indices where the flanks end (one index,
+    the tip, for a sharp wedge; the two arc ends for a rounded one).
     """
     L = np.asarray(L, dtype=float)
     T = np.asarray(T, dtype=float)
     unit = np.asarray(direction, dtype=float) / np.linalg.norm(direction)
     half_gap = 0.5 * np.linalg.norm(T - L)
     tip = 0.5 * (L + T) - unit * half_gap / np.tan(half_angle_rad)
-    count = max(num_points // 2 + 1, 2)
-    to_tip = T + np.linspace(0.0, 1.0, count)[:, None] * (tip - T)
-    to_wall = tip + np.linspace(0.0, 1.0, num_points - count + 1)[1:, None] * (L - tip)
-    points = np.vstack([to_tip, to_wall])
+    if tip_radius <= 0.0:
+        count = max(num_points // 2 + 1, 2)
+        to_tip = T + np.linspace(0.0, 1.0, count)[:, None] * (tip - T)
+        to_wall = tip + np.linspace(0.0, 1.0, num_points - count + 1)[1:, None] * (L - tip)
+        points = np.vstack([to_tip, to_wall])
+        return points[:, 0], points[:, 1], [count - 1]
+    flank = tip_radius / np.tan(half_angle_rad)
+    if flank >= half_gap / np.sin(half_angle_rad):
+        raise ValueError("Leading-edge radius too large for the wedge: lower le_te_ratio's radius or the half-angle.")
+    center = tip + unit * tip_radius / np.sin(half_angle_rad)
+    start = tip + flank * (T - tip) / np.linalg.norm(T - tip)
+    end = tip + flank * (L - tip) / np.linalg.norm(L - tip)
+    arc = max(num_points // 2, 4)
+    first = (num_points - arc + 2) // 2
+    last = num_points - first - arc + 2
+    angle_start = np.arctan2(*(start - center)[::-1])
+    sweep = (np.arctan2(*(end - center)[::-1]) - angle_start + np.pi) % (2 * np.pi) - np.pi
+    angles = angle_start + np.linspace(0.0, sweep, arc)
+    points = np.vstack([
+        T + np.linspace(0.0, 1.0, first)[:, None] * (start - T),
+        (center + tip_radius * np.column_stack([np.cos(angles), np.sin(angles)]))[1:],
+        end + np.linspace(0.0, 1.0, last)[1:, None] * (L - end),
+    ])
+    return points[:, 0], points[:, 1], [first - 1, first + arc - 2]
+
+
+def _ellipse_from_gap(L, T, outward, ratio, num_points=40):
+    """
+    Half ellipse closing the edge gap L-T: semi-minor axis b along the gap
+    (half its width), semi-major axis a = ratio * b along ``outward`` (the
+    flow direction pointing away from the blade). Like the semicircle it
+    replaces, it runs from L to T with ``num_points`` points and leaves both
+    ends tangent to the walls.
+    """
+    L = np.asarray(L, dtype=float)
+    T = np.asarray(T, dtype=float)
+    centre = 0.5 * (L + T)
+    across = L - centre
+    along = ratio * np.linalg.norm(across) * np.asarray(outward, dtype=float) / np.linalg.norm(outward)
+    angles = np.linspace(0.0, np.pi, num_points)
+    points = centre + np.outer(np.cos(angles), across) + np.outer(np.sin(angles), along)
     return points[:, 0], points[:, 1]
 
 
 def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
-                        le_te_ratio, num_points, le_wedge_half_angle=None):
+                        le_te_ratio, num_points, le_wedge_half_angle=None, le_round_tip=False,
+                        le_ellipse_ratio=None, te_ellipse_ratio=None, translate=None):
     """
     Close the pressure (`lower`) and suction+pitch (`upper`) open walls
     into a finite solid blade with rounded leading/trailing edges, using
@@ -228,7 +270,10 @@ def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
     With ``le_wedge_half_angle`` [deg] the leading edge is closed by a sharp
     symmetric wedge on the same gap instead of the semicircle, so that a
     supersonic inflow meets weak attached shocks rather than a detached bow
-    shock; ``le_radius`` is then zero.
+    shock; ``le_radius`` is then zero. With ``le_round_tip`` the wedge tip is a
+    circular arc with the trailing-edge radius pitch/le_te_ratio.
+
+    A given ``translate`` is used as is (the edge radii then follow from it).
 
     Returns (closed_x, closed_y, diagnostics) where diagnostics has
     translate/le_radius/te_radius.
@@ -249,7 +294,8 @@ def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
     L1_check = np.array([lower_x[-1], lower_y[-1]])
     U1_notranslate = np.array([upper_x[-1], upper_y[-1]])
     D_TE_base = np.dot(U1_notranslate - L1_check, n_TE_unit)
-    translate = (2.0 * r_TE_target - D_TE_base) / n_TE_unit[1]
+    if translate is None:
+        translate = (2.0 * r_TE_target - D_TE_base) / n_TE_unit[1]
 
     L0 = np.array([lower_x[0], lower_y[0]])
     L1 = np.array([lower_x[-1], lower_y[-1]])
@@ -268,11 +314,17 @@ def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
     ])
     le_x, le_y = _arc_from_diameter(L0, T_LE, interior_ref, num_points=num_points)
     te_x, te_y = _arc_from_diameter(L1, T_TE, interior_ref, num_points=num_points)
+    if le_ellipse_ratio is not None:
+        le_x, le_y = _ellipse_from_gap(L0, T_LE, -u_LE, le_ellipse_ratio, num_points)
+    if te_ellipse_ratio is not None:
+        te_x, te_y = _ellipse_from_gap(L1, T_TE, u_TE, te_ellipse_ratio, num_points)
     le_radius = float(0.5 * np.linalg.norm(T_LE - L0))
+    le_breaks = []
     if le_wedge_half_angle is not None:
-        wedge_x, wedge_y = _wedge_from_gap(L0, T_LE, u_LE, np.radians(le_wedge_half_angle), num_points)
+        le_radius = r_TE_target if le_round_tip else 0.0
+        wedge_x, wedge_y, le_breaks = _wedge_from_gap(L0, T_LE, u_LE, np.radians(le_wedge_half_angle),
+                                                      num_points, le_radius)
         le_x, le_y = wedge_x[::-1], wedge_y[::-1]
-        le_radius = 0.0
     te_radius = float(0.5 * np.linalg.norm(T_TE - L1))
 
     upper_rev_x = upper_x[::-1]
@@ -287,8 +339,37 @@ def _close_blade_le_te(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad,
         lower_y, np.asarray(te_y)[1:], [U1[1]], upper_rev_y[1:], [T_LE[1]], le_arc_rev_y[1:],
     ])
 
-    diagnostics = {"translate": float(translate), "le_radius": le_radius, "te_radius": te_radius}
+    diagnostics = {"translate": float(translate), "le_radius": le_radius, "te_radius": te_radius,
+                   "le_breaks": [int(index) for index in le_breaks]}
     return closed_x, closed_y, diagnostics
+
+
+def _displacement_thickness(manager, x, y, nu, length_scale, viscosity, factor=1.0):
+    """Turbulent flat-plate displacement thickness along one wall, from the leading edge, in wall units.
+
+    delta* = 0.046 s Re_s^-0.2 (1/7 power law), with Re_s from the local edge state of the vortex design
+    (rho, V at the wall's Prandtl-Meyer angle) and the arc length s in metres (``length_scale`` metres per
+    wall unit). Fully turbulent from the leading edge, no pressure-gradient history: a first-order allowance
+    in the spirit of Bufi's RODEC correction. A barotropic boundary layer has no density change across it
+    (rho = rho(p), p constant across the layer), so the incompressible form applies.
+    """
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(x), np.diff(y)))]) * length_scale
+    V = np.array([manager.V_of_nu(float(value)) for value in nu])
+    rho = np.array([float(manager.rho_of_V(value)) for value in V])
+    reynolds = np.maximum(rho * V * s / viscosity, 1.0)
+    return factor * 0.046 * s * reynolds ** -0.2 / length_scale
+
+
+def _offset_into_blade(wall, other, thickness):
+    """Move an open wall polyline by ``thickness`` along its normal, towards the blade interior (``other``)."""
+    x, y = np.asarray(wall["x"], dtype=float), np.asarray(wall["y"], dtype=float)
+    tx, ty = np.gradient(x), np.gradient(y)
+    norm = np.hypot(tx, ty)
+    nx, ny = -ty / norm, tx / norm
+    middle = len(x) // 2
+    towards = np.array([np.mean(other["x"]) - x[middle], np.mean(other["y"]) - y[middle]])
+    sign = 1.0 if nx[middle] * towards[0] + ny[middle] * towards[1] > 0 else -1.0
+    return {"x": (x + sign * thickness * nx).tolist(), "y": (y + sign * thickness * ny).tolist()}
 
 
 def _V_of_M(manager, M_target):
@@ -341,9 +422,12 @@ def _lower_arc_march(manager, nu_far, nu_wall, delnu, num_points):
     nu_far, finding each wall point as the intersection of the local Mach
     line (through a reference point on the major vortex characteristic)
     with the previous wall segment. Real-gas generalized via _R_star/
-    _mach_angle; the marching recursion itself is unchanged from the
-    original FORTRAN. Returns (x, y) arrays, local unrotated frame, index
-    0 = wall, index -1 = far/uniform-flow end.
+    _mach_angle. The Mach line through reference point k is inclined at
+    phi_k + mu_k, the exact simple-wave characteristic; the original FORTRAN
+    averages this with the previous point's phi + mu, which only lowers the
+    first-order discretization error (by ~30 % at a given num_points).
+    Returns (x, y) arrays, local unrotated frame, index 0 = wall, index -1 =
+    far/uniform-flow end.
     """
     KMN = num_points - 1
     delv = (nu_far - nu_wall) / KMN if KMN > 0 else 0.0
@@ -351,7 +435,6 @@ def _lower_arc_march(manager, nu_far, nu_wall, delnu, num_points):
     V = nu_far
 
     PHIKP1 = -(V - nu_wall) + KMN * delv
-    UMKP1 = _mach_angle(manager, R_wall)
     TXLO, TYLO = 0.0, R_wall
     xs, ys = [TXLO], [TYLO]
     ref_xs, ref_ys = [], []
@@ -364,13 +447,13 @@ def _lower_arc_march(manager, nu_far, nu_wall, delnu, num_points):
         TX, TY = TR * np.sin(PHIK), TR * np.cos(PHIK)
         EMWK = np.tan(-PHIKP1)
         UMK = _mach_angle(manager, TR)
-        EMK = -np.tan((PHIK + UMK + PHIKP1 + UMKP1) / 2.0)
+        EMK = -np.tan(PHIK + UMK)
         TEMP = TYLO - EMWK * TXLO
         TEMPP = TY - EMK * TX
         TEMPPP = EMK - EMWK
         TXLO = (TEMP - TEMPP) / TEMPPP
         TYLO = (EMK * TEMP - EMWK * TEMPP) / TEMPPP
-        PHIKP1, UMKP1 = PHIK, UMK
+        PHIKP1 = PHIK
         xs.append(TXLO)
         ys.append(TYLO)
         ref_xs.append(TX)
@@ -385,7 +468,8 @@ def _upper_arc_march(manager, nu_far, nu_wall, delnu, num_points):
     loop -- genuinely different sign conventions from the lower-arc block
     in the original FORTRAN (not a simple mirror image), reproduced
     faithfully here. nu_wall > nu_far (the upper/suction surface increases
-    the Mach number relative to the far/uniform-flow value).
+    the Mach number relative to the far/uniform-flow value). Mach line at
+    the exact phi_j + mu_j, as in _lower_arc_march.
     """
     JMN = num_points - 1
     delv = (nu_wall - nu_far) / JMN if JMN > 0 else 0.0
@@ -393,7 +477,6 @@ def _upper_arc_march(manager, nu_far, nu_wall, delnu, num_points):
     V = nu_far
 
     PHIJP1 = -(nu_wall - V) + JMN * delv
-    UMJP1 = _mach_angle(manager, R_wall)
     TXUP, TYUP = 0.0, R_wall
     xs, ys = [TXUP], [TYUP]
     ref_xs, ref_ys = [], []
@@ -407,13 +490,13 @@ def _upper_arc_march(manager, nu_far, nu_wall, delnu, num_points):
         TX, TY = TR * np.sin(PHIJ), TR * np.cos(PHIJ)
         EMWJ = np.tan(-PHIJP1)
         UMJ = _mach_angle(manager, TR)
-        EMJ = np.tan((-PHIJ + UMJ - PHIJP1 + UMJP1) / 2.0)
+        EMJ = np.tan(-PHIJ + UMJ)
         TEMP = TYUP - EMWJ * TXUP
         TEMPP = TY - EMJ * TX
         TEMPPP = EMJ - EMWJ
         TXUP = (TEMP - TEMPP) / TEMPPP
         TYUP = (EMJ * TEMP - EMWJ * TEMPP) / TEMPPP
-        PHIJP1, UMJP1 = PHIJ, UMJ
+        PHIJP1 = PHIJ
         xs.append(TXUP)
         ys.append(TYUP)
         ref_xs.append(TX)
@@ -481,9 +564,12 @@ def _surface(manager, nu_inlet, nu_outlet, nu_wall, beta_inlet_rad, beta_outlet_
 
     x = np.concatenate([x_in[::-1], x_circ[1:-1], x_out])
     y = np.concatenate([y_in[::-1], y_circ[1:-1], y_out])
+    # Wall Prandtl-Meyer angle: the marching steps nu linearly from the arc's wall value to its far value
+    nu = np.concatenate([np.linspace(nu_wall, nu_inlet, len(x_in))[::-1], np.full(n_circ - 2, nu_wall),
+                         np.linspace(nu_wall, nu_outlet, len(x_out))])
 
     return {
-        "x": x, "y": y,
+        "x": x, "y": y, "nu": nu,
         "x_inlet_far": float(x_in[-1]), "y_inlet_far": float(y_in[-1]),
         "x_outlet_far": float(x_out[-1]), "y_outlet_far": float(y_out[-1]),
         "R_wall_star": float(R_wall_star),
@@ -504,6 +590,10 @@ def design_rotor_vortex_blade(
     num_points=60,
     le_te_ratio=25.0,
     le_wedge_half_angle=None,
+    le_round_tip=False,
+    le_ellipse_ratio=None,
+    te_ellipse_ratio=None,
+    boundary_layer=None,
 ):
     """
     Design a supersonic rotor blade section by the vortex-flow method,
@@ -559,6 +649,20 @@ def design_rotor_vortex_blade(
     le_wedge_half_angle : float or None
         Close the leading edge with a sharp wedge of this half-angle [deg]
         instead of the semicircle (the trailing edge stays rounded).
+    le_round_tip : bool
+        Round the wedge tip with a circular arc of the trailing-edge radius
+        pitch/le_te_ratio.
+    le_ellipse_ratio, te_ellipse_ratio : float or None
+        Close the leading/trailing edge with a half ellipse of this semiaxis
+        ratio a/b instead of the semicircle: b is half the edge gap, a lies
+        along the flow direction (Mushtaq et al.: 3.2 at the leading edge,
+        5 at the trailing edge).
+    boundary_layer : dict or None
+        Displacement-thickness correction: ``{"chord": [m], "viscosity": [Pa s], "factor": 1.0}``. Both walls
+        move into the blade by the turbulent delta*(s) of their own vortex-design edge state (see
+        `_displacement_thickness`), so the viscous passage keeps the inviscid area distribution; ``chord``
+        gives the metres per design unit. The spacing stays the inviscid one, so the captured inflow is
+        unchanged and the trailing edge thins by the two delta*s.
 
     Returns
     -------
@@ -661,6 +765,24 @@ def design_rotor_vortex_blade(
         "x": suction_packed["x"],
         "y": [y + pitch * scale for y in suction_packed["y"]],
     }
+    displacement, translate = None, None
+    if boundary_layer is not None:
+        # Spacing of the inviscid blade, kept: the inflow captured per passage stays the design one, and the
+        # walls alone open by delta* (the trailing edge thins by the two delta*s instead)
+        translate = _close_blade_le_te(blade_lower, blade_upper, pitch * scale, beta_inlet_rad, beta_outlet_rad,
+                                       le_te_ratio=le_te_ratio, num_points=num_points)[2]["translate"]
+        walls_x = np.concatenate([blade_lower["x"], blade_upper["x"]])
+        length_scale = float(boundary_layer["chord"]) / float(np.ptp(walls_x))
+        factor = float(boundary_layer.get("factor", 1.0))
+        lower_delta = _displacement_thickness(manager, blade_lower["x"], blade_lower["y"], pressure["nu"],
+                                              length_scale, float(boundary_layer["viscosity"]), factor)
+        upper_delta = _displacement_thickness(manager, blade_upper["x"], blade_upper["y"], suction["nu"],
+                                              length_scale, float(boundary_layer["viscosity"]), factor)
+        blade_lower, blade_upper = (_offset_into_blade(blade_lower, blade_upper, lower_delta),
+                                    _offset_into_blade(blade_upper, blade_lower, upper_delta))
+        displacement = {"lower_max_m": float(lower_delta.max() * length_scale),
+                        "upper_max_m": float(upper_delta.max() * length_scale),
+                        "lower_m": (lower_delta * length_scale).tolist(), "upper_m": (upper_delta * length_scale).tolist()}
 
     # Solid single-blade cross-section, LE/TE closed by circular-arc
     # fillets: lower wall (pressure) -> TE arc -> TE straight stub ->
@@ -673,6 +795,8 @@ def design_rotor_vortex_blade(
     blade_x, blade_y, le_te_diag = _close_blade_le_te(
         blade_lower, blade_upper, pitch * scale, beta_inlet_rad, beta_outlet_rad,
         le_te_ratio=le_te_ratio, num_points=num_points, le_wedge_half_angle=le_wedge_half_angle,
+        le_round_tip=le_round_tip, le_ellipse_ratio=le_ellipse_ratio, te_ellipse_ratio=te_ellipse_ratio,
+        translate=translate,
     )
 
     spacing = pitch * scale + le_te_diag["translate"]
@@ -687,6 +811,7 @@ def design_rotor_vortex_blade(
             "le_radius": le_te_diag["le_radius"],
             "te_radius": le_te_diag["te_radius"],
             "translate": le_te_diag["translate"],
+            "le_breaks": le_te_diag["le_breaks"],
         },
         "fluid_name": fluid_name,
         "M_inlet": float(M_inlet), "M_outlet": float(M_outlet),
@@ -703,4 +828,5 @@ def design_rotor_vortex_blade(
         "units": "m" if r_star is not None else "r*",
         "method": "goldman_1968_tn_d4421",
         "num_points": int(num_points),
+        "boundary_layer": displacement,
     }

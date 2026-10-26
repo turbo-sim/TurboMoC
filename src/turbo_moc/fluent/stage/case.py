@@ -126,6 +126,13 @@ def configure_boundaries(settings, zones, state, point, options):
     shroud.relative = False
     shroud.rotating = False
     shroud.speed.value = 0.0
+    if options.get("slip_endwalls", False):
+        settings.mesh.modify_zones.zone_type(
+            zone_names=[zones[f"{row}_{side}"] for row in (STATOR, ROTOR) for side in ("hub", "shroud")],
+            new_type="symmetry")
+    if options.get("slip_blades", False):  # Zero shear but still walls, so the blade torque is reported
+        for row in (STATOR, ROTOR):
+            bc.wall[zones[f"{row}_blade"]].momentum.shear_condition = "Specified Shear"
 
 
 def configure_stage(solver, mesh_file, state, expressions, point, options):

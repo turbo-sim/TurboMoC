@@ -93,6 +93,7 @@ def mesh_table(results):
         cells, quality = summary["cells"], summary["quality"]
         rows.append([row.split("_")[0].capitalize(), f"{cells.get('hexahedra', 0):,}", f"{cells.get('prisms', 0):,}",
                      number(quality["min_determinant_jacobian"], ".2e"), number(quality["min_sicn"], ".3f"),
+                     "– (inviscid)" if results.y_plus[row] is None else
                      f"{np.mean(results.y_plus[row]):.0f} / {np.max(results.y_plus[row]):.0f}"])
     return rows
 

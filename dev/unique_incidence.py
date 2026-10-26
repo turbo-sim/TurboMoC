@@ -4,13 +4,13 @@ import CoolProp
 import jaxprop as jxp
 
 
-fluid_name = "R245fa"
+fluid_name = "cyclopentane"
 CoolProp.CoolProp.set_config_bool(CoolProp.CoolProp.DONT_CHECK_PROPERTY_LIMITS, True)
 T_MIN = 175
 
 r = 0.5  # leading edge radius
-s = r / 0.05  # pitch
-beta_s = np.pi / 3  # stagger angle
+s = 20  # pitch
+beta_s = np.deg2rad(60.75)  # stagger angle
 x_O_adj = s * np.sin(beta_s)
 y_O_adj = s * np.cos(beta_s)
 
@@ -52,6 +52,14 @@ def set_inlet(p_r, T_r):
     fluid = jxp.Fluid(fluid_name)
     critical = fluid.critical_point
     state_0 = fluid.get_state(jxp.PT_INPUTS, p_r * critical.p, T_r * critical.T)
+    h_0, s_0 = state_0.h, state_0.s
+    a_star, sonic_0 = sonic_state(s_0)
+    rho_star = sonic_0.rho
+
+def set_inlet_two_phase(p_0, Q_0):
+    global fluid, state_0, h_0, s_0, a_star, rho_star
+    fluid = jxp.Fluid(fluid_name)
+    state_0 = fluid.get_state(jxp.PQ_INPUTS, p_0, Q_0)
     h_0, s_0 = state_0.h, state_0.s
     a_star, sonic_0 = sonic_state(s_0)
     rho_star = sonic_0.rho
@@ -164,19 +172,18 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
     jxp.set_plot_options(grid=False)
-    M_1_range = np.linspace(1.2, 2.0, 17)
-    cases = {"Dense gas": (0.1, 0.95, "k-"), "Dilute gas": (0.01, 1.18, "k:")}
+    M_1_range = np.linspace(1.1, 3.0, 20)
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    for label, (p_r, T_r, style) in cases.items():
-        set_inlet(p_r, T_r)
-        results = np.array([unique_incidence(M) for M in M_1_range])
-        axes[0].plot(M_1_range, np.degrees(results[:, 0]), style, label=label)
-        axes[1].plot(M_1_range, np.degrees(results[:, 1]), style, label=label)
+
+    set_inlet_two_phase(802200, 0.0671)
+    results = np.array([unique_incidence(M) for M in M_1_range])
+    axes[0].plot(M_1_range, np.degrees(results[:, 0]))
     axes[0].set_ylabel(r"$\phi_1$ [deg]")
-    axes[1].set_ylabel(r"$\beta_{i,1}$ [deg]")
+
     for ax in axes:
         ax.set_xlabel(r"$M_1$ [-]")
-        ax.legend()
+        # ax.legend()
+    
     plt.tight_layout()
     plt.show()

@@ -100,9 +100,9 @@ def rotor_design_result(output_dir):
     return read_json(results[-1]) if results else None
 
 
-def compute(output_dir):
+def compute(output_dir, report_dir=None):
     """Load the extracted data and compute stations, stage performance and the design comparison."""
-    data_dir = output_dir / "report" / "data"
+    data_dir = (report_dir or output_dir / "report") / "data"
     setup = read_json(output_dir / "fluent" / "setup_summary.json")
     point = read_json(output_dir / "operating_point.json")
     reports = read_json(data_dir / "fluent_reports.json")
@@ -153,6 +153,10 @@ def compute(output_dir):
         ("Power", "kW", power / 1e3, design_stage.get("Power, annulus estimate [kW]"), "relative", ".2f"),
         ("Specific work (torque)", "kJ/kg", work / 1e3, design_stage.get("Specific work [kJ/kg]"), "relative", ".3f"),
         ("Specific work (Euler)", "kJ/kg", euler / 1e3, design_stage.get("Specific work [kJ/kg]"), "relative", ".3f"),
+        # Rotor loss from energy and torque: the moving-frame solution does not conserve angular momentum
+        # (swirl drifts in the blade-free outlet duct), so Delta(r c_t) is not used for losses.
+        ("Rotor dissipation, ΔH0 − torque work", "kJ/kg", (rotor_in["H0"] - outlet["H0"] - work) / 1e3, None, None,
+         ".3f"),
         ("Isentropic drop, total-to-static", "kJ/kg", drop_ts / 1e3,
          design_stage.get("Isentropic drop, total-to-static [kJ/kg]"), "relative", ".3f"),
         ("Efficiency, total-to-static", "–", work / drop_ts, design_stage.get("Efficiency, total-to-static [-]"),
@@ -186,7 +190,7 @@ def compute(output_dir):
         stations=stations, exit_=exit_, rotor_in=rotor_in, outlet=outlet, flows=flows,
         torque_passage=torque_passage, power=power, performance=performance, station_rows=station_rows,
         design_stations=design_stations, residuals=residuals, gap=gap,
-        y_plus={row: arrays[f"{boundary(setup, row, 'blade')}|face|y-plus"] for row in ROWS},
+        y_plus={row: arrays.get(f"{boundary(setup, row, 'blade')}|face|y-plus") for row in ROWS},
         mesh_report=read_json(output_dir / "mesh" / "mesh_report.json"),
         midspan={row: polydata(arrays, midspan_surface(row)) for row in ROWS},
         rotor_design=rotor_design_result(output_dir))

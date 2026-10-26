@@ -65,8 +65,14 @@ def kantrowitz_ratio(isentrope, mach):
     def momentum(v2):
         return p1 + rho1 * v1 ** 2 - float(downstream(v2).p) - rho1 * v1 * v2
 
-    grid = np.linspace(0.05 * v1, 0.9999 * v1, 60)
-    values = [momentum(v) for v in grid]
+    def safe_momentum(v2):
+        try:
+            return momentum(v2)
+        except RuntimeError:  # Post-shock density beyond the liquid limit (dense two-phase fluids)
+            return np.nan
+
+    grid = np.linspace(0.05 * v1, 0.998 * v1, 120)
+    values = [safe_momentum(v) for v in grid]
     k = next(i for i in range(len(grid) - 1) if values[i] * values[i + 1] < 0)
     v2 = brentq(momentum, grid[k], grid[k + 1])
     behind = Isentrope(fluid, isentrope.h0, float(downstream(v2).s), minimum_temperature(fluid.name))
@@ -101,3 +107,53 @@ def starting_curves(rotor, machs):
     isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
                                    rotor.get("Q0_rel", float("nan")))
     return np.array([[isentropic_ratio(isentrope, m), kantrowitz_ratio(isentrope, m)] for m in machs])
+
+
+def prandtl_meyer(isentrope, v, count=400):
+    """Real-gas Prandtl-Meyer angle [rad]: the integral of sqrt(M^2 - 1) dV / V from the sonic speed."""
+    speeds = np.linspace(isentrope.v_star, v, count)
+    machs = np.array([u / float(isentrope.state(u).a) for u in speeds])
+    return float(np.trapezoid(np.sqrt(np.maximum(machs ** 2 - 1, 0.0)) / speeds, speeds))
+
+
+def unique_incidence(rotor, mach):
+    """Inflow angle [deg] a started rotor imposes on a supersonic inflow with subsonic axial component.
+
+    Simplified form of Bufi (thesis, Sec. 3.3.4, after Starken et al. 1984): the limiting characteristic meets
+    the adjacent suction surface on its straight entrance (phi_E = 0), the flow there runs along the inlet metal
+    angle beta_s, and the bow-shock loss is neglected. Continuity across the passage entrance (Eq. 3.31)
+
+        rho_1 W_1 cos(beta_1) s = rho_E W_E (s cos(beta_s) - r)
+
+    and the simple-wave relation along the right-running characteristic (Eq. 3.34)
+
+        beta_1 - beta_s = nu(M_E) - nu(M_1)
+
+    fix beta_1 and M_E; s is the blade spacing and r the leading-edge radius.
+    """
+    isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
+                                   rotor.get("Q0_rel", float("nan")))
+    spacing, radius = float(rotor["pitch"]), float(rotor["blade"]["le_radius"])
+    metal = np.radians(float(rotor["beta_inlet"]))
+    v1 = isentrope.velocity(mach)
+    nu1, flux1 = prandtl_meyer(isentrope, v1), isentrope.flux(v1)
+    width = spacing * np.cos(metal) - radius
+
+    def angle(v):
+        return metal + prandtl_meyer(isentrope, v) - nu1
+
+    def residual(v):
+        return flux1 * np.cos(angle(v)) * spacing - isentrope.flux(v) * width
+
+    try:
+        v_top = isentrope.velocity(min(2.5 * mach, 4.0))
+    except ValueError:  # Mach not reachable before the triple point (dense fluids): search the whole isentrope
+        v_top = isentrope.v_max
+    grid = np.linspace(1.0001 * isentrope.v_star, v_top, 40)
+    values = [residual(v) for v in grid]
+    roots = [brentq(residual, grid[i], grid[i + 1]) for i in range(len(grid) - 1) if values[i] * values[i + 1] < 0]
+    if mach * np.cos(metal) >= 1.0 or not roots:
+        raise ValueError("No unique incidence: the axial inflow is supersonic or the passage cannot pass the flow.")
+    vE = min(roots, key=lambda v: abs(angle(v) - metal))
+    return {"beta_inlet": float(np.degrees(angle(vE))), "incidence": float(np.degrees(angle(vE) - metal)),
+            "M_E": vE / float(isentrope.state(vE).a), "width_ratio": float(width / (spacing * np.cos(metal)))}

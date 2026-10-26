@@ -53,14 +53,19 @@ def _boundary_splines(result, points):
     directions = ((incoming, outgoing), (outgoing, -outgoing),
                   (-outgoing, -outgoing), (-outgoing, -incoming),
                   (-incoming, -incoming), (-incoming, incoming))
-    sharp = result["blade"].get("le_radius", 1.0) == 0.0
+    breaks = result["blade"].get("le_breaks") or []
+    if not breaks and result["blade"].get("le_radius", 1.0) == 0.0:
+        breaks = [None]
     splines, start = [], 0
     for index, (count, tangents) in enumerate(zip(lengths, directions)):
         segment = points[start:start + count]
-        if sharp and index == len(lengths) - 1:
-            tip = int(np.argmin(segment @ incoming))
-            splines.extend(make_interp_spline(np.linspace(0, 1, len(part)), part, k=1)
-                           for part in (segment[:tip + 1], segment[tip:]))
+        if breaks and index == len(lengths) - 1:
+            cuts = [int(np.argmin(segment @ incoming))] if breaks == [None] else breaks
+            bounds = [0, *cuts, len(segment) - 1]
+            for part_index, (low, high) in enumerate(zip(bounds[:-1], bounds[1:])):
+                part = segment[low:high + 1]
+                degree = 3 if len(cuts) == 2 and part_index == 1 else 1
+                splines.append(make_interp_spline(np.linspace(0, 1, len(part)), part, k=degree))
         else:
             spline = _spline(segment, tangents)
             if spline is not None:

@@ -47,13 +47,15 @@ def build_mesh(output_dir, design, rotor_only=False):
                 "swirl_direction": inflow_direction(rotor), "rotor_passages": 1,
                 "stator_pitch_m": float(rotor["pitch"][0]) / 1e3, "rotor_pitch_m": float(rotor["pitch"][0]) / 1e3,
                 "cells": {"rotor_1": len(rotor["cells"])}}
-    stator, rotor = planar_mesh.assemble(sections["stator_1"], sections["rotor_1"], passages)
+    stator, rotor = planar_mesh.assemble(sections["stator_1"], sections["rotor_1"], passages,
+                                         match=not design.get("mixing", False))
     zones = {"rotor_1": sections["rotor_1"]} if rotor_only else {"stator_1": stator, "rotor_1": rotor}
     name = "rotor_2d.cgns" if rotor_only else "stage_2d.cgns"
     return {"mesh_file": planar_mesh.write_cgns(output_dir / "mesh" / name, zones),
             "swirl_direction": swirl_direction(stator), "rotor_passages": 1 if rotor_only else passages,
             "stator_pitch_m": float(stator["pitch"][0]) / 1e3,
             "rotor_pitch_m": float(sections["rotor_1"]["pitch"][0]) / 1e3,
+            "rotor_sector_m": float(rotor["pitch"][0]) / 1e3,
             "cells": {row: len(section["cells"]) for row, section in zones.items()}}
 
 
@@ -75,12 +77,16 @@ def flow_model(settings, options):
 
 
 def translational_periodicity(settings, zones, rows, pitch_m):
-    """Each row's sides paired one sector apart along +x (2D needs the explicit translation vector)."""
+    """Each row's sides paired one sector apart along +x (2D needs the explicit translation vector).
+
+    ``pitch_m`` is one sector for all rows, or a ``{row: sector}`` mapping when the rows differ (mixing plane).
+    """
     for row in rows:
+        sector = pitch_m[row] if isinstance(pitch_m, dict) else pitch_m
         settings.mesh.modify_zones.make_periodic(zone_name=zones[f"{row}_periodic_left"],
                                                  shadow_zone_name=zones[f"{row}_periodic_right"],
                                                  rotate_periodic=False, create=True, auto_translation=False,
-                                                 direction=[pitch_m, 0.0])
+                                                 direction=[sector, 0.0])
     periodic = settings.setup.boundary_conditions.periodic
     for name in periodic.get_object_names():
         periodic[name].periodic.rotationally_periodic = "Translational"
@@ -101,7 +107,11 @@ def outlet_boundary(settings, zones, pressure, options):
 
 
 def configure_stage(solver, mesh, state, expressions, cycle, options):
-    """Stator at rest, rotor zone translating at U along the stator swirl, a non-conformal interface between them."""
+    """Stator at rest, rotor zone translating at U along the stator swirl, a non-conformal interface between them.
+
+    With ``interface: mixing_plane`` the stator outlet and rotor inlet become a pressure outlet and a pressure inlet,
+    to be coupled by a mixing plane (Fluent: Setup > Turbomachinery > Mixing Planes); their values are only a start.
+    """
     settings = solver.settings
     rows = (STATOR, ROTOR)
     zones = import_mesh(settings, mesh["mesh_file"], rows)
@@ -109,16 +119,31 @@ def configure_stage(solver, mesh, state, expressions, cycle, options):
     modify = settings.mesh.modify_zones
     modify.zone_type(zone_names=[zones[f"{STATOR}_inlet"]], new_type="pressure-inlet")
     modify.zone_type(zone_names=[zones[f"{ROTOR}_outlet"]], new_type="pressure-outlet")
-    modify.zone_type(zone_names=[zones[f"{STATOR}_outlet"], zones[f"{ROTOR}_inlet"]], new_type="interface")
-    translational_periodicity(settings, zones, rows, mesh["stator_pitch_m"])
+    mixing = cycle.get("interface") == "mixing_plane"
+    if mixing:
+        modify.zone_type(zone_names=[zones[f"{STATOR}_outlet"]], new_type="pressure-outlet")
+        modify.zone_type(zone_names=[zones[f"{ROTOR}_inlet"]], new_type="pressure-inlet")
+    else:
+        modify.zone_type(zone_names=[zones[f"{STATOR}_outlet"], zones[f"{ROTOR}_inlet"]], new_type="interface")
+    translational_periodicity(settings, zones, rows, {STATOR: mesh["stator_pitch_m"], ROTOR: mesh["rotor_sector_m"]})
     options = flow_model(settings, options)
     case.configure_numerics(settings, options)
     speed = mesh["swirl_direction"] * cycle["blade_speed"]
     frame = settings.setup.cell_zone_conditions.fluid[names[ROTOR]].reference_frame
     frame.frame_motion = True
     frame.reference_frame_velocity = [speed, 0.0]
-    settings.setup.mesh_interfaces.create_manually(name="stator_rotor", zone_list_1=[zones[f"{STATOR}_outlet"]],
-                                                   zone_list_2=[zones[f"{ROTOR}_inlet"]])
+    if mixing:
+        upstream = settings.setup.boundary_conditions.pressure_outlet[zones[f"{STATOR}_outlet"]]
+        upstream.momentum.gauge_pressure.value = cycle["outlet_pressure"]
+        downstream = settings.setup.boundary_conditions.pressure_inlet[zones[f"{ROTOR}_inlet"]]
+        downstream.momentum.gauge_total_pressure.value = state["P0"]
+        downstream.momentum.supersonic_or_initial_gauge_pressure.value = cycle["outlet_pressure"]
+        if options.get("viscous", True):
+            turbulence(upstream, options, backflow=True)
+            turbulence(downstream, options)
+    else:
+        settings.setup.mesh_interfaces.create_manually(name="stator_rotor", zone_list_1=[zones[f"{STATOR}_outlet"]],
+                                                       zone_list_2=[zones[f"{ROTOR}_inlet"]])
     inlet = settings.setup.boundary_conditions.pressure_inlet[zones[f"{STATOR}_inlet"]]
     inlet.momentum.gauge_total_pressure.value = state["P0"]
     inlet.momentum.supersonic_or_initial_gauge_pressure.value = state["P0"]
@@ -138,11 +163,29 @@ def mass_flow_inflow(inflow, mesh):
             "mass_flow": inflow["rho"] * inflow["W"] * np.cos(beta) * mesh["rotor_pitch_m"]}
 
 
-def configure_rotor(solver, mesh, state, expressions, cycle, options):
-    """The rotor alone, at rest, fed through a mass-flow inlet with the stator's design flow and direction.
+def total_pressure_expression(closure, total, static, degree=8):
+    """Inlet total pressure that is isentropic on the barotropic model at any inlet state.
 
-    A choked stator imposes the mass flow; a pressure inlet would instead lose total pressure as soon as
-    the inflow turns subsonic (Fluent relates p0 and p incompressibly for a pressure-defined density).
+    Fluent subtracts rho W^2 / 2 from the total pressure of a pressure-defined density; giving it
+    p + rho(p) [H(P0_rel) - H(p)] makes that equal to the barotropic head drop, so W^2 / 2 = H(P0_rel) - H(p)
+    whether the inflow is supersonic or subsonic. H(p) is fitted from 0.3 times the design static pressure
+    to just below P0_rel.
+    """
+    pressure = np.linspace(0.3 * static, 0.98 * total, 400)
+    coefficients = np.polyfit(pressure / total - 1, float(closure.head(total)) - closure.head(pressure), degree)
+    ratio = f"(AbsolutePressure / {total:.10e} [Pa] - 1)"
+    horner = f"{coefficients[0]:.12e}"
+    for value in coefficients[1:]:
+        horner = f"({horner}) * {ratio} {'+' if value >= 0 else '-'} {abs(value):.12e}"
+    return f"AbsolutePressure + barotropic_density * ({horner}) * 1 [m^2/s^2]"
+
+
+def configure_rotor(solver, mesh, state, expressions, cycle, options):
+    """The rotor alone, at rest, fed with the design relative inflow.
+
+    ``inlet: mass_flow`` (default) imposes the flow of a choked stator, but lets the total pressure float, which
+    favours the unstarted branch. ``inlet: pressure`` imposes the relative total pressure and direction like an
+    upstream reservoir, with ``total_pressure_expression`` making Fluent's incompressible p0-p relation isentropic.
     """
     settings = solver.settings
     rows = (ROTOR,)
@@ -155,31 +198,78 @@ def configure_rotor(solver, mesh, state, expressions, cycle, options):
     options = flow_model(settings, options)
     case.configure_numerics(settings, options)
     inflow = mass_flow_inflow(cycle["relative_inflow"], mesh)
-    inlet = settings.setup.boundary_conditions.mass_flow_inlet[zones[f"{ROTOR}_inlet"]]
-    inlet.momentum.mass_flow_specification = "Mass Flow Rate"
-    inlet.momentum.mass_flow_rate.value = inflow["mass_flow"]
-    inlet.momentum.supersonic_gauge_pressure.value = inflow["p"]
-    inlet.momentum.direction_specification = "Direction Vector"
+    if cycle["inlet"] == "pressure":
+        modify.zone_type(zone_names=[zones[f"{ROTOR}_inlet"]], new_type="pressure-inlet")
+        inlet = settings.setup.boundary_conditions.pressure_inlet[zones[f"{ROTOR}_inlet"]]
+        from ..barotropic_model import BarotropicClosure
+        closure = BarotropicClosure.from_file(cycle["barotropy_dir"] / "fluent_expressions_safe.json",
+                                              float(state["p_min"]), float(state["P0"]))
+        settings.setup.named_expressions["inlet_total_pressure"] = {"definition": total_pressure_expression(
+            closure, cycle["relative_inflow"]["P0_rel"], inflow["p"])}
+        inlet.momentum.gauge_total_pressure.value = "inlet_total_pressure"
+        inlet.momentum.supersonic_or_initial_gauge_pressure.value = inflow["p"]
+        inlet.momentum.direction_specification_method = "Direction Vector"
+    elif cycle["inlet"] == "velocity":
+        modify.zone_type(zone_names=[zones[f"{ROTOR}_inlet"]], new_type="velocity-inlet")
+        inlet = settings.setup.boundary_conditions.velocity_inlet[zones[f"{ROTOR}_inlet"]]
+        momentum = inlet.momentum
+        momentum.velocity_specification_method = "Magnitude and Direction"
+        children = set(momentum.get_active_child_names())
+        print(f"    velocity inlet settings: {sorted(children)}", flush=True)
+        (momentum.velocity_magnitude if "velocity_magnitude" in children else momentum.velocity).value = inflow["W"]
+        for name in ("initial_gauge_pressure", "supersonic_or_initial_gauge_pressure"):
+            if name in children:
+                getattr(momentum, name).value = inflow["p"]
+    else:
+        inlet = settings.setup.boundary_conditions.mass_flow_inlet[zones[f"{ROTOR}_inlet"]]
+        inlet.momentum.mass_flow_specification = "Mass Flow Rate"
+        inlet.momentum.mass_flow_rate.value = inflow["mass_flow"]
+        inlet.momentum.supersonic_gauge_pressure.value = inflow["p"]
+        inlet.momentum.direction_specification = "Direction Vector"
     for component, value in zip(inlet.momentum.flow_direction, inflow["direction"]):
         component.value = value
     if options.get("viscous", True):
         turbulence(inlet, options)
     outlet_boundary(settings, zones, cycle["outlet_pressure"], options)
     settings.mesh.check()
-    return {"cell_zones": names, "boundaries": zones, "inflow": inflow}
+    kind = {"pressure": "pressure_inlet", "velocity": "velocity_inlet"}.get(cycle["inlet"], "mass_flow_inlet")
+    return {"cell_zones": names, "boundaries": zones, "inflow": inflow, "inlet": [kind, zones[f"{ROTOR}_inlet"]]}
 
 
-def solve_rotor(solver, inflow, options):
-    """Start from the uniform design inflow, then the staged strategy."""
+def inlet_direction(inflow, beta):
+    swirl = np.sign(inflow["direction"][0]) or 1.0
+    return [swirl * np.sin(np.radians(beta)), -np.cos(np.radians(beta))]
+
+
+def solve_rotor(solver, configured, options):
+    """Start from a uniform inflow, then the staged strategy.
+
+    A stage ``beta`` [deg] turns the inlet flow direction, so a passage started with a supersonic axial inflow
+    can be carried to the subsonic-axial unique incidence. A stage ``outlet_pressure`` [Pa] resets the back
+    pressure, so a passage started against a low back pressure can be raised to the design one.
+    """
     from ..common import set_order
     settings = solver.settings
+    inflow = configured["inflow"]
+    kind, name = configured["inlet"]
+    inlet = getattr(settings.setup.boundary_conditions, kind)[name]
+    first = next((stage["beta"] for stage in options["solution_strategy"] if "beta" in stage), None)
+    direction = inflow["direction"] if first is None else inlet_direction(inflow, first)
     initialization = settings.solution.initialization
     initialization.initialization_type = "standard"
     initialization.defaults["pressure"] = inflow["p"]
-    for component, value in zip(VELOCITIES, inflow["direction"]):
+    for component, value in zip(VELOCITIES, direction):
         initialization.defaults[component] = value * inflow["W"]
     initialization.standard_initialize()
     for stage in options["solution_strategy"]:
+        if "beta" in stage:
+            for component, value in zip(inlet.momentum.flow_direction, inlet_direction(inflow, stage["beta"])):
+                component.value = value
+            print(f"    inlet angle {stage['beta']:.2f} deg", flush=True)
+        if "outlet_pressure" in stage:
+            outlet = settings.setup.boundary_conditions.pressure_outlet[configured["boundaries"][f"{ROTOR}_outlet"]]
+            outlet.momentum.gauge_pressure.value = stage["outlet_pressure"]
+            print(f"    outlet pressure {stage['outlet_pressure']:.0f} Pa", flush=True)
         set_order(settings, first_order=stage["order"] == "first")
         settings.solution.run_calculation.pseudo_time_settings.time_step_method.time_step_size_scale_factor = (
             stage["time_scale_factor"])
@@ -239,9 +329,15 @@ def summary(design, mesh, cycle):
     rotor = design["rotor"]
     return {"stator_exit": design["stator_exit"], "relative_inflow": design["relative_inflow"],
             "rotor": {"chord_mm": rotor["chord"], "passages": rotor["passages"], "pitch_chord": rotor["pitch_chord"],
-                      "beta_inlet": rotor["blade"]["beta_inlet"], "beta_outlet": rotor["blade"]["beta_outlet"]},
+                      "beta_inlet": rotor["blade"]["beta_inlet"], "beta_outlet": rotor["blade"]["beta_outlet"],
+                      **{key: rotor["blade"][key] for key in ("M_inlet", "M_outlet", "M_lower", "M_upper",
+                                                               "nu_inlet_deg", "nu_outlet_deg", "nu_lower_deg",
+                                                               "nu_upper_deg", "num_points")},
+                      "surfaces": {side: {"x": rotor["blade"][side]["x"], "y": rotor["blade"][side]["y"]}
+                                   for side in ("pressure", "suction")},
+                      "blade_x_range": [float(min(rotor["blade"]["blade"]["x"])), float(max(rotor["blade"]["blade"]["x"]))]},
             "stator": {"pitch_mm": float(design["stator"]["design"].blade["pitch"])} if "design" in design["stator"] else None,
-            "cycle": {key: value for key, value in cycle.items() if key != "relative_inflow"},
+            "cycle": {key: value for key, value in cycle.items() if key not in ("relative_inflow", "barotropy_dir")},
             "mesh": {key: str(value) if isinstance(value, Path) else value for key, value in mesh.items()}}
 
 
@@ -269,7 +365,7 @@ def extract_case(config_file, name):
                 print(f"    {zone}: {len(points)} vertices, x extent {extent:.4f} mm", flush=True)
         print(f"    Extracted: {extract(solver, configured, fluent_dir / f'{name}_fields.npz')}", flush=True)
     finally:
-        solver.exit()
+        close_fluent(solver, fluent_dir)
 
 
 def main(config_file, mode="stage"):
@@ -287,22 +383,31 @@ def main(config_file, mode="stage"):
     prescribed = rotor_only and "relative_inflow" in workflow
     design = (planar_design.design_rotor_only if prescribed else planar_design.design_stage)(source, workflow)
     mesh = build_mesh(output_dir, design, rotor_only)
-    cycle = {"blade_speed": float(workflow["blade_speed"]), "outlet_pressure": float(workflow["outlet_pressure"]),
-             "relative_inflow": design["relative_inflow"]}
+    cycle = {"blade_speed": float(workflow.get("blade_speed", 0.0)),
+             "outlet_pressure": float(design.get("outlet_pressure") or workflow["outlet_pressure"]),
+             "relative_inflow": design["relative_inflow"], "inlet": workflow.get("inlet", "mass_flow"), "interface": workflow.get("interface", "frozen_rotor"),
+             "barotropy_dir": output_dir / "barotropy"}
     inflow = design["relative_inflow"]
     print(f"    rotor inflow M_rel {inflow['M']:.3f} at {inflow['beta']:.2f} deg (axial Mach {inflow['axial_mach']:.3f}); "
           f"rotor chord {design['rotor']['chord']:.2f} mm, {design['rotor']['passages']} passages per stator pitch; "
           f"cells {mesh['cells']}", flush=True)
+    start = design["rotor"]["starting"]
+    print(f"    starting check: throat/inlet {start['throat_ratio']:.3f}, Kantrowitz {start['kantrowitz_ratio']:.3f}, "
+          f"margin {start['margin']:.3f}", flush=True)
 
     from ..barotropic_model import generate_barotropic_model
     from ..common import load_dependencies
     barotropy, pyfluent = load_dependencies(False)
     print("2/5 Barotropic model along the stator inlet isentrope", flush=True)
     parameters = dict(design["stator"]["config"]["method_of_characteristics"])
-    if "backend" in workflow["barotropic"]:
-        parameters["backend"] = workflow["barotropic"]["backend"]
+    baro = dict(workflow["barotropic"])
+    if "backend" in baro:
+        parameters["backend"] = baro["backend"]
+    if baro.get("pressure_ratio") == "auto":
+        baro["pressure_ratio"] = float(design["stator"]["nozzle"]["meta"]["P0"]) / (cycle["outlet_pressure"] / 100)
+        print(f"    fit from P0 down to p_out / 100: pressure ratio {baro['pressure_ratio']:.0f}", flush=True)
     expressions, state = generate_barotropic_model(barotropy, {"nozzle": parameters}, design["stator"]["nozzle"],
-                                                   workflow["barotropic"], output_dir / "barotropy")
+                                                   baro, output_dir / "barotropy")
 
     options = workflow["fluent"]
     print(f"3/5 Launch Fluent 2D ({options['ui_mode']})", flush=True)
@@ -322,16 +427,32 @@ def main(config_file, mode="stage"):
         indent=2, default=float), encoding="utf-8")
     print(f"5/5 Case saved: {case_file}", flush=True)
     if options.get("solve", False):
-        if rotor_only:
-            solve_rotor(solver, configured["inflow"], options)
-        else:
-            solve(solver, options, VELOCITIES)
-        solver.settings.file.write_case_data(file_name=str(case_file))
-        extract(solver, configured, fluent_dir / f"{name}_fields.npz")
-        print(f"    Solved, saved and extracted: {case_file}", flush=True)
-        if options["ui_mode"] == "no_gui":
-            solver.exit()
+        try:
+            if rotor_only:
+                solve_rotor(solver, configured, options)
+            else:
+                solve(solver, options, VELOCITIES)
+            solver.settings.file.write_case_data(file_name=str(case_file))
+            extract(solver, configured, fluent_dir / f"{name}_fields.npz")
+            print(f"    Solved, saved and extracted: {case_file}", flush=True)
+        finally:
+            if options["ui_mode"] == "no_gui":
+                close_fluent(solver, fluent_dir)
+    elif options["ui_mode"] == "no_gui":
+        close_fluent(solver, fluent_dir)
     return case_file
+
+
+def close_fluent(solver, fluent_dir):
+    """Exit Fluent, then run its own cleanup scripts so no MPI process keeps the licence or the files."""
+    import subprocess
+    try:
+        solver.exit()
+    except Exception:
+        pass
+    for script in fluent_dir.glob("cleanup-fluent-*.bat"):
+        subprocess.run(["cmd", "/c", str(script)], cwd=str(fluent_dir), capture_output=True)
+        script.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

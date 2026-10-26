@@ -17,6 +17,8 @@ def solve_nozzle(parameters, *, progress_callback=None):
     disk access or cache lookup.
     """
     logger.info("  Calculating a new MoC solution (solver output follows).")
+    # The boundary-layer correction acts on the finished wall (geometry.stator_boundary_layer), not the solver
+    parameters = {key: value for key, value in parameters.items() if key != "boundary_layer"}
     result = turbo_moc.design_nozzle(
         **outlet_parameters(solver_parameters(parameters)), progress_callback=progress_callback
     )

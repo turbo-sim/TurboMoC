@@ -13,14 +13,17 @@ import yaml
 from . import analysis, document, extraction, figures
 
 
-def main(config_file, plots_only=False):
+def main(config_file, plots_only=False, case_filename=None):
+    """Report one solved case; ``case_filename`` (e.g. a variant saved next to the main case) reports into
+    ``report_<its stem>`` instead of ``report``."""
     config_file = Path(config_file).resolve()
     workflow = yaml.safe_load(config_file.read_text(encoding="utf-8"))
     output_dir = (config_file.parent / workflow["output_dir"]).resolve()
-    report_dir = output_dir / "report"
+    case_name = case_filename or workflow["fluent"]["case_filename"]
+    report_dir = output_dir / ("report_" + case_name.replace(".cas.h5", "") if case_filename else "report")
     data_dir = report_dir / "data"
     if not plots_only:
-        case_file = output_dir / "fluent" / workflow["fluent"]["case_filename"]
+        case_file = output_dir / "fluent" / case_name
         if not case_file.with_name(case_file.name.replace(".cas.h5", ".dat.h5")).exists():
             raise FileNotFoundError(f"Solve and save the case first: no data file next to {case_file}")
         setup = analysis.read_json(output_dir / "fluent" / "setup_summary.json")
@@ -30,7 +33,7 @@ def main(config_file, plots_only=False):
         extraction.residual_table(output_dir / "fluent", data_dir)
     print("2/3 Figures and tables")
     options = workflow["report"]
-    results = analysis.compute(output_dir)
+    results = analysis.compute(output_dir, report_dir)
     results.starting = None
     if results.rotor_design is not None:
         from turbo_moc.core.rotor_starting import starting_check

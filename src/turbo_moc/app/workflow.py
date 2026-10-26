@@ -147,9 +147,13 @@ def load_nozzle(reference, config):
         raise ValueError(f"{action} for the current inputs first.")
     try:
         name = "rotor_result.json" if rotor else "moc_result.json"
-        return json.loads((directory(reference) / name).read_text(encoding="utf-8"))
+        result = json.loads((directory(reference) / name).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise ValueError(f"The selected design result is missing or unreadable. {action} again.") from exc
+    if rotor:
+        return result
+    from turbo_moc.geometry.stator_boundary_layer import displaced_nozzle
+    return displaced_nozzle(result, config)
 
 
 def get_stator_template(config, nozzle_reference, nozzle=None):

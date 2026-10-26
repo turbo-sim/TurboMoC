@@ -67,10 +67,13 @@ def edge_line(section, name):
     return points[:, 0].min(), points[:, 0].max(), float(np.median(points[:, 1]))
 
 
-def assemble(stator, rotor, rotor_copies):
-    """Rotor passages repeated to the stator pitch and moved so that their inlet lies on the stator outlet."""
+def assemble(stator, rotor, rotor_copies, match=True):
+    """Rotor passages repeated to the stator pitch and moved so that their inlet lies on the stator outlet.
+
+    With ``match=False`` (mixing plane) the rows keep their own pitches.
+    """
     rotor = replicate(rotor, rotor_copies)
-    if not np.isclose(rotor["pitch"][0], stator["pitch"][0], rtol=1e-6):
+    if match and not np.isclose(rotor["pitch"][0], stator["pitch"][0], rtol=1e-6):
         raise ValueError(f"Sector mismatch: {rotor_copies} rotor passages span {rotor['pitch'][0]:.6f} mm, "
                          f"one stator passage {stator['pitch'][0]:.6f} mm.")
     outlet_start, _, outlet_y = edge_line(stator, "outlet")
