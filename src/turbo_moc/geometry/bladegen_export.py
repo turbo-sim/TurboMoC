@@ -85,7 +85,7 @@ def export_bladegen(design, output_dir, *, row_id, role="stator", span_sections=
         "Number of Blades Per Set: 1",
         "Geometry Units: MM",
         "Blade 0 LE: EllipseEnd",
-        "Blade 0 TE: CutOffEnd",
+        "Blade 0 TE: EllipseEnd",  # Stator and rotor trailing edges are rounded (arc or ellipse), not cut off
         f"Hub Data File: {names['hub']}",
         f"Shroud Data File: {names['shroud']}",
         f"Profile Data File: {names['profile']}",

@@ -498,13 +498,13 @@ def sidebar(project):
         identifier, geometry = row["id"], row["geometry"]
         if row["role"] == "stator":
             fields = [group(title, moc_controls(geometry[name], identifier, ("p_back",))
-                if name == "method_of_characteristics" else meridional_controls(geometry[name], identifier)
-                if name == "meridional_channel" else controls(geometry[name], name, identifier)) for name, title in (
+                if name == "method_of_characteristics" else meridional_controls(geometry[name], identifier))
+                for name, title in (
                 ("method_of_characteristics", "Method of characteristics"),
                 ("meridional_channel", "Linear cascade definition" if family == "linear"
-                     else "Meridional channel definition"),
-                ("blade_geometry", "Blade geometry definition"))]
-            fields[2] = blade_geometry_group(geometry["blade_geometry"], identifier)
+                     else "Meridional channel definition"))]
+            # Offsets have integer keys once loaded from a file, so they never go through the generic controls
+            fields.append(blade_geometry_group(geometry["blade_geometry"], identifier))
             fields.insert(1, outlet_controls(geometry["method_of_characteristics"], identifier))
             fields.append(flow_domain_controls(project, row))
         else:

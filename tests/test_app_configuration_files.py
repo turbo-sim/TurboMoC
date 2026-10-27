@@ -109,3 +109,30 @@ def test_invalid_settings_cannot_be_saved(app):
     })
     assert set(result) == {"configuration-message"}
     assert "invalid settings" in result["configuration-message"]["children"]
+
+
+def test_load_yaml_with_control_point_offsets_rebuilds_settings_and_saves_them(app):
+    base = projects.default_project()
+    project = projects.default_project()
+    project["rows"][0]["geometry"]["blade_geometry"]["control_point_offsets"] = {"16": 0.035, "17": 0.065}
+    loaded = call(app, "..loaded-project.data", "configuration-upload.contents", {
+        ("configuration-upload", "contents"): upload(project),
+        ("configuration-upload", "filename"): "edited.yaml",
+        ("base-project", "data"): base,
+    })["loaded-project"]["data"]
+    changed = call(app, "..base-project.data", "loaded-project.data", {
+        ("loaded-project", "data"): loaded,
+        ("design-mode", "value"): "stator",
+        ("machine-family", "value"): "axial",
+        ("base-project", "data"): base,
+        ("selected-row", "value"): "stator_1",
+    })
+    assert "2 control points modified" in str(changed["settings"]["children"])
+    saved = call(app, "..loaded-project.data", "save-configuration.n_clicks", {
+        ("save-configuration", "n_clicks"): 1,
+        ("base-project", "data"): base,
+        ("config", "data"): {"project": changed["base-project"]["data"], "valid": True},
+    })
+    offsets = yaml.safe_load(saved["configuration-download"]["data"]["content"])["rows"][0]["geometry"][
+        "blade_geometry"]["control_point_offsets"]
+    assert {int(key): value for key, value in offsets.items()} == {16: 0.035, 17: 0.065}
