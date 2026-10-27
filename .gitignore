@@ -34,6 +34,14 @@ docs/_build/
 output/
 turbo_moc_output/
 
+# Droplet-impingement example: meshes and Fluent files are not shared
+examples/droplet_impingment/meshes/
+examples/droplet_impingment/**/*.def
+examples/droplet_impingment/**/*.gtm
+examples/droplet_impingment/**/*.cas.h5
+examples/droplet_impingment/**/*.dat.h5
+examples/droplet_impingment/**/*.trn
+
 # Confidential
 TurboExpo2027/
 examples/fluent_3D/

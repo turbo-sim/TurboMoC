@@ -1,0 +1,605 @@
+inputs:
+  loss_model: benner
+  fluid_name: Cyclopentane
+  turbine_type: axial
+  inlet_property_pair: PQ_INPUTS
+  inlet_property_1: 251300.00
+  inlet_property_2: 0.09155
+  exit_pressure: 94400.00
+  mass_flow_rate: 126.95
+  inlet_flow_angle: 0.00
+  blade_velocity_ratio: 0.5554763934762255
+  rotational_speed:
+    type: specific
+    value: 0.6136390136617249
+  stages:
+  - name: stage_1
+    work_fraction_split: 1.00
+    stator_exit_angle: 72.00
+    degree_reaction: 0.00
+    meridional_velocity_ratio_12: 0.16844080029635694
+    meridional_velocity_ratio_23: 1.00
+    meridional_velocity_ratio_34: 1.000000000003258
+    radius_ratio_01: 1.00
+    radius_ratio_12: 1.00
+    radius_ratio_23: 1.00
+    radius_ratio_34: 1.00
+    blade_geometry:
+      stator:
+        solidity_chord: 1.4221370303315783
+        aspect_ratio: 2.50
+        maximum_thickness_to_chord: 0.30
+        maximum_thickness_location: 0.30
+        leading_edge_radius_to_max_thickness: 0.50
+        trailing_edge_thickness_to_opening: 0.02
+        trailing_edge_wedge_angle: 5.00
+        leading_edge_wedge_angle: 5.00
+      rotor:
+        solidity_chord: 1.40
+        aspect_ratio: 2.50
+        maximum_thickness_to_chord: 0.30
+        maximum_thickness_location: 0.50
+        leading_edge_radius_to_max_thickness: 0.05
+        trailing_edge_thickness_to_opening: 0.02
+        trailing_edge_wedge_angle: 5.00
+        leading_edge_wedge_angle: 5.00
+  diffuser:
+    kinetic_energy_recovery_fraction: 0.60
+geometry:
+  schema_version: 1
+  stages:
+  - stator:
+      schema_version: 2
+      label: Stage 1 stator
+      source:
+        camberline:
+          turning_concentration: 1.20
+          turning_location: 0.52
+          inlet_metal_angle_deg: 0
+          outlet_metal_angle_deg: 72
+          interpolation: angle
+        thickness:
+          maximum_thickness_location: 0.30
+          leading_edge_fullness: 0
+          trailing_edge_fullness: 0
+          leading_edge_fraction: 0.10
+          trailing_edge_fraction: 0.025
+          leading_edge_rounding_exponent: 3
+          trailing_edge_rounding_exponent: 3
+          shape_exponent: 2
+          maximum_thickness_ratio: 0.30
+          trailing_edge_thickness_ratio: 0.005327591264721293
+          leading_edge_thickness_ratio: 0.20
+        leading_edge:
+          relief_strength: 0.15
+        trailing_edge:
+          relief_strength: 0
+        geometry:
+          type: axial
+          mean_radius: 0.4906928718332034
+          blade_height: 0.10904286040889713
+          meridional_chord: 0.04361714416355885
+          inlet_radius: 0.4906928718332034
+          outlet_radius: 0.4906928718332034
+        cascade:
+          blade_count: 82
+        correction:
+          preserve_physical_thickness: false
+        numerics:
+          number_of_points: 601
+      overrides:
+        cascade.blade_count: 82
+    rotor:
+      schema_version: 2
+      label: Stage 1 rotor
+      source:
+        camberline:
+          turning_concentration: 1.8753
+          turning_location: 0.50
+          inlet_metal_angle_deg: 52.00396384057661
+          outlet_metal_angle_deg: -52.003963840435446
+          interpolation: angle
+        thickness:
+          maximum_thickness_location: 0.50
+          leading_edge_fullness: -0.25
+          trailing_edge_fullness: -0.25
+          leading_edge_fraction: 0.005
+          trailing_edge_fraction: 0.005
+          leading_edge_rounding_exponent: 3
+          trailing_edge_rounding_exponent: 3
+          shape_exponent: 2
+          maximum_thickness_ratio: 0.30
+          trailing_edge_thickness_ratio: 0.008790846798152686
+          leading_edge_thickness_ratio: 0.018024500489842034
+        leading_edge:
+          relief_strength: 0
+        trailing_edge:
+          relief_strength: 0
+        geometry:
+          type: axial
+          mean_radius: 0.4906928718332034
+          blade_height: 0.1090428604088865
+          meridional_chord: 0.0436171441635546
+          inlet_radius: 0.4906928718332034
+          outlet_radius: 0.4906928718332034
+        cascade:
+          blade_count: 99
+        correction:
+          preserve_physical_thickness: false
+        numerics:
+          number_of_points: 601
+      overrides:
+        cascade.blade_count: 120
+        camberline.turning_concentration: 2
+        thickness.maximum_thickness_ratio: 0.28
+        thickness.shape_exponent: 2.20
+        thickness.trailing_edge_fullness: -0.35
+        thickness.leading_edge_fullness: -0.35
+        geometry.profile_type: impulse_constant_width
+        geometry.mean_radius: 0.4906928718332034
+        camberline.inlet_metal_angle_deg: 52.00396384057661
+        camberline.outlet_metal_angle_deg: -52.00396384057661
+        geometry.meridional_chord: 0.0498571557094309
+        thickness.leading_edge_thickness_ratio: 0.00912604971512169
+        thickness.trailing_edge_thickness_ratio: 0.007690603819227071
+blade_coordinate_exports:
+  stage_01/stator:
+    blade_count: 82
+    reference_radius_m: 0.4906928718332034
+    pitch_at_reference_radius_m: 0.037598954178538285
+    geometry_id: f6dccf3499edc410e1597bde3c8e34c058063d4b82638f835588178522444ed1
+    csv_filename: stage_01_stator_N82_f6dccf3499ed_blade_coordinates.csv
+    coordinate_system: unwrapped_axial_circumferential
+    units: m
+  stage_01/rotor:
+    blade_count: 120
+    reference_radius_m: 0.4906928718332034
+    pitch_at_reference_radius_m: 0.02569261868866783
+    geometry_id: 18aa9f0b58cc496c57acec17c046378232adf2d8eaf6d00225ae28bc5590663c
+    csv_filename: stage_01_rotor_N120_18aa9f0b58cc_blade_coordinates.csv
+    coordinate_system: unwrapped_axial_circumferential
+    units: m
+optimization:
+  design_variables:
+    blade_velocity_ratio:
+      lower_value: 0.25
+      upper_value: 1.00
+      initial_value: null
+    rotational_speed:
+      lower_value: 0.20
+      upper_value: 1.50
+      initial_value: null
+    stages.0.stator_exit_angle:
+      lower_value: 40.00
+      upper_value: 72.00
+      initial_value: null
+    stages.0.meridional_velocity_ratio_12:
+      lower_value: 0.10
+      upper_value: 1.50
+      initial_value: null
+    stages.0.meridional_velocity_ratio_23:
+      lower_value: 0.10
+      upper_value: 1.50
+      initial_value: null
+    stages.0.meridional_velocity_ratio_34:
+      lower_value: 0.10
+      upper_value: 1.50
+      initial_value: null
+    stages.0.blade_geometry.stator.aspect_ratio:
+      lower_value: 1.50
+      upper_value: 2.50
+      initial_value: null
+    stages.0.blade_geometry.stator.solidity_chord:
+      lower_value: 0.50
+      upper_value: 2.00
+      initial_value: null
+    stages.0.blade_geometry.rotor.aspect_ratio:
+      lower_value: 1.50
+      upper_value: 2.50
+      initial_value: null
+    stages.0.blade_geometry.rotor.solidity_chord:
+      lower_value: 1.40
+      upper_value: 1.50
+      initial_value: null
+  constraints:
+  - variable: $stages_performance.*.geometry_meanline.stator.hub_tip_ratio_in
+    type: '='
+    value: 0.80
+    normalize: 1.00
+  - variable: $stages_performance.*.geometry_meanline.stator.hub_tip_ratio_out
+    type: '='
+    value: 0.80
+    normalize: 1.00
+  - variable: $stages_performance.*.geometry_meanline.rotor.hub_tip_ratio_in
+    type: '='
+    value: 0.80
+    normalize: 1.00
+  - variable: $stages_performance.*.geometry_meanline.rotor.hub_tip_ratio_out
+    type: '='
+    value: 0.80
+    normalize: 1.00
+  objective_function:
+    variable: $overall_performance.efficiency_ts_with_recovery
+    type: maximize
+    normalize: 1.00
+  feasibility_tolerance: 1.00e-06
+  solver_options:
+    ftol: 1.00e-09
+    maxiter: 200
+    finite_diff_step: 1.00e-07
+    first_step_fraction: 0.25
+    max_step_fraction: 1.00
+    step_growth_factor: 1.50
+    domain_backtracking: true
+    backtrack_factor: 0.50
+    max_backtracks: 20
+    optimality_tol: 0.0001
+overall_performance:
+  efficiency_ts: 0.7901164376870382
+  efficiency_tt: 0.8989406872268838
+  efficiency_ts_with_recovery: 0.8520015646100291
+  mass_flow_rate: 126.95
+  power_isentropic: 828740.9301154092
+  power_actual: 654801.8314682298
+  shaft_torque: 5062.277963312052
+  rotational_speed: 1235.1943016058071
+  isentropic_enthalpy_drop: 6528.089248644421
+  spouting_velocity: 114.26363593588663
+  pressure_ratio_ts: 2.6620762711781087
+  volume_ratio_ts: 6.01219292736488
+  exit_blade_speed: 63.47075239514673
+  exit_rotor_diameter: 0.9813857436664069
+  maximum_mach_number: 1.4299913792343475
+  specific_speed: 0.6136390136617248
+  blade_velocity_ratio: 0.5554763934762255
+  flow_coefficient: null
+  work_coefficient: null
+  degree_reaction: null
+stages_performance:
+- stage_performance:
+    efficiency_ts: 0.7901164376887255
+    efficiency_tt: 0.898940687229068
+    loss_coefficient_stator: 0.034253176584470565
+    loss_coefficient_rotor: 0.21657718427096456
+    mass_flow_rate: 126.95
+    power_isentropic: 828740.9301136394
+    power_actual: 654801.8314682298
+    shaft_torque: 5062.277963312052
+    rotational_speed: 1235.1943016058071
+    isentropic_enthalpy_drop: 6528.08924863048
+    spouting_velocity: 114.26363593576463
+    pressure_ratio_ts: 2.6620762711821593
+    volume_ratio_ts: 6.012192927377528
+    exit_blade_speed: 63.47075239514673
+    exit_rotor_diameter: 0.9813857436664069
+    maximum_mach_number: 1.4299913792343475
+    specific_speed: 0.6136390136620289
+    blade_velocity_ratio: 0.5554763934768185
+    flow_coefficient: 0.5563098594348025
+    work_coefficient: 1.4242913919077609
+    degree_reaction: 0.00
+    stator_loss_coefficient: 0.034253176584470565
+    rotor_loss_coefficient: 0.21657718427096456
+  geometry_meanline:
+    stator:
+      blade_count_continuous: 81.32638728891446
+      spacing_method: solidity_chord
+      radius_in: 0.4906928718332034
+      radius_out: 0.4906928718332034
+      height: 0.10904286040889713
+      chord: 0.05391375517056694
+      chord_meridional: 0.04361714416355885
+      meridional_chord: 0.04361714416355885
+      aspect_ratio: 2.50
+      flaring_angle: -7.902686437036188e-12
+      maximum_thickness: 0.013085143249067654
+      maximum_thickness_location: 0.30
+      leading_edge_radius: 0.006542571624533827
+      leading_edge_diameter: 0.013085143249067654
+      leading_edge_angle: 0.00
+      leading_edge_wedge_angle: 5.00
+      trailing_edge_thickness_to_opening: 0.02
+      trailing_edge_wedge_angle: 5.00
+      stagger_angle: 36.00
+      hub_tip_ratio_in: 0.7999999999974834
+      hub_tip_ratio_out: 0.7999999999975032
+      tip_clearance: 0.00
+      A_out: 0.33619159598487275
+      metal_angle_in: 0.00
+      metal_angle_out: 72.00
+      flow_turning: 72.00
+      blade_count: 81.32638728891446
+      blade_count_integer: null
+      spacing: 0.037910379956843314
+      pitch: 0.037910379956843314
+      opening: 0.01171495166987597
+      solidity: 1.150533025868167
+      solidity_meridional: 1.150533025868167
+      solidity_chord: 1.4221370303315783
+      pitch_to_chord: 0.7031671200959059
+      trailing_edge_thickness: 0.0002342990333975194
+      A_throat: 0.10388891652536203
+    rotor:
+      blade_count_continuous: 98.96016858670997
+      spacing_method: solidity_chord
+      radius_in: 0.4906928718332034
+      radius_out: 0.4906928718332034
+      height: 0.1090428604088865
+      chord: 0.0436171441635546
+      chord_meridional: 0.0436171441635546
+      meridional_chord: 0.0436171441635546
+      aspect_ratio: 2.50
+      flaring_angle: -6.052345783382399e-12
+      maximum_thickness: 0.013085143249066379
+      maximum_thickness_location: 0.50
+      leading_edge_radius: 0.000654257162453319
+      leading_edge_diameter: 0.001308514324906638
+      leading_edge_angle: 52.00396384057661
+      leading_edge_wedge_angle: 5.00
+      trailing_edge_thickness_to_opening: 0.02
+      trailing_edge_wedge_angle: 5.00
+      stagger_angle: 7.05796889363569e-11
+      hub_tip_ratio_in: 0.7999999999975032
+      hub_tip_ratio_out: 0.7999999999975185
+      tip_clearance: 0.001090428604088865
+      A_out: 0.3361915959848444
+      metal_angle_in: 52.00396384057661
+      metal_angle_out: -52.003963840435446
+      flow_turning: 104.00792768101206
+      blade_count: 98.96016858670997
+      blade_count_integer: null
+      spacing: 0.031155102973967567
+      pitch: 0.031155102973967567
+      opening: 0.019179298156762597
+      solidity: 1.4000000000000001
+      solidity_meridional: 1.4000000000000001
+      solidity_chord: 1.4000000000000001
+      pitch_to_chord: 0.7142857142857142
+      trailing_edge_thickness: 0.0003835859631352519
+      A_throat: 0.2069618855883392
+  geometry_discrete: null
+  geometry:
+    stator:
+      blade_count_continuous: 81.32638728891446
+      spacing_method: solidity_chord
+      radius_in: 0.4906928718332034
+      radius_out: 0.4906928718332034
+      height: 0.10904286040889713
+      chord: 0.05391375517056694
+      chord_meridional: 0.04361714416355885
+      meridional_chord: 0.04361714416355885
+      aspect_ratio: 2.50
+      flaring_angle: -7.902686437036188e-12
+      maximum_thickness: 0.013085143249067654
+      maximum_thickness_location: 0.30
+      leading_edge_radius: 0.006542571624533827
+      leading_edge_diameter: 0.013085143249067654
+      leading_edge_angle: 0.00
+      leading_edge_wedge_angle: 5.00
+      trailing_edge_thickness_to_opening: 0.02
+      trailing_edge_wedge_angle: 5.00
+      stagger_angle: 36.00
+      hub_tip_ratio_in: 0.7999999999974834
+      hub_tip_ratio_out: 0.7999999999975032
+      tip_clearance: 0.00
+      A_out: 0.33619159598487275
+      metal_angle_in: 0.00
+      metal_angle_out: 72.00
+      flow_turning: 72.00
+      blade_count: 81.32638728891446
+      blade_count_integer: null
+      spacing: 0.037910379956843314
+      pitch: 0.037910379956843314
+      opening: 0.01171495166987597
+      solidity: 1.150533025868167
+      solidity_meridional: 1.150533025868167
+      solidity_chord: 1.4221370303315783
+      pitch_to_chord: 0.7031671200959059
+      trailing_edge_thickness: 0.0002342990333975194
+      A_throat: 0.10388891652536203
+    rotor:
+      blade_count_continuous: 98.96016858670997
+      spacing_method: solidity_chord
+      radius_in: 0.4906928718332034
+      radius_out: 0.4906928718332034
+      height: 0.1090428604088865
+      chord: 0.0436171441635546
+      chord_meridional: 0.0436171441635546
+      meridional_chord: 0.0436171441635546
+      aspect_ratio: 2.50
+      flaring_angle: -6.052345783382399e-12
+      maximum_thickness: 0.013085143249066379
+      maximum_thickness_location: 0.50
+      leading_edge_radius: 0.000654257162453319
+      leading_edge_diameter: 0.001308514324906638
+      leading_edge_angle: 52.00396384057661
+      leading_edge_wedge_angle: 5.00
+      trailing_edge_thickness_to_opening: 0.02
+      trailing_edge_wedge_angle: 5.00
+      stagger_angle: 7.05796889363569e-11
+      hub_tip_ratio_in: 0.7999999999975032
+      hub_tip_ratio_out: 0.7999999999975185
+      tip_clearance: 0.001090428604088865
+      A_out: 0.3361915959848444
+      metal_angle_in: 52.00396384057661
+      metal_angle_out: -52.003963840435446
+      flow_turning: 104.00792768101206
+      blade_count: 98.96016858670997
+      blade_count_integer: null
+      spacing: 0.031155102973967567
+      pitch: 0.031155102973967567
+      opening: 0.019179298156762597
+      solidity: 1.4000000000000001
+      solidity_meridional: 1.4000000000000001
+      solidity_chord: 1.4000000000000001
+      pitch_to_chord: 0.7142857142857142
+      trailing_edge_thickness: 0.0003835859631352519
+      A_throat: 0.2069618855883392
+  losses:
+    stator:
+      loss_profile: 0.01615390516379662
+      loss_incidence: 0.00
+      loss_trailing: 0.001371512459615283
+      loss_secondary: 0.016727758961058662
+      loss_clearance: 0.00
+      loss_total: 0.034253176584470565
+      diagnostics:
+        penetration_raw_ratio: 0.05734956768741237
+        tangential_loading_parameter: 1.5884677502555187
+        convergence_ratio: 3.2360679774997894
+        aspect_ratio_true_chord: 2.0225424859373686
+        inlet_displacement_thickness_height_ratio: 0.009513226627502949
+        penetration_effective_ratio: 0.05734956768741237
+        primary_loss_weight: 0.9426504323125876
+        penetration_smoothing_active: false
+        penetration_outside_model_domain: false
+        profile_loss_unweighted: 0.017136686739925987
+        trailing_loss_unweighted: 0.0014549534086040524
+        incidence_loss_unweighted: 0.00
+        primary_loss_unweighted: 0.01859164014853004
+        primary_loss_weighted: 0.0175254176234119
+      loss_definition: 0.00
+      loss_error: -0.034253176584470565
+    rotor:
+      loss_profile: 0.10322522261488569
+      loss_incidence: 0.00
+      loss_trailing: 0.0005646884501745841
+      loss_secondary: 0.03001476075996958
+      loss_clearance: 0.0827725124459347
+      loss_total: 0.21657718427096456
+      diagnostics:
+        penetration_raw_ratio: 0.17044774948384123
+        tangential_loading_parameter: 3.657497622821431
+        convergence_ratio: 0.9999999999968461
+        aspect_ratio_true_chord: 2.50
+        inlet_displacement_thickness_height_ratio: 0.008130418246553717
+        penetration_effective_ratio: 0.17044774948384123
+        primary_loss_weight: 0.8295522505161588
+        penetration_smoothing_active: false
+        penetration_outside_model_domain: false
+        profile_loss_unweighted: 0.12443486537545712
+        trailing_loss_unweighted: 0.0006807147468085672
+        incidence_loss_unweighted: 0.00
+        primary_loss_unweighted: 0.12511558012226567
+        primary_loss_weighted: 0.10378991106506028
+      loss_definition: 0.00
+      loss_error: -0.21657718427096456
+  flow_stations:
+  - p: 250169.97125847396
+    T: 352.8723346701859
+    d: 63.49041307131856
+    q: 0.09243748626003005
+    Z: 0.09418834691231621
+    a: 37.58281269057513
+    h: 95333.01542420272
+    s: 277.41601998358846
+    v: 5.94754449401059
+    w: 5.94754449401059
+    u: 0.00
+    v_m: 5.94754449401059
+    v_t: 0.00
+    w_m: 5.94754449401059
+    w_t: 0.00
+    alpha: 0.00
+    beta: 0.00
+    Ma_abs: 0.15825171316946407
+    Ma_rel: 0.15825171316946407
+    Re: 829039.3627147943
+    p0_rel: 251300.00000003542
+    r: 0.4906928718332034
+    H: 0.10904286040890314
+    I: 95350.70206695666
+    h0: 95350.70206695684
+  - p: 94400.00000006729
+    T: 320.26255694350345
+    d: 10.694375988880358
+    q: 0.23777844338330192
+    Z: 0.23248671355647516
+    a: 79.90512222327438
+    h: 88822.61281831836
+    s: 277.41601998358846
+    v: 114.26363593594924
+    w: 114.26363593594924
+    u: 0.00
+    v_m: 35.30940534328027
+    v_t: 108.6711755324616
+    w_m: 35.30940534328027
+    w_t: 108.6711755324616
+    alpha: 72.00
+    beta: 72.00
+    Ma_abs: 1.4299913792343475
+    Ma_rel: 1.4299913792343475
+    Re: 6129758.31124695
+    p0_rel: 251300.00000086482
+    r: 0.4906928718332034
+    H: 0.1090428604088911
+    I: 95350.70206695666
+    h0: 95350.70206696994
+  - p: 94400.00000006729
+    T: 320.26255694350345
+    d: 10.694375988880358
+    q: 0.23777844338330192
+    Z: 0.23248671355647516
+    a: 79.90512222327438
+    h: 88822.61281831836
+    s: 277.41601998358846
+    v: 114.26363593594924
+    w: 57.357060223553795
+    u: 63.47075239514673
+    v_m: 35.30940534328027
+    v_t: 108.6711755324616
+    w_m: 35.30940534328027
+    w_t: 45.20042313731485
+    alpha: 72.00
+    beta: 52.00396384057661
+    Ma_abs: 1.4299913792343475
+    Ma_rel: 0.7178145609149336
+    Re: 2489314.909128713
+    p0_rel: 114601.57519789005
+    r: 0.4906928718332034
+    H: 0.1090428604088911
+    I: 88453.26079224625
+    h0: 95350.70206696994
+  - p: 94400.00000029546
+    T: 320.2625569435759
+    d: 10.694375988916105
+    q: 0.23777844338303197
+    Z: 0.23248671355620742
+    a: 79.90512222320604
+    h: 88822.61281833956
+    s: 277.41601998358846
+    v: 39.75624525645375
+    w: 57.35706022318604
+    u: 63.47075239514673
+    v_m: 35.30940534316523
+    v_t: 18.270329258208683
+    w_m: 35.30940534316523
+    w_t: -45.20042313693805
+    alpha: 27.358636300548213
+    beta: -52.003963840435446
+    Ma_abs: 0.4975431380406267
+    Ma_rel: 0.7178145609109451
+    Re: 2489314.909118581
+    p0_rel: 114601.57519861464
+    r: 0.4906928718332034
+    H: 0.10904286040888189
+    I: 88453.26079224626
+    h0: 89612.89233678521
+  loading:
+    stator:
+      angular_momentum_change: -53.324171207513736
+      flow_torque: -6769.503534793869
+      reference_radius: 0.4906928718332034
+      reference_height: 0.1090428604088911
+      reference_kinetic_pressure: 69813.84091404743
+      loading_coefficient_outlet_signed: -0.5108808170447288
+      loading_coefficient_outlet: 0.5108808170447288
+    rotor:
+      angular_momentum_change: 44.35905087446511
+      flow_torque: 5631.3815085133465
+      reference_radius: 0.4906928718332034
+      reference_height: 0.10904286040888189
+      reference_kinetic_pressure: 17591.3520855159
+      loading_coefficient_outlet_signed: 1.3860889195411028
+      loading_coefficient_outlet: 1.3860889195411028
+  name: stage_1

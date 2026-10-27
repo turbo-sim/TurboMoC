@@ -1,0 +1,131 @@
+machine:
+  design_mode: stator
+  geometry_type: axial
+  fluid_name: Cyclopentane
+workflow:
+  save_figures: true
+  show_gmsh: true
+  show_pyvista: true
+  log_level: INFO
+rows:
+- id: stator_1
+  role: stator
+  geometry:
+    method_of_characteristics:
+      inlet_property_pair: PQ_INPUTS
+      inlet_property_1: 251300
+      inlet_property_2: 0.09155
+      p_back: 94400
+      solver: conventional
+      use_true_sauer_line: true
+      y_t: 0.01
+      n: 15
+      rho_t: 0.2
+      rho_d: 0.1
+      delta_flow: 0
+      tau_max: 90
+      tau_step: 1
+      outlet_condition: pressure
+      exit_mach: 2
+    meridional_channel:
+      type: axial
+      hub_radius: 436.1714416288
+      blade_height: 109.04286040879998
+      hub_chord: 44.0004
+      tip_chord: 44.0004
+      num_blades: 44
+    blade_geometry:
+      parametrization: full
+      metal_angle_in: 0
+      metal_angle_out: 72
+      r_trailing: 0.5
+      inlet_opening_ratio: 1.5
+      n_cp: 30
+      num_baseline_points: 500
+      num_curve_points: 500
+      control_point_offsets:
+        '15': 0.006
+        '16': 0.03
+        '17': 0.027
+        '18': 0.0225
+        '19': 0.0275
+        '20': 0.0335
+        '21': 0.0115
+        '22': 0.007
+    flow_domain:
+      domain_shift_mode: auto
+      domain_shift_value: 0
+      number_of_points: 120
+      inlet:
+        extension_type: bspline
+        extension_length: 1.5
+        axial_tangent: 0.35
+        blade_tangent: 0.35
+      outlet:
+        extension_type: straight
+        extension_length: 2
+        axial_tangent: 0.55
+        blade_tangent: 0.15
+  mesh:
+    show_gui: false
+    numerics:
+      terminal_output: true
+      verbosity: 2
+      blade_size: 0.25
+      domain_size: 1
+      curvature_elements: 50
+      algorithm: 8
+      recombine: true
+      recombination_algorithm: 1
+      recombine_minimum_quality: 0.1
+      smoothing_steps: 5
+      inflation_layers:
+        enabled: true
+        first_height: 0.03
+        growth_ratio: 1.2
+        thickness: 1
+      span_layers: 25
+      span_stretch: 1.5
+    matplotlib:
+      num_blades: 3
+      annotate_boundaries: true
+      mesh_color: orange
+      edge_color: black
+      domain_color: lightgrey
+      dpi: 500
+      rasterize_mesh: true
+    visualization:
+      section_edge_width: 0.35
+      volume_edge_width: 0.35
+    pyvista:
+      show_mesh_edges: true
+      surfaces:
+        blade: true
+        hub: true
+        shroud: false
+        inlet: false
+        outlet: false
+        periodic_left: false
+        periodic_right: false
+    cgns:
+      enabled: true
+      filename: stator_mesh_3d.cgns
+      length_scale: 0.001
+      boundary_types:
+        blade: BCWallViscous
+        inlet: BCInflowSubsonic
+        outlet: BCOutflowSubsonic
+        periodic_left: BCGeneral
+        periodic_right: BCGeneral
+        hub: BCWallViscous
+        shroud: BCWallViscous
+    cad:
+      span_sections: 9
+      disk_thickness: 5
+      axial_margin: 0.25
+      root_overlap: 0.03
+      linear_blades: 5
+      fluid_annulus: false
+  placement:
+    streamwise_offset_mm: 0
+    angular_phase_deg: 0
