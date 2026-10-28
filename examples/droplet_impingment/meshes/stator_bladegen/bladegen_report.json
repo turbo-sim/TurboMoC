@@ -16,7 +16,7 @@
     "one_le_and_te_per_section": true,
     "minimum_segment_mm": 0.7371916959355238,
     "profiles_inside_meridional_channel": true,
-    "hub_points": 80,
-    "shroud_points": 80
+    "hub_points": 59,
+    "shroud_points": 59
   }
 }
