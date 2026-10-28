@@ -1,0 +1,22 @@
+{
+  "units": "mm",
+  "frame": "row-local",
+  "axis": "X (machine axis)",
+  "files": {
+    "inf": "stator_1_BladeGen.inf",
+    "profile": "stator_1_profile.curve",
+    "hub": "stator_1_hub.curve",
+    "shroud": "stator_1_shroud.curve"
+  },
+  "checks": {
+    "span_sections": 11,
+    "points_per_section": [
+      200
+    ],
+    "one_le_and_te_per_section": true,
+    "minimum_segment_mm": 0.7371916959355238,
+    "profiles_inside_meridional_channel": true,
+    "hub_points": 80,
+    "shroud_points": 80
+  }
+}

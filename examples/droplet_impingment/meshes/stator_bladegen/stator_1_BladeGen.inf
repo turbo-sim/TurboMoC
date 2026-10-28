@@ -1,0 +1,10 @@
+!======  CFX-BladeGen Export  ========
+Axis of Rotation: X
+Number of Blade Sets: 44
+Number of Blades Per Set: 1
+Geometry Units: MM
+Blade 0 LE: EllipseEnd
+Blade 0 TE: EllipseEnd
+Hub Data File: stator_1_hub.curve
+Shroud Data File: stator_1_shroud.curve
+Profile Data File: stator_1_profile.curve

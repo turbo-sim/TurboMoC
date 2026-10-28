@@ -1,0 +1,550 @@
+stage_number: 1
+blade_row: rotor
+blade_count: 120
+axis_of_rotation: X
+geometry_units: MM
+spanwise_model: constant_midspan_metal_angles
+angle_reference: relative
+camberline_type: classical_balje_reference
+thickness_model: parallel_passage_arcs
+profile_type: impulse_constant_width
+constant_width_scope: overlapping main circular arcs at mean radius only
+edge_continuity: G1 (not G2)
+profile_constraints: &id001
+  profile_type: impulse_constant_width
+  feasible: true
+  errors: []
+  blade_count: 120
+  pitch_m: 0.02569261868866783
+  passage_width_m: 0.015816554824683474
+  beta_from_tangent_deg: 37.99603615942339
+  orientation: 1.0
+  angle_rad: 0.9076403931061373
+  specified_chord_m: 0.0498571557094309
+  classical_chord_m: 0.0498571557094309
+  chord_residual_m: 0.0
+  count_for_specified_chord: 120.0
+  pressure_radius_m: 0.03163310964936695
+  suction_radius_m: 0.015816554824683474
+  requested_throat_opening_m: null
+  leading_edge_radius_m: 0.000191715816057374
+  trailing_edge_thickness_m: 0.00038343163211474807
+  leading_trim_rad: 0.15538638267641594
+  trailing_trim_rad: 0.15538638267641597
+  pressure_inlet_tangent_deg: 43.10097991941325
+  pressure_outlet_tangent_deg: -43.10097991941324
+  constant_width_turning_fraction: 0.8288018207908852
+profile_warnings: &id002
+- 'Classical Balje construction: chord and metal angles describe virtual sharp noses.
+  Finite circular edges trim the pressure tangents to 43.101 / -43.101 degrees; these
+  are not the nominal metal angles.'
+- G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+  Main surfaces have no curvature sign reversal; edge caps are excluded from that
+  claim.
+- Denton body, fullness, peak thickness, peak location, turning-law and relief controls
+  are inactive for this family. LE dimensions are recovered from the effective radius
+  mapping; TE thickness is used as the circular cap diameter. No thickness target
+  is fitted.
+- Constant passage width applies only to overlapping main arcs at mean radius, not
+  to nose regions, open ends, other span radii or CFD streamlines. Side pairs use
+  normalized arclength; their distance is not a camber-normal thickness.
+span_sections: 11
+profile_points_requested: 800
+profile_points_written_per_section: 4139
+hub_shroud_offset_fraction: 0.01
+endwall_model: constant_radius_envelope
+length_unit: m
+hub_radius: 0.4361714416287602
+shroud_radius: 0.5452143020376466
+axial_domain:
+  chord_meridional: 0.0498571557094309
+  blade_x_min: 0.0029913960262112752
+  blade_x_max: 0.04686575968321963
+  inlet_extension_fraction: 1.0
+  outlet_extension_fraction: 2.0
+  inlet_length: 0.0498571557094309
+  outlet_length: 0.0997143114188618
+  x_min: -0.04686575968321963
+  x_max: 0.14658007110208143
+sections:
+- span_fraction: 0.01
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints: *id001
+    profile_warnings: *id002
+- span_fraction: 0.108
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.20600000000000002
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.30400000000000005
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.402
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.5
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.5980000000000001
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.6960000000000001
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.794
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.892
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
+- span_fraction: 0.99
+  angle_in_deg: 52.00396384057661
+  angle_out_deg: -52.00396384057661
+  profile_metadata:
+    profile_type: impulse_constant_width
+    camberline_type: classical_balje_reference
+    thickness_model: parallel_passage_arcs
+    constant_width_scope: overlapping main circular arcs at mean radius only
+    edge_continuity: G1 (not G2)
+    profile_constraints:
+      profile_type: impulse_constant_width
+      feasible: true
+      errors: []
+      blade_count: 120
+      pitch_m: 0.02569261868866783
+      passage_width_m: 0.015816554824683474
+      beta_from_tangent_deg: 37.99603615942339
+      orientation: 1.0
+      angle_rad: 0.9076403931061373
+      specified_chord_m: 0.0498571557094309
+      classical_chord_m: 0.0498571557094309
+      chord_residual_m: 0.0
+      count_for_specified_chord: 120.0
+      pressure_radius_m: 0.03163310964936695
+      suction_radius_m: 0.015816554824683474
+      requested_throat_opening_m: null
+      leading_edge_radius_m: 0.000191715816057374
+      trailing_edge_thickness_m: 0.00038343163211474807
+      leading_trim_rad: 0.15538638267641594
+      trailing_trim_rad: 0.15538638267641597
+      pressure_inlet_tangent_deg: 43.10097991941325
+      pressure_outlet_tangent_deg: -43.10097991941324
+      constant_width_turning_fraction: 0.8288018207908852
+    profile_warnings:
+    - 'Classical Balje construction: chord and metal angles describe virtual sharp
+      noses. Finite circular edges trim the pressure tangents to 43.101 / -43.101
+      degrees; these are not the nominal metal angles.'
+    - G1 circular fillets and straight-to-arc joins are not curvature-continuous (G2).
+      Main surfaces have no curvature sign reversal; edge caps are excluded from that
+      claim.
+    - Denton body, fullness, peak thickness, peak location, turning-law and relief
+      controls are inactive for this family. LE dimensions are recovered from the
+      effective radius mapping; TE thickness is used as the circular cap diameter.
+      No thickness target is fitted.
+    - Constant passage width applies only to overlapping main arcs at mean radius,
+      not to nose regions, open ends, other span radii or CFD streamlines. Side pairs
+      use normalized arclength; their distance is not a camber-normal thickness.
