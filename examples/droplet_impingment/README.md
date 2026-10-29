@@ -26,7 +26,7 @@ The only manual step is to put the TurboGrid meshes `stator.gtm` and `rotor.gtm`
   taken from `PATH`, or else from the newest Ansys installation (`AWP_ROOT<version>`).
 - **Design inputs** ship in `inputs/`:
   - `stator_moc_config.yaml`: TurboMoC stator design; sets the inlet state of the barotropic model;
-  - `rotor_turbodash.yaml`: TurboDash meanline design; compared against the CFD in the report.
+  - `rotor_turbodash.yaml`: TurboDash meanline design; sets the rotor speed and is compared against the CFD in the report.
 - **Row placement.** Each TurboGrid mesh has its own axial origin. After the rotor is appended, it is translated
   axially so its inlet plane sits `AXIAL_GAP` (default 0) downstream of the stator outlet plane. The setup stops if
   either interface is not a plane x = const.
@@ -51,5 +51,6 @@ Meshes and Fluent files are ignored by git.
 | 4 | `04_extract_results.py [processors]` | Reads the solved case headless and writes surface data (blade-to-blade cuts at 10/50/90 % span, axial cuts, walls) and Fluent reports to `RUN_DIR/report/data`. |
 | 5 | `05_make_report.py` | Report (Markdown, HTML, PDF) and figures: stage performance against the TurboDash meanline, spanwise rotor-inlet kinematics, wetness, and the impact angle of droplets that lag the vapour. |
 
-The rotor speed, the outlet pressure and the axial gap between the rows are constants at the top of
+The rotor speed is read from the TurboDash design (`overall_performance.rotational_speed` in
+`inputs/rotor_turbodash.yaml`); the outlet pressure and the axial gap between the rows are constants at the top of
 `01_setup_stage_case.py`.

@@ -18,9 +18,10 @@ from turbo_moc.fluent.common import MACH_EXPRESSION, boundary_types, configure_n
 from turbo_moc.fluent.barotropic_model import generate_barotropic_model
 from turbo_moc.fluent.stage.case import STATOR, ROTOR, configure_boundaries, configure_material, create_turbo_interface
 
-from settings import CASE_NAME, MESH_DIR, RUN_DIR, STATOR_CONFIG, cfx5gtmconv
+from settings import CASE_NAME, MESH_DIR, RUN_DIR, ROTOR_DESIGN, STATOR_CONFIG, cfx5gtmconv
 
-RPM, P_OUT = 1235.1943016058071, 94400.0   # Rotor speed [rpm], outlet static pressure [Pa]
+RPM = yaml.safe_load(ROTOR_DESIGN.read_text(encoding="utf-8"))["overall_performance"]["rotational_speed"]   # TurboDash [rpm]
+P_OUT = 94400.0                             # Outlet static pressure [Pa]
 AXIAL_GAP = 0.0                             # Rotor inlet minus stator outlet axial position [m]; 0: the planes coincide
 OPTIONS = {
     "product_version": "24.2", "material_name": "barotropic_fluid", "case_filename": CASE_NAME,
