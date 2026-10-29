@@ -32,9 +32,9 @@ OPTIONS = {
 BAROTROPIC = {"calculation_type": "equilibrium", "efficiency": 1.0, "pressure_ratio": 251300.0 / (P_OUT / 100),
               "polynomial_degree": 8, "segment_pressure_ratio": 1.3, "ODE_solver": "LSODA", "ODE_tolerance": 1.0e-9,
               "save_figures": True}
-PARTS = {"inlet": ["inflow-passage"], "outlet": ["outflow-outblock"], "blade": ["bld-"], "hub": ["hub-"],
+PARTS = {"inlet": ["inflow-"], "outlet": ["outflow-"], "blade": ["bld-"], "hub": ["hub-"],
          "shroud": ["shroud-"], "periodic_left": ["per1-"], "periodic_right": ["per2-"]}
-JOIN = ["outflow-passage", "inflow-outblock"]   # TurboGrid passage block / outlet block internal face
+JOIN = ["outflow-passage", "inflow-outblock"]   # TurboGrid passage block / outlet block internal face, if any
 
 
 def convert_meshes():
@@ -68,17 +68,17 @@ def axial_position(solver, zone):
 
 
 def tidy_row(solver, row):
-    """Rename the imported CFX zones to <row>_<part> (merging the passage and outlet-block pieces)."""
+    """Rename the imported CFX zones to <row>_<part> (merging the passage and outlet-block pieces, if any)."""
     settings = solver.settings
     modify = settings.mesh.modify_zones
     cells = [name for name in settings.setup.cell_zone_conditions.fluid.get_object_names()
              if not name.startswith(("stator_1", "rotor_1"))]
     modify.zone_name(zone_name=cells[0], new_name=f"{row}_fluid")
     def matching(prefixes):
-        return [name for name in boundary_types(settings.setup.boundary_conditions)
-                if name.startswith(tuple(prefixes)) and name not in JOIN]
-    modify.fuse_face_zones(zone_names=JOIN, zone_name=f"{row}_block_join")
-    print(row, "after fusing the block join:", sorted(boundary_types(settings.setup.boundary_conditions)), flush=True)
+        return [name for name in boundary_types(settings.setup.boundary_conditions) if name.startswith(tuple(prefixes))]
+    if all(name in boundary_types(settings.setup.boundary_conditions) for name in JOIN):
+        modify.fuse_face_zones(zone_names=JOIN, zone_name=f"{row}_block_join")
+    print(row, "zones:", sorted(boundary_types(settings.setup.boundary_conditions)), flush=True)
     for part, prefixes in PARTS.items():
         names = matching(prefixes)
         if len(names) > 1:

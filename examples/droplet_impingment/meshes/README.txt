@@ -1,0 +1,1 @@
+Upload the mesh here with the names stator.gtm and rotor.gtm
