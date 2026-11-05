@@ -2,9 +2,7 @@
 
 **From a real-fluid supersonic nozzle to a meshed turbine stage, in one Python package.**
 
-TurboMoC designs supersonic nozzles with the method of characteristics (MoC)
-using real-fluid thermodynamics, including two-phase flashing and condensing
-expansions under the Homogeneous Equilibrium Model (HEM). Its current design
+Python package for the design of supersonic nozzles and turbomachinery blades using the method of characteristics. Its current design
 app designs stator and vortex rotor profiles for linear cascades and axial/radial
 machines, then generates section and volume meshes with quality reports and
 CGNS export. The Python library and preserved preceding app also provide
@@ -191,3 +189,10 @@ YAML files are available in `examples/apps/cases/`.
 Follow the illustrated [app user guide](docs/source/app_user_guide.md) for the
 stator–rotor workflow, mesh inspection, quality reports, and project export.
 
+<!-- research-software-metadata:start -->
+## Development and citation
+
+TurboMoC is co-developed by Roberto Agromayor and Andrea Cioffi.
+
+Citation metadata is provided in [CITATION.cff](CITATION.cff). For version-specific reproducibility, also record the release or commit used.
+<!-- research-software-metadata:end -->

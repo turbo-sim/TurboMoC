@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+type: software
+message: If you use this software, please cite it using this metadata and record the version or commit used.
+title: 'TurboMoC: Python package for the design of supersonic nozzles and turbomachinery blades using the method
+  of characteristics'
+abstract: Python package for the design of supersonic nozzles and turbomachinery blades using the method of characteristics.
+authors:
+- family-names: Agromayor
+  given-names: Roberto
+  orcid: https://orcid.org/0009-0009-9289-1130
+- family-names: Cioffi
+  given-names: Andrea
+version: 1.2.1
+repository-code: https://github.com/turbo-sim/TurboMoC
+url: https://github.com/turbo-sim/TurboMoC

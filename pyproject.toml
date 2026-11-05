@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "turbo_moc"
 version = "1.2.1"
-description = "Method of Characteristics solvers for two-phase and single-phase nozzle/stator design (minimum-length and conventional/arc-flashing variants)."
+description = "Python package for the design of supersonic nozzles and turbomachinery blades using the method of characteristics."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = {text = "MIT"}
@@ -36,6 +36,11 @@ fluent = ["ansys-fluent-core[reader]>=0.38,<0.43"]
 turbo_moc-app-legacy = "turbo_moc.legacy.app:main"
 turbo_moc-app = "turbo_moc.app:main"
 
+[[project.authors]]
+name = "Roberto Agromayor"
+
+[[project.authors]]
+name = "Andrea Cioffi"
 [tool.poetry.group.dev.dependencies]
 bibtexparser = ">=1.4,<2"
 linkify-it-py = ">=2,<3"
