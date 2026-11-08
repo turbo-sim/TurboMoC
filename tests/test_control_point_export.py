@@ -35,3 +35,12 @@ def test_export_includes_applied_editor_offsets(monkeypatch, small_design):
     assert table[6, 6] == 0.01 and "1 moved by the control-point editor" in text
     assert np.allclose(table[:, 3:5], design.blade["control_points"])
 
+
+def test_export_includes_xy_displacements(monkeypatch, small_design):
+    nozzle, config = small_design
+    config["blade_geometry"]["control_point_displacements"] = {6: [0.01, -0.008]}
+    text, template, design, table = exported(monkeypatch, nozzle, config)
+    assert np.allclose(table[6, 7:9], [0.01, -0.008])
+    assert "1 moved by the control-point editor" in text
+    assert np.allclose(table[:, 3:5], design.blade["control_points"])
+

@@ -118,6 +118,14 @@ def normalize(config):
                                     **result["blade_geometry"]}
         offsets = result["blade_geometry"].get("control_point_offsets") or {}
         result["blade_geometry"]["control_point_offsets"] = {int(key): float(value) for key, value in offsets.items()}
+        displacements = result["blade_geometry"].get("control_point_displacements")
+        if displacements is not None:
+            from turbo_moc.geometry.stator_blade import validate_control_point_displacements
+            blade = {"control_points": [None] * int(result["blade_geometry"]["n_cp"])}
+            result["blade_geometry"]["control_point_displacements"] = validate_control_point_displacements(
+                blade, displacements)
+            if offsets and displacements:
+                raise ValueError("Use control_point_offsets or control_point_displacements, not both.")
     if isinstance(result["mesh"].get("numerics"), dict):
         result["mesh"]["numerics"].setdefault("recombine_minimum_quality", 0.1)
     view = result["mesh"].setdefault("visualization", {})

@@ -185,16 +185,19 @@ def stator_control_points_csv(config, nozzle_reference, label="stator"):
     placed = np.asarray(blade["control_points"], dtype=float)
     knots = np.asarray(template["knots"], dtype=float)
     offsets = {int(key): float(value) for key, value in (template.get("control_point_offsets") or {}).items()}
+    displacements = {int(key): value for key, value in
+                     (template.get("control_point_displacements") or {}).items()}
     from turbo_moc.geometry.stator_blade import editable_control_points
     editable = set(editable_control_points(template))
     lines = [f"# {label} blade B-spline control points (TurboMoC)",
              f"# degree {len(knots) - len(native) - 1}, {len(native)} control points, "
-             f"{len(offsets)} moved by the control-point editor",
+             f"{len(offsets.keys() | displacements.keys())} moved by the control-point editor",
              "# knots " + " ".join(f"{value:.12g}" for value in knots),
              f"# x, y: MoC wall units; x_placed, y_placed: blade-to-blade section as placed in the design "
-             f"[{blade.get('units', 'mm')}]; offset: normal displacement applied [wall units]",
-             "index,x,y,x_placed,y_placed,editable,offset"]
-    lines += [f"{i},{x:.12g},{y:.12g},{xm:.12g},{ym:.12g},{int(i in editable)},{offsets.get(i, 0.0):.12g}"
+             f"[{blade.get('units', 'mm')}]; offset: legacy normal / chord; dx, dy: XY displacement / chord",
+             "index,x,y,x_placed,y_placed,editable,offset,dx,dy"]
+    lines += [f"{i},{x:.12g},{y:.12g},{xm:.12g},{ym:.12g},{int(i in editable)},{offsets.get(i, 0.0):.12g},"
+              f"{displacements.get(i, [0.0, 0.0])[0]:.12g},{displacements.get(i, [0.0, 0.0])[1]:.12g}"
               for i, ((x, y), (xm, ym)) in enumerate(zip(native, placed))]
     return "\n".join(lines) + "\n"
 

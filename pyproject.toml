@@ -60,7 +60,7 @@ bump-my-version = "^1.5.1"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"turbo_moc.app" = ["assets/*.js", "assets/*.css", "assets/*.svg"]
+"turbo_moc.app" = ["assets/*.js", "assets/*.mjs", "assets/*.css", "assets/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

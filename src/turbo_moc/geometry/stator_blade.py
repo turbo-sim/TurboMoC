@@ -24,7 +24,7 @@ from turbo_moc.geometry.splines import BSplineTool
 
 __all__ = [
     "parametrize_stator_blade", "parametrize_stator_blade_semi", "parametrize_stator", "STATOR_PARAMETRIZATIONS",
-    "apply_control_point_offsets", "editable_control_points", "blade_self_intersects",
+    "apply_control_point_offsets", "apply_control_point_displacements", "editable_control_points", "blade_self_intersects",
     "export_blade_step", "export_flared_blade_step", "export_annular_blade_step",
     "export_annular_blade_stl",
     "move_control_point_along_normal",
@@ -999,10 +999,15 @@ STATOR_PARAMETRIZATIONS = {"full": parametrize_stator_blade, "semi": parametrize
 LOCKED_CONTROL_POINTS = 2
 
 
-def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_offsets=None, **kwargs):
+def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_offsets=None,
+                      control_point_displacements=None, **kwargs):
     if parametrization not in STATOR_PARAMETRIZATIONS:
         raise ValueError(f"Stator parametrization must be one of {tuple(STATOR_PARAMETRIZATIONS)}.")
     blade = STATOR_PARAMETRIZATIONS[parametrization](wall_x, wall_y, **kwargs)
+    if control_point_offsets and control_point_displacements:
+        raise ValueError("Use control_point_offsets or control_point_displacements, not both.")
+    if control_point_displacements:
+        return apply_control_point_displacements(blade, control_point_displacements)
     return apply_control_point_offsets(blade, control_point_offsets) if control_point_offsets else blade
 
 
@@ -1050,12 +1055,50 @@ def apply_control_point_offsets(blade, offsets):
     chord = blade_chord(blade)
     for index, value in offsets.items():
         moved[index] += value * chord * normals[index]
+    result = _with_control_points(blade, moved)
+    result["control_point_offsets"] = {str(index): value for index, value in offsets.items()}
+    return result
+
+
+def validate_control_point_displacements(blade, displacements):
+    """Validate sparse [dx, dy] displacements as fractions of the baseline chord."""
+    if displacements is not None and not isinstance(displacements, dict):
+        raise ValueError("control_point_displacements must map point indices to [dx, dy].")
+    editable = set(editable_control_points(blade))
+    result = {}
+    for key, value in (displacements or {}).items():
+        index = int(key)
+        if index not in editable:
+            raise ValueError(f"Control point {index} cannot be moved.")
+        vector = np.asarray(value)
+        if (vector.shape != (2,) or vector.dtype.kind not in "iuf" or not np.isfinite(vector).all()
+                or any(isinstance(component, (bool, np.bool_)) for component in value)):
+            raise ValueError(f"Control point {index} needs two finite displacements [dx, dy].")
+        if np.any(vector):
+            result[index] = vector.astype(float).tolist()
+    return result
+
+
+def apply_control_point_displacements(blade, displacements):
+    """Apply total XY displacements to an unedited MoC-derived baseline."""
+    displacements = validate_control_point_displacements(blade, displacements)
+    if not displacements:
+        return blade
+    moved = np.asarray(blade["control_points"], dtype=float).copy()
+    chord = blade_chord(blade)
+    for index, value in displacements.items():
+        moved[index] += chord * np.asarray(value)
+    result = _with_control_points(blade, moved)
+    result["control_point_displacements"] = {str(index): value for index, value in displacements.items()}
+    return result
+
+
+def _with_control_points(blade, moved):
     curve = BSplineTool(degree=3).forward(moved, np.asarray(blade["knots"], dtype=float),
                                           num_points=len(blade["blade_curve"]["x"]))
     result = dict(blade)
     result["control_points"] = moved.tolist()
     result["blade_curve"] = {"x": curve[:, 0].tolist(), "y": curve[:, 1].tolist()}
-    result["control_point_offsets"] = {str(index): value for index, value in offsets.items()}
     return result
 
 

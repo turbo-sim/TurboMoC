@@ -52,3 +52,22 @@ def test_offsets_survive_a_saved_case():
     project = validate_project(normalize_project(project))
     loaded = validate_project(normalize_project(yaml.safe_load(yaml.safe_dump(project))))
     assert get_row(loaded, "stator_1")["geometry"]["blade_geometry"]["control_point_offsets"] == {12: 0.04, 20: -0.02}
+
+
+@pytest.mark.parametrize("mode", ["full", "semi"])
+def test_vector_displacements_reconstruct_exactly_from_project_yaml(small_design, mode):
+    wall, config = small_design
+    config["blade_geometry"].update(parametrization=mode, control_point_displacements={5: [0.01, -0.002]})
+    project = validate_project(normalize_project(config))
+    loaded = validate_project(normalize_project(yaml.safe_load(yaml.safe_dump(project))))
+    original_inputs = project["rows"][0]["geometry"]["blade_geometry"]
+    loaded_inputs = loaded["rows"][0]["geometry"]["blade_geometry"]
+    x, y = wall["wall_final"]["x"], wall["wall_final"]["y"]
+    assert parametrize_stator(x, y, **original_inputs) == parametrize_stator(x, y, **loaded_inputs)
+
+
+@pytest.mark.parametrize("value", [[0.1], [0.1, 0.2, 0.3], [float("nan"), 0], [True, 0.1]])
+def test_invalid_vector_displacements_are_rejected(blade, value):
+    from turbo_moc.geometry.stator_blade import apply_control_point_displacements
+    with pytest.raises(ValueError, match="two finite"):
+        apply_control_point_displacements(blade, {5: value})
