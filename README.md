@@ -83,7 +83,8 @@ mapping, mesh deformation, connectivity and CGNS export.
 
 ## Installation instructions
 
-TurboMoC requires Python 3.11, 3.12, or 3.13.
+TurboMoC requires Python 3.12 or 3.13. The control-point editor uses the installed
+`nurbspy>=1.7.1,<2.0` package from PyPI.
 
 ### Install from PyPI
 

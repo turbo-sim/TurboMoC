@@ -7,13 +7,14 @@ name = "turbo_moc"
 version = "1.2.1"
 description = "Python package for the design of supersonic nozzles and turbomachinery blades using the method of characteristics."
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.14"
 license = {text = "MIT"}
 dependencies = [
     "jaxprop>=0.5.6",
     "numpy",
     "scipy",
     "matplotlib",
+    "nurbspy>=1.7.1,<2.0",
     "gmsh>=4.12,<5.0",
     "pyvista>=0.46,<1.0",
     "dash-vtk>=0.0.9,<1.0",

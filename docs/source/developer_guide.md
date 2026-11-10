@@ -2,7 +2,7 @@
 
 ## Installation for developers
 
-With Python 3.11, 3.12, or 3.13, Git, and
+With Python 3.12 or 3.13, Git, and
 [Poetry](https://python-poetry.org/docs/#installation) installed,
 clone the repository and install the package, development tools, and optional
 CadQuery support:

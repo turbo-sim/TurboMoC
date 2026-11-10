@@ -1,4 +1,4 @@
-"""Prototype bridge to the local nurbspy viewer; all geometry evaluation stays in Python.
+"""Bridge to the installed nurbspy viewer; all geometry evaluation stays in Python.
 
 Only this module knows about nurbspy's prototype model/transport API. No viewer
 code is copied, and no per-browser geometry is stored in shared Python objects.
@@ -6,8 +6,6 @@ code is copied, and no per-browser geometry is stored in shared Python objects.
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
-import os
-import sys
 
 import numpy as np
 from dash import Input, Output
@@ -25,12 +23,7 @@ EDIT_FIELDS = ("control_point_offsets", "control_point_displacements")
 
 @lru_cache(maxsize=1)
 def nurbspy_api():
-    """Prefer the sibling source checkout for this explicitly local prototype."""
-    source = Path(os.environ.get("TURBO_MOC_NURBSPY", Path(__file__).resolve().parents[4] / "nurbspy"))
-    if (source / "src" / "nurbspy").is_dir():
-        source = source / "src"
-    if (source / "nurbspy" / "visualization" / "dash.py").is_file() and str(source) not in sys.path:
-        sys.path.insert(0, str(source))
+    """Use the declared PyPI dependency through normal Python imports."""
     from nurbspy.numpy import NurbsCurve
     from nurbspy.visualization import GeometryEditor
     import nurbspy

@@ -22,8 +22,6 @@ from werkzeug.serving import make_server
 import numpy as np
 import yaml
 
-# The local prototype may use the sibling checkout's browser-test dependency.
-sys.path.append(str(ROOT.parent / "nurbspy/.venv/Lib/site-packages"))
 from playwright.sync_api import sync_playwright
 
 OUT = ROOT / ("output/control_point_ux_mirrored" if os.environ.get("TURBO_MOC_TEST_MIRROR") == "1"

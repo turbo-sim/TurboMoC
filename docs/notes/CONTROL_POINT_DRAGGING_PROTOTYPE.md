@@ -1,10 +1,10 @@
-# Local nurbspy control-point editor prototype
+# nurbspy control-point editor
 
-The stator control-point pane embeds the **local sibling nurbspy viewer**. The centre blade has draggable handles; two adjacent blades show the current passage without extra control points. Copies update live at the configured production pitch, expressed in the native editing plane. For annular rows this respects the configured blade count rather than assuming the original MoC pitch. The viewer stays orthographic in x–y, with pan, zoom, and **Fit passage**.
+The stator control-point pane embeds the **installed nurbspy viewer from PyPI**. The centre blade has draggable handles; two adjacent blades show the current passage without extra control points. Copies update live at the configured production pitch, expressed in the native editing plane. For annular rows this respects the configured blade count rather than assuming the original MoC pitch. The viewer stays orthographic in x–y, with pan, zoom, and **Fit passage**.
 
 A single pinned pane contains point selection, X/Y coordinates, displacement readouts, and **Reset point**. Its view options are limited to Grid, Control polygon, Original outline, and Adjacent blades. Scientific colouring, Frenet–Serret frames, weights, z editing, and 3D controls are omitted. The first and last two points remain fixed and cannot join a selection. Status updates use a fixed-height footer, and editing or changing view options preserves the camera and drawing area. The native viewer's redundant frame and heading are removed from this mode.
 
-A small TurboMoC adapter imports nurbspy's renderer, interaction controls, native geometry model, and binary evaluation path. The initial prototype made no nurbspy changes; the subsequent configurable-preview addition lives in nurbspy's shared sampling layer. The adapter currently depends on the local viewer API, including some implementation methods, so this is a local prototype rather than a pinned distribution dependency. The sibling checkout is imported directly; `pyproject.toml` does not declare a nurbspy dependency.
+A small TurboMoC adapter imports nurbspy's renderer, interaction controls, native geometry model, and binary evaluation path. The initial prototype made no nurbspy changes; the subsequent configurable-preview addition lives in nurbspy's shared sampling layer. The adapter uses the viewer API shipped in nurbspy 1.7.1, including some implementation methods. `pyproject.toml` declares `nurbspy>=1.7.1,<2.0`; normal Python imports load the installed package and its bundled web assets.
 
 The 8 November 2026 adapter revision uses the nurbspy selection/history and automatic-sampling API introduced through `51ef25d`, following the original prototype's `8c3e963`. It reuses native multi-selection, edit-history transactions, automatic display sampling, and HTTP packet decoding. TurboMoC supplies only its editing restrictions, passage context, and applied displacement inputs.
 
@@ -16,7 +16,7 @@ From this repository in Git Bash:
 PYTHONPATH=src poetry run python -m turbo_moc.app --port 8052
 ```
 
-The sibling `../nurbspy/src` is selected automatically. If the checkout is elsewhere, set `TURBO_MOC_NURBSPY` to its repository root or `src` directory before starting. Use an environment with the app and local nurbspy's numerical dependencies installed; the tested environment is this repository's Python 3.13 `.venv`.
+Install the project dependencies with `poetry install` or `python -m pip install .` using Python 3.12 or 3.13. This installs nurbspy from PyPI. The app and browser verification use that installed package; no sibling checkout or `TURBO_MOC_NURBSPY` override is used.
 
 Open the app, generate the stator geometry, then choose **Modify stator control points**. Drag a point or enter precise x/y coordinates in the pinned pane. Coordinates and displacement readouts use millimetres. **Apply** commits the draft to the project; **Save configuration** downloads its YAML. **Cancel** discards the draft. **Reset point** and **Reset all** return the selected point or entire draft to the unedited MoC-derived baseline, even when opening an already edited case; Apply is needed to commit a reset. Displayed coordinates use fewer digits for readability while the stored model retains full precision; confirming an untouched field does not round the geometry.
 
@@ -48,7 +48,7 @@ The editor supports free x–y movement of individual points and groups. Normal 
 
 Display sampling uses `quality="fine", preview_quality="full"`. Dragging reuses the fine display grid without switching to a coarse outline; a completed edit can refine the drawing and update its topology. This is a configuration of nurbspy's shared sampler, whose default remains `preview_quality="coarse"` for other viewers/editors. Adjacent blades share the central blade's drawing buffers at every quality. Drawing resolution does not change the float64 control-point model, saved displacements, or production geometry sampling.
 
-Exact reproduction assumes unchanged generator inputs and implementation; changing CP count or parametrization still requires an explicit reset/rebase decision. Keep the local nurbspy revision/working tree with archived prototype cases until its viewer API is stabilized and pinned. Do not replace TurboMoC's baseline-relative YAML inputs with a nurbspy figure snapshot; the two formats serve different purposes.
+Exact reproduction assumes unchanged generator inputs and implementation; changing CP count or parametrization still requires an explicit reset/rebase decision. Record the installed TurboMoC and nurbspy versions with archived cases; the Poetry lockfile records the validated dependency versions. Do not replace TurboMoC's baseline-relative YAML inputs with a nurbspy figure snapshot; the two formats serve different purposes.
 
 Focused regression tests cover both parametrizations, YAML reconstruction, no-op/zero behavior, legacy compatibility, protected points, finite vectors, self-intersection, exports, and stale Apply requests. Browser verification uses a synthetic MoC wall to exercise the real app without rerunning the thermodynamic solver.
 

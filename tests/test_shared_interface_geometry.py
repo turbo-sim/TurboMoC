@@ -87,6 +87,10 @@ def test_refined_preview_retains_physical_axial_cap():
 
 def test_shared_cap_tapered_axial_reference_and_volume(tmp_path):
     nozzle, config = small_design_config()
+    # Algorithm 8 overlaps a triangle at this coarse fixture's trailing edge in
+    # Gmsh 4.15.2. Use Frontal-Delaunay while retaining quad recombination and
+    # the cap, positive-volume and periodic-conformity checks below.
+    config["mesh"]["numerics"]["algorithm"] = 6
     config["assembly"] = {"interfaces": {"outlet": {
         "id": "pair", "geometry_type": "axial", "coordinate_mm": 24.}}}
     design = geometry.build_design(nozzle, config)

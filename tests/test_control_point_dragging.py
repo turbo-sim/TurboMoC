@@ -1,4 +1,4 @@
-"""Reconstruction and app boundaries for the local nurbspy prototype."""
+"""Reconstruction and app boundaries for the installed nurbspy editor."""
 from copy import deepcopy
 import base64
 
@@ -10,10 +10,26 @@ from turbo_moc.app import control_point_editor as editor
 from turbo_moc.geometry.stator_blade import parametrize_stator
 from turbo_moc.configuration import project as projects
 
-try:
-    editor.nurbspy_api()
-except ImportError:
-    pytest.skip("The local nurbspy viewer is required for prototype integration tests.", allow_module_level=True)
+editor.nurbspy_api()
+
+
+def test_editor_uses_installed_dependency_without_changing_import_paths(monkeypatch):
+    import importlib.metadata
+    from pathlib import Path
+    import sys
+    import nurbspy
+
+    # The former local-development override must no longer affect the app.
+    monkeypatch.setenv("TURBO_MOC_NURBSPY", str(Path(__file__).resolve().parents[2] / "nurbspy"))
+    original_paths = list(sys.path)
+    editor.nurbspy_api.cache_clear()
+    curve_type, editor_type, assets = editor.nurbspy_api()
+    assert sys.path == original_paths
+    installed_package = Path(importlib.metadata.distribution("nurbspy").locate_file("nurbspy")).resolve()
+    assert Path(nurbspy.__file__).resolve().parent == installed_package
+    assert assets == installed_package / "web_assets"
+    assert curve_type.__module__.startswith("nurbspy.")
+    assert editor_type.__module__.startswith("nurbspy.")
 
 
 @pytest.fixture

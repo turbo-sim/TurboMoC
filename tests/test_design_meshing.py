@@ -59,6 +59,9 @@ def test_actual_reference_volume_and_cgns_export(case, small_design, tmp_path):
     definition = None
     if case == "axial_taper":
         config["meridional_channel"]["tip_chord"] = 22
+        # Avoid Gmsh 4.15.2's overlapping trailing-edge triangle for this coarse
+        # tapered fixture; retain quad recombination and volume/export checks.
+        config["mesh"]["numerics"]["algorithm"] = 6
     if case.startswith("radial"):
         radial = flow.read_configuration(CASES["radial_stator"])["meridional_channel"]
         if case == "radial_outflow":

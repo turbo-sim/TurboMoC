@@ -25,7 +25,7 @@ Jump to [startup](#2-start-the-app-and-load-the-example), [stator inputs](#3-und
 
 ## 2. Start the app and load the example
 
-Use Python **3.11–3.13** and [Poetry](getting_started.md). From the repository root, install the package and launch the app:
+Use Python **3.12 or 3.13** and [Poetry](getting_started.md). From the repository root, install the package and launch the app:
 
 ```bash
 poetry install

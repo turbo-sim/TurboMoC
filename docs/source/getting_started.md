@@ -14,7 +14,7 @@ stator and rotor blades.
 
 ## Installation instructions
 
-TurboMoC requires Python 3.11, 3.12, or 3.13. To add it to an existing
+TurboMoC requires Python 3.12 or 3.13. To add it to an existing
 [Poetry](https://python-poetry.org/docs/#installation) project:
 
 ```bash

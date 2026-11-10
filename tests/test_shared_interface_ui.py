@@ -68,7 +68,8 @@ def test_invalid_interface_keeps_settings_available_and_does_not_crash_views():
     assert state["valid"] and not state["supported"] and error
     scene = callback("..geometry-data.data")(state, {}, None)
     assert scene[0]["rows"] == []
-    assert "Shared interface unavailable" in scene[-1]
+    # assembly-basis.children carries the shared-interface status message.
+    assert "Shared interface unavailable" in scene[5]
     assert not any(trace.name == "Shared row interface" for trace in scene[3].data)
 
 
