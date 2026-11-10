@@ -43,6 +43,12 @@ def validate_machine(machine):
     for name in names:
         if not np.isfinite(machine[name]) or machine[name] <= 0:
             raise ValueError(f"machine.{name} must be finite and positive [mm].")
+    flare = machine.get("flare")
+    if flare is not None:
+        if machine["type"] != "axial" or set(flare) != {"ratio", "end"}:
+            raise ValueError("machine.flare (axial only) requires ratio and end.")
+        if not -0.5 < flare["ratio"] < 1.0 or not 0.0 < flare["end"] <= 1.0:
+            raise ValueError("machine.flare requires -0.5 < ratio < 1 and 0 < end <= 1.")
     if (
         machine["type"] == "radial"
         and machine["inlet_radius"] == machine["outlet_radius"]
@@ -85,9 +91,32 @@ def meridional_line(start, end):
     return BSpline([0, 0, 1, 1], np.asarray([start, end], dtype=float), 1)
 
 
+def flared_wall(radius, shift, chord, end):
+    """Clamped cubic wall: radius at the LE, radius + shift from u = end to the TE, zero slope at both ends.
+
+    The wall stays exactly at radius + shift on [end, 1] (only equal control points act there), and the zero end
+    slopes keep the linear extensions of meridional_points at constant radius upstream and downstream.
+    """
+    knots = np.asarray([0, 0, 0, 0, end / 2, end, 1, 1, 1, 1], dtype=float)
+    greville = np.asarray([knots[i + 1:i + 4].mean() for i in range(6)])
+    radii = radius + shift * np.asarray([0, 0, 1, 1, 1, 1], dtype=float)
+    return BSpline(knots, np.column_stack([radii, greville * chord]), 3)
+
+
 def axial_geometry(machine):
-    """Convert cylindrical walls and hub/tip chords to meridional curves."""
+    """Convert cylindrical walls and hub/tip chords to meridional curves.
+
+    Optional flare {ratio, end}: blade height (1 + ratio) x blade_height from u = end to the TE, opened
+    symmetrically about midspan (midspan radius and blade speed unchanged)."""
     hub, tip = machine["hub_radius"], machine["hub_radius"] + machine["blade_height"]
+    flare = machine.get("flare")
+    if flare is not None:
+        shift = 0.5 * flare["ratio"] * machine["blade_height"]
+        return GeometryDefinition(
+            hub=flared_wall(hub, -shift, machine["hub_chord"], flare["end"]),
+            shroud=flared_wall(tip, shift, machine["tip_chord"], flare["end"]),
+            num_blades=machine["num_blades"],
+        )
     return GeometryDefinition(
         hub=meridional_line((hub, 0), (hub, machine["hub_chord"])),
         shroud=meridional_line((tip, 0), (tip, machine["tip_chord"])),

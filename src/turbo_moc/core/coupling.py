@@ -17,7 +17,7 @@ import jaxprop as jxp
 __all__ = ["derive_rotor_inlet_from_stator"]
 
 
-def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U):
+def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U, stator_efficiency=1.0):
     """Velocity triangle at the rotor inlet, from the stator's own EXIT
     static state (wall_final's LAST point: p, T, rho, M -- the converged
     nozzle wall exit, not the throat) plus the absolute flow angle
@@ -29,6 +29,10 @@ def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U):
     a wall point can sit arbitrarily close to the saturation curve (wet-
     steam/two-phase designs), where (p, T) alone is degenerate for phase
     determination, but (rho, T) never is.
+
+    ``stator_efficiency`` is the stator kinetic-energy efficiency (V/V_is)^2 at the same exit static pressure:
+    the exit keeps the MoC pressure and stagnation enthalpy, its velocity drops to sqrt(efficiency) V_is and
+    its static enthalpy (hence entropy) rises accordingly. 1.0 is the loss-free MoC exit.
 
     Returns
     -------
@@ -62,6 +66,15 @@ def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U):
     s_static = float(state_static.s)
 
     V_abs = M_abs * a
+    if not 0.0 < stator_efficiency <= 1.0:
+        raise ValueError("stator_efficiency must be in (0, 1].")
+    if stator_efficiency < 1.0:
+        h0 = h_static + 0.5 * V_abs ** 2
+        V_abs = float(V_abs * np.sqrt(stator_efficiency))
+        state_static = fluid.get_state(jxp.HmassP_INPUTS, h0 - 0.5 * V_abs ** 2, p_static)
+        T_static, rho_static = float(state_static.T), float(state_static.rho)
+        a, h_static, s_static = float(state_static.a), float(state_static.h), float(state_static.s)
+        M_abs = V_abs / a
     alpha = np.radians(alpha_deg)
     V_m = V_abs * np.cos(alpha)
     V_t = V_abs * np.sin(alpha)

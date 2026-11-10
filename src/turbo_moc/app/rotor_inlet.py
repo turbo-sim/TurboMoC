@@ -17,9 +17,9 @@ from turbo_moc.app.rotor_speed import resolve_speed, stator_reference
 
 
 @lru_cache(maxsize=32)
-def _triangle(serialized_nozzle, angle, speed):
+def _triangle(serialized_nozzle, angle, speed, stator_efficiency=1.0):
     # Cache only this small derived display calculation, never a MoC solve.
-    return derive_rotor_inlet_from_stator(json.loads(serialized_nozzle), angle, speed)
+    return derive_rotor_inlet_from_stator(json.loads(serialized_nozzle), angle, speed, stator_efficiency)
 
 
 def resolve_configuration(project, row_id, registry):
@@ -63,7 +63,8 @@ def resolve_configuration(project, row_id, registry):
     exit_state = {"fluid_name": project["machine"]["fluid_name"], "wall_final": {
         key: [nozzle["wall_final"][key][-1]] for key in ("p", "T", "rho", "M")}}
     try:
-        triangle = deepcopy(_triangle(json.dumps(exit_state, sort_keys=True), angle, speed))
+        triangle = deepcopy(_triangle(json.dumps(exit_state, sort_keys=True), angle, speed,
+                                      float(config["inlet_coupling"].get("stator_efficiency", 1.0))))
     except (ValueError, RuntimeError) as exc:
         raise ValueError(f"Cannot compute the coupled rotor inlet: {exc}") from exc
     if (not all(isfinite(triangle[name]) for name in ("P0_rel", "T0_rel", "M_rel", "beta_rel_deg"))

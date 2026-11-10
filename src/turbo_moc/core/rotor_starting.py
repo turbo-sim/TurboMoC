@@ -102,6 +102,45 @@ def starting_check(rotor):
             "leading_edge_radius_over_pitch": rotor["blade"]["le_radius"] / rotor["pitch"]}
 
 
+SEPARATION_RECOVERY = 0.5  # Goldman (NASA TN D-4422, 1968, p. 5), after Schubauer & Spangenberg (1958)
+
+
+def pressure_recovery(isentrope, mach_from, mach_to):
+    """Static-pressure rise from mach_from to mach_to over the dynamic pressure at mach_from (isentropic)."""
+    v = isentrope.velocity(mach_from)
+    state = isentrope.state(v)
+    return (float(isentrope.state(isentrope.velocity(mach_to)).p) - float(state.p)) / (0.5 * float(state.rho) * v * v)
+
+
+def design_limits(rotor):
+    """Goldman's three blade design limitations (NASA TN D-4422, 1968), on the real-gas relative isentrope.
+
+    - Starting: the Kantrowitz check of `starting_check`.
+    - Flow separation: the outlet transition of the upper (suction) surface recompresses M_upper -> M_outlet
+      and the inlet transition of the lower (pressure) surface compresses M_inlet -> M_lower. Goldman keeps the
+      pressure-recovery coefficient (pressure rise over the dynamic pressure where the rise starts) below about
+      1/2, and notes the supersonic separation value may be lower, so the limit is optimistic.
+    - Axial Mach: with a subsonic relative axial Mach number the blade imposes its inflow angle (unique
+      incidence, `unique_incidence`); the design inflow angle should match it.
+    """
+    check = starting_check(rotor)
+    isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
+                                   rotor.get("Q0_rel", float("nan")))
+    upper = pressure_recovery(isentrope, float(rotor["M_upper"]), float(rotor["M_outlet"]))
+    lower = pressure_recovery(isentrope, float(rotor["M_inlet"]), float(rotor["M_lower"]))
+    limits = dict(check, recovery_upper=upper, recovery_lower=lower, recovery_limit=SEPARATION_RECOVERY,
+                  attached=bool(max(upper, lower) < SEPARATION_RECOVERY),
+                  unique_incidence=bool(check["axial_mach"] < 1.0))
+    if limits["unique_incidence"]:
+        try:
+            unique = unique_incidence(rotor, check["M_inlet"])
+            limits.update(unique_beta_inlet=unique["beta_inlet"],
+                          unique_incidence_error=unique["beta_inlet"] - check["beta_inlet"])
+        except ValueError:
+            limits.update(unique_beta_inlet=float("nan"), unique_incidence_error=float("nan"))
+    return limits
+
+
 def design_for_margin(target_margin, M_lower, M_upper_bracket, **design):
     """Starting-constrained vortex design: the M_upper whose exact vortex passage, at its own natural pitch,
     has ``target_margin`` (throat over Kantrowitz ratio, with the delta* correction when ``boundary_layer`` is

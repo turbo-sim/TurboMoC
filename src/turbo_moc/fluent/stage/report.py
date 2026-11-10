@@ -31,6 +31,13 @@ def main(config_file, plots_only=False, case_filename=None):
         print("1/3 Extract surfaces and Fluent reports (headless Fluent)")
         extraction.extract(case_file, setup, data_dir, workflow["fluent"], radii)
         extraction.residual_table(output_dir / "fluent", data_dir)
+    setup = analysis.read_json(output_dir / "fluent" / "setup_summary.json")
+    if "stator_1_fluid" not in setup["cell_zones"]:  # Rotor-only case: stations and performance only, no figures
+        report_dir.mkdir(parents=True, exist_ok=True)
+        (report_dir / "report.json").write_text(json.dumps(analysis.compute_rotor_only(output_dir, report_dir), indent=2,
+                                                           default=float), encoding="utf-8")
+        print(f"Rotor-only report written: {report_dir / 'report.json'}")
+        return report_dir
     print("2/3 Figures and tables")
     options = workflow["report"]
     results = analysis.compute(output_dir, report_dir)

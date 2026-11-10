@@ -198,3 +198,46 @@ def compute(output_dir, report_dir=None):
 
 def radius_at(results, span):
     return results.r_hub + span * (results.r_shroud - results.r_hub)
+
+
+def compute_rotor_only(output_dir, report_dir=None):
+    """Rotor-only case (design relative inflow, no stator): rotor stations and performance.
+
+    Efficiencies use the stage definition, with the stator inlet total state of the barotropic model: the imposed
+    inflow already carries the design stator loss (stator_efficiency of the workflow), so eta_tt is the stage value
+    for that stator loss, without stator wake mixing.
+    """
+    data_dir = (report_dir or output_dir / "report") / "data"
+    setup = read_json(output_dir / "fluent" / "setup_summary.json")
+    point = read_json(output_dir / "operating_point.json")
+    reports = read_json(data_dir / "fluent_reports.json")
+    arrays = dict(np.load(data_dir / "surfaces.npz"))
+    blades = point["design"]["num_blades"]["rotor_1"]
+    state = setup["inlet_state"]
+    P0 = float(state["P0"])
+    model = BarotropicClosure.from_file(output_dir / "barotropy" / "fluent_expressions_safe.json", float(state["p_min"]), P0)
+    omega = float(setup["rotor_omega_rad_s"])
+    inlet = arrays[f"{boundary(setup, 'rotor_1', 'inlet')}|face|z-velocity"]
+    kinematics = Kinematics(omega, float(point["swirl_sign"]), float(np.sign(np.mean(inlet))))
+    stations = {"Rotor inlet (1)": mass_averages(arrays, boundary(setup, "rotor_1", "inlet"), model, kinematics, True),
+                "Rotor exit (2)": mass_averages(arrays, boundary(setup, "rotor_1", "outlet"), model, kinematics, True)}
+    rotor_in, outlet = stations["Rotor inlet (1)"], stations["Rotor exit (2)"]
+    mass_flow = abs(reports["mass_flow"][boundary(setup, "rotor_1", "outlet")]) * blades
+    torque = sum(reports["moment"]["rotor_1"][wall] for wall in ("blade", "hub")) * blades
+    work = torque * omega / mass_flow
+    drop_ts = model.head(P0) - model.head(outlet["p"])
+    drop_tt = drop_ts - outlet["kinetic"]
+    stage = dict(point["stage"])
+    performance = {
+        "Mass flow rate, full annulus": {"cfd": mass_flow, "moc": point["design"]["stator"]["mass_flow"]},
+        "Specific work (torque)": {"cfd": work / 1e3, "moc": stage.get("Specific work [kJ/kg]")},
+        "Specific work (Euler)": {"cfd": abs(omega) * (rotor_in["r_c_t"] - outlet["r_c_t"]) / 1e3,
+                                  "moc": stage.get("Specific work [kJ/kg]")},
+        "Efficiency, total-to-static": {"cfd": work / drop_ts, "moc": stage.get("Efficiency, total-to-static [-]")},
+        "Efficiency, total-to-total": {"cfd": work / drop_tt, "moc": None},
+        "Relative total-pressure ratio (Fluent p + rho w^2/2)": {
+            "cfd": (outlet["p"] + 0.5 * outlet["rho"] * outlet["w"] ** 2) / (rotor_in["p"] + 0.5 * rotor_in["rho"] * rotor_in["w"] ** 2),
+            "moc": None},
+    }
+    return {"stations": stations, "performance": performance, "fluent_reports": reports, "rotor_only": True,
+            "design_inflow": setup.get("rotor_inflow")}

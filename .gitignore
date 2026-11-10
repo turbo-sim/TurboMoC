@@ -35,7 +35,6 @@ output/
 turbo_moc_output/
 
 # Droplet-impingement example: meshes and Fluent files are not shared
-examples/droplet_impingment/meshes/
 examples/droplet_impingment/**/*.def
 examples/droplet_impingment/**/*.gtm
 examples/droplet_impingment/**/*.cas.h5
@@ -47,3 +46,11 @@ TurboExpo2027/
 examples/fluent_3D/
 examples/fluent_2D_stage/
 dev/
+examples/droplet_impingment/**/*.cgns
+examples/droplet_impingment/run_annulus_*/
+examples/droplet_impingment/run_2D_rotor/
+
+# Fluent session leftovers (transcripts and cleanup scripts from local runs)
+/fluent-*.trn
+/cleanup-fluent-*.bat
+/cleanup-fluent-*.sh

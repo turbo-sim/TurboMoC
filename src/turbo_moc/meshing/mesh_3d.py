@@ -144,7 +144,9 @@ class CoreDeformation:
         clearance = float(np.min(distance[outer]))
         if clearance <= required:
             raise ValueError(
-                "Insufficient sampled wall clearance to protect the full inflation stack. "
+                f"Insufficient sampled wall clearance to protect the full inflation stack "
+                f"(clearance {clearance:.4g} <= required {required:.4g} at "
+                f"{np.array2string(xy[outer[np.argmin(distance[outer])]], precision=4)}). "
                 "Increase the blade gap/domain clearance or reduce the requested inflation thickness."
             )
         self.collar = np.flatnonzero(distance <= required)
