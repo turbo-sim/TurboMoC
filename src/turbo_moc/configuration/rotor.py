@@ -136,8 +136,12 @@ def validate_rotor_configuration(config):
     if type(design["num_points"]) is not int or design["num_points"] < 10:
         raise ValueError("rotor_design.num_points must be an integer >= 10.")
     coupling = config["inlet_coupling"]
-    if not isinstance(coupling, dict) or set(coupling) != set(COUPLING_DEFAULTS):
-        raise ValueError("inlet_coupling requires mode and rotational_speed.")
+    if not isinstance(coupling, dict) or set(coupling) - {"stator_efficiency"} != set(COUPLING_DEFAULTS):
+        raise ValueError("inlet_coupling requires mode and rotational_speed (optional stator_efficiency).")
+    if "stator_efficiency" in coupling:
+        _finite(coupling["stator_efficiency"], "inlet_coupling.stator_efficiency", minimum=0, strict=True)
+        if coupling["stator_efficiency"] > 1:
+            raise ValueError("inlet_coupling.stator_efficiency must not exceed 1.")
     if coupling["mode"] not in ("manual", "stator_exit"):
         raise ValueError("inlet_coupling.mode must be manual or stator_exit.")
     speed = coupling["rotational_speed"]

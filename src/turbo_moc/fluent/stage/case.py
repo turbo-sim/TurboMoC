@@ -1,5 +1,7 @@
 """Fluent stage case: barotropic material, rotating rotor zone, mixing plane, periodicity and boundaries."""
 
+from pathlib import Path
+
 import numpy as np
 
 from ..common import MACH_EXPRESSION, boundary_types, configure_numerics
@@ -179,3 +181,88 @@ def configure_stage(solver, mesh_file, state, expressions, point, options):
     settings.solution.run_calculation.iter_count = options["solution_strategy"][0]["iterations"]
     return {"cell_zones": names, "boundaries": zones, "rotor_omega_rad_s": omega, "interface": kind,
             "passages": {row.split("_fluid")[0]: count for row, count in passages.items()}}
+
+
+def design_relative_inflow(output_dir, point):
+    """Rotor inflow of the design triangle for a rotor-only case: static pressure, Fluent total pressure, angle.
+
+    The barotropic material makes Fluent report total pressure as p + rho w^2 / 2 (checked on the s65u50
+    stage: 103.14 kPa from Fluent vs 103.31 from p + rho w^2 / 2), so that is what the inlet gets, with p and
+    rho on the rotor's relative isentrope (stator losses included) at the triangle Mach number.
+    """
+    import json
+    from ...core.rotor_starting import relative_isentrope
+    result = json.loads(max(Path(output_dir).glob("jobs/*/*/rotor_result.json"), key=lambda p: p.stat().st_mtime).read_text())
+    rotor = result.get("rotor", result)
+    iso = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"], rotor.get("Q0_rel", float("nan")))
+    mach, beta = float(point["relative_inlet_mach"]), float(point["relative_inlet_angle"])
+    w = float(iso.velocity(mach))
+    state = iso.state(w)
+    p, rho = float(state.p), float(state.rho)
+    return {"mach": mach, "beta_deg": beta, "w": w, "p": p, "rho": rho, "p0_fluent": p + 0.5 * rho * w ** 2}
+
+
+def mean_axial(solver, zone):
+    from ansys.fluent.core import SurfaceDataType, SurfaceFieldDataRequest
+    centroids = solver.fields.field_data.get_field_data(SurfaceFieldDataRequest(
+        surfaces=[zone], data_types=[SurfaceDataType.FacesCentroid]))[zone].face_centroids
+    return float(np.asarray(centroids, dtype=float).reshape(-1, 3)[:, 2].mean())
+
+
+def configure_rotor_only(solver, mesh_file, state, expressions, point, options, inflow):
+    """Rotor alone from the stage CGNS: stator cell zone deleted, rotor inlet a pressure inlet with the design
+    relative inflow (direction in the relative frame, cylindrical: tangential along the rotation, axial from inlet
+    to outlet). Same material, numerics, periodicity, outlet and walls as configure_stage."""
+    settings = solver.settings
+    settings.file.import_.read(file_type="cgns-mesh", file_name=str(mesh_file))
+    for name in [z for z in settings.setup.cell_zone_conditions.fluid.get_object_names() if z.startswith(STATOR)]:
+        solver.execute_tui(f"/mesh/modify-zones/delete-cell-zone {name}")
+    settings.mesh.check()
+    types = boundary_types(settings.setup.boundary_conditions)
+    zones = {f"{ROTOR}_{name}": zone(types, "rotor_1", name) for name in BOUNDARIES}
+    if any(z.startswith("stator") for z in settings.setup.cell_zone_conditions.fluid.get_object_names()):
+        raise RuntimeError("The stator cell zone was not deleted.")
+    names = configure_material(settings, expressions, options["material_name"])
+    modify = settings.mesh.modify_zones
+    modify.zone_type(zone_names=[zones[f"{ROTOR}_inlet"]], new_type="pressure-inlet")
+    modify.zone_type(zone_names=[zones[f"{ROTOR}_outlet"]], new_type="pressure-outlet")
+    modify.make_periodic(zone_name=zones[f"{ROTOR}_periodic_left"], shadow_zone_name=zones[f"{ROTOR}_periodic_right"],
+                         rotate_periodic=True, create=True, auto_translation=True)
+    configure_numerics(settings, options)
+    omega = point["swirl_sign"] * point["rpm"] * 2 * np.pi / 60
+    rotor_frame = settings.setup.cell_zone_conditions.fluid[names[ROTOR]].reference_frame
+    rotor_frame.frame_motion = True
+    rotor_frame.mrf_omega.value = omega
+
+    bc = settings.setup.boundary_conditions
+    axial = np.sign(mean_axial(solver, zones[f"{ROTOR}_outlet"]) - mean_axial(solver, zones[f"{ROTOR}_inlet"]))
+    beta = np.radians(inflow["beta_deg"])
+    direction = [0.0, float(np.sign(omega) * np.sin(beta)), float(axial * np.cos(beta))]
+    inlet = bc.pressure_inlet[zones[f"{ROTOR}_inlet"]]
+    m = inlet.momentum
+    m.reference_frame = "Relative to Adjacent Cell Zone"
+    m.gauge_total_pressure.value = inflow["p0_fluent"]
+    m.supersonic_or_initial_gauge_pressure.value = inflow["p"]
+    m.direction_specification_method = "Direction Vector"
+    m.coordinate_system = "Cylindrical (Radial, Tangential, Axial)"
+    m.flow_direction = [{"value": x} for x in direction]
+    inlet.turbulence.turbulence_specification = "Intensity and Viscosity Ratio"
+    inlet.turbulence.turbulent_intensity = options["turbulence_intensity"]
+    inlet.turbulence.turbulent_viscosity_ratio = options["turbulence_viscosity_ratio"]
+    outlet = bc.pressure_outlet[zones[f"{ROTOR}_outlet"]]
+    outlet.momentum.gauge_pressure.value = point["rotor_exit_pressure"]
+    outlet.turbulence.turbulence_specification = "Intensity and Viscosity Ratio"
+    outlet.turbulence.backflow_turbulent_intensity = options["turbulence_intensity"]
+    outlet.turbulence.backflow_turbulent_viscosity_ratio = options["turbulence_viscosity_ratio"]
+    shroud = bc.wall[zones[f"{ROTOR}_shroud"]].momentum
+    shroud.wall_motion = "Moving Wall"
+    shroud.relative = False
+    shroud.rotating = False
+    shroud.speed.value = 0.0
+    if options.get("slip_endwalls", False):
+        modify.zone_type(zone_names=[zones[f"{ROTOR}_{side}"] for side in ("hub", "shroud")], new_type="symmetry")
+    settings.mesh.check()
+    settings.solution.initialization.initialization_type = "hybrid"
+    settings.solution.run_calculation.iter_count = options["solution_strategy"][0]["iterations"]
+    return {"cell_zones": names, "boundaries": zones, "rotor_omega_rad_s": omega, "interface": "none (rotor only)",
+            "rotor_inflow": dict(inflow, direction_cylindrical=direction), "passages": {"rotor_1": 1}}

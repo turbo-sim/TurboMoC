@@ -17,6 +17,11 @@ FIELDS = ("absolute-pressure", "density", "x-velocity", "y-velocity", "z-velocit
           "relative-x-velocity", "relative-y-velocity", "relative-z-velocity")
 
 
+def rows_of(setup):
+    """Rows present in the case: both for a stage, the rotor alone for a rotor-only case."""
+    return tuple(row for row in ROWS if f"{row}_fluid" in setup["cell_zones"])
+
+
 def boundary(setup, row, name):
     return setup["boundaries"][f"{row}_fluid_{name}"]
 
@@ -55,16 +60,18 @@ def surface_arrays(field_data, surface, wall):
 def fluent_reports(settings, setup):
     definitions = settings.solution.report_definitions
     walls = set(settings.setup.boundary_conditions.wall.keys())
-    flow_surfaces = [boundary(setup, row, name) for row in ROWS for name in ("inlet", "outlet")]
-    definitions.surface.create(name="report_mass_flow")
+    flow_surfaces = [boundary(setup, row, name) for row in rows_of(setup) for name in ("inlet", "outlet")]
+    if "report_mass_flow" not in definitions.surface.keys():  # A GUI session may hold them from an earlier report
+        definitions.surface.create(name="report_mass_flow")
     mass_flow = definitions.surface["report_mass_flow"]
     mass_flow.report_type = "surface-massflowrate"
     mass_flow.surface_names = flow_surfaces
     mass_flow.per_surface = True
     moments, zone_lists = {}, {}
-    for row in ROWS:
+    for row in rows_of(setup):
         name = f"report_moment_{row}"
-        definitions.moment.create(name=name)
+        if name not in definitions.moment.keys():
+            definitions.moment.create(name=name)
         moment = definitions.moment[name]
         moment.report_output_type = "Moment"
         moment.mom_center = [0.0, 0.0, 0.0]
@@ -117,8 +124,9 @@ def extract(case_file, setup, data_dir, options, radii):
         settings = solver.settings
         settings.file.read_case_data(file_name=str(case_file))
         iso = settings.results.surfaces.iso_surface
-        for row in ROWS:
-            iso.create(name=midspan_surface(row))
+        for row in rows_of(setup):
+            if midspan_surface(row) not in iso.keys():  # A GUI session may hold them from an earlier report
+                iso.create(name=midspan_surface(row))
             surface = iso[midspan_surface(row)]
             surface.field = "radial-coordinate"
             surface.zones = [setup["cell_zones"][f"{row}_fluid"]]
@@ -126,7 +134,7 @@ def extract(case_file, setup, data_dir, options, radii):
 
         field_data = solver.fields.field_data
         arrays = {}
-        for row in ROWS:
+        for row in rows_of(setup):
             for name in ("inlet", "outlet", *WALLS):
                 arrays.update(surface_arrays(field_data, boundary(setup, row, name), wall=name in WALLS))
             arrays.update(surface_arrays(field_data, midspan_surface(row), wall=False))
@@ -154,6 +162,8 @@ def residual_table(transcript_dir, data_dir):
         return None
     parsed = barotropy.read_residual_file(str(transcripts[-1]))
     history = parsed[0] if isinstance(parsed, tuple) else parsed
+    if "iter" not in history.columns:  # Solved in a GUI started elsewhere: its transcript is not in this folder
+        return None
     history = history.drop_duplicates("iter", keep="last").sort_values("iter")
     history.to_csv(data_dir / "residuals.csv", index=False)
     return data_dir / "residuals.csv"

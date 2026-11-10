@@ -123,3 +123,15 @@ def test_subcooled_relative_stagnation_state_keeps_pressure_and_temperature():
     total = jxp.Fluid("CarbonDioxide").get_state(jxp.PT_INPUTS, tri["P0_rel"], tri["T0_rel"])
     assert not total.is_two_phase
     assert np.isclose(float(total.s), entropy, rtol=1e-3)
+
+
+def test_stator_efficiency_scales_kinetic_energy_at_the_same_pressure():
+    nozzle_result = _make_nozzle_result(M=1.4)
+    ideal = derive_rotor_inlet_from_stator(nozzle_result, alpha_deg=65.0, U=80.0)
+    lossy = derive_rotor_inlet_from_stator(nozzle_result, alpha_deg=65.0, U=80.0, stator_efficiency=0.97)
+
+    assert np.isclose(lossy["V_abs"] ** 2 / ideal["V_abs"] ** 2, 0.97)
+    assert np.isclose(lossy["p_static"], ideal["p_static"])
+    assert lossy["T_static"] > ideal["T_static"]  # Lost kinetic energy stays as static enthalpy
+    assert lossy["M_rel"] < ideal["M_rel"]
+    assert lossy["P0_rel"] < ideal["P0_rel"]

@@ -55,6 +55,8 @@ def stage_project(workflow):
     rotor = next(row for row in project["rows"] if row["role"] == "rotor")
     rotor["geometry"]["inlet_coupling"] = {"mode": "stator_exit",
                                            "rotational_speed": {"type": "actual", "value": float(workflow["rpm"])}}
+    if "stator_efficiency" in workflow:  # Stator kinetic-energy efficiency (V/V_is)^2 seen by the rotor design
+        rotor["geometry"]["inlet_coupling"]["stator_efficiency"] = float(workflow["stator_efficiency"])
     rotor["geometry"]["axial_interspace_mm"] = float(workflow["axial_interspace_mm"])
     if "fluid_name" in workflow:
         project["machine"]["fluid_name"] = workflow["fluid_name"]

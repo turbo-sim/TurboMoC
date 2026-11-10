@@ -91,7 +91,13 @@ def main(config_file):
                                     ui_mode=options["ui_mode"], start_timeout=options["start_timeout"],
                                     cwd=str(fluent_dir), cleanup_on_exit=False)
     print("4/5 Configure materials, rotating rotor zone, mixing plane, periodicity and boundaries")
-    configured = case.configure_stage(solver, output_dir / "mesh" / "stage.cgns", state, expressions, point, options)
+    if options.get("rotor_only", False):  # Rotor alone with the design relative inflow (Smith-chart screening)
+        inflow = case.design_relative_inflow(output_dir, point)
+        print("    rotor only, design inflow:", json.dumps(inflow, default=float))
+        configured = case.configure_rotor_only(solver, output_dir / "mesh" / "stage.cgns", state, expressions, point,
+                                               options, inflow)
+    else:
+        configured = case.configure_stage(solver, output_dir / "mesh" / "stage.cgns", state, expressions, point, options)
     case_file = fluent_dir / options["case_filename"]
     solver.settings.file.batch_options.confirm_overwrite = False
     solver.settings.file.write_case(file_name=str(case_file))

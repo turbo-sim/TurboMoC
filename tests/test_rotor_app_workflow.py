@@ -25,7 +25,7 @@ def coupled_project(tmp_path, monkeypatch):
         "wall_final": {"p": [100000.], "T": [280.], "rho": [1.2], "M": [2.]}})
     calls = []
 
-    def triangle(serialized, angle, speed):
+    def triangle(serialized, angle, speed, stator_efficiency=1.0):
         calls.append((json.loads(serialized), angle, speed))
         return {"P0_rel": 150000. + speed, "T0_rel": 330., "M_rel": 1.7,
                 "beta_rel_deg": angle - 20., "U": speed, "is_supersonic": True}

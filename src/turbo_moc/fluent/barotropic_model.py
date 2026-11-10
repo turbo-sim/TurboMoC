@@ -21,6 +21,8 @@ PROPERTY_VARIABLES = (
     "vapor_quality",
 )
 POSITIVE_PROPERTIES = ("density", "viscosity", "speed_of_sound")
+# jaxprop >= 0.5.8 names these quality_volume / quality_mass; the Fluent expressions keep the old names.
+RENAMED_PROPERTIES = {"void_fraction": "quality_volume", "vapor_quality": "quality_mass"}
 MAX_FIT_RELATIVE_ERROR = 0.01
 
 
@@ -163,6 +165,10 @@ def generate_barotropic_model(barotropy, config, nozzle, settings, output_dir):
     )
     logger.info("  Solve the expansion and fit the property polynomials.")
     model.solve()
+    for states in (model.states, model.state_in):
+        for name, current in RENAMED_PROPERTIES.items():
+            if name not in states and current in states:
+                states[name] = states[current]
     model.fit_polynomials()
     if settings["calculation_type"] == "blending":
         logger.info("  Keep barotropy's blended polynomials (equilibrium/metastable blending).")
@@ -342,7 +348,7 @@ def fit_wide_isentrope(barotropy, fitter, fluid, entropy, degree, segment_pressu
         states = [
             fluid.get_state(
                 barotropy.PSmass_INPUTS, float(pressure * fitter.p_in), entropy
-            ).to_dict()
+            ).to_dict(include_aliases=True)
             for pressure in normalized_pressure
         ]
         # Validate at midpoints that were not used in the fit.
@@ -350,7 +356,7 @@ def fit_wide_isentrope(barotropy, fitter, fluid, entropy, degree, segment_pressu
         check_states = [
             fluid.get_state(
                 barotropy.PSmass_INPUTS, float(pressure * fitter.p_in), entropy
-            ).to_dict()
+            ).to_dict(include_aliases=True)
             for pressure in check_pressure
         ]
         for variable in PROPERTY_VARIABLES:
