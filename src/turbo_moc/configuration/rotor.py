@@ -20,9 +20,9 @@ ROTOR_DEFAULTS = {
 }
 # Optional edge closure and boundary-layer correction settings passed through to design_rotor_vortex_blade.
 ROTOR_OPTIONAL = {"le_ellipse_ratio", "te_ellipse_ratio", "le_wedge_half_angle", "le_round_tip", "boundary_layer",
-                  "blade_type"}
+                  "blade_type", "impulse_thickness", "section_profiles"}  # section_profiles: 3D section-wise blades (meshing.section_morph)
 # blade_type "impulse_constant_passage" swaps the vortex geometry for the matched Baines baseline (core.impulse_blade).
-BLADE_TYPES = ("vortex", "impulse_constant_passage")
+BLADE_TYPES = ("vortex", "impulse_constant_passage", "impulse_thin_arc", "vortex_straight_transition", "vortex_arc_transition")  # last: vortex arcs, no MoC transitions (core.impulse_blade)
 ROTOR_OUTLET_CONDITIONS = ("mach", "pressure")
 SPEED_TYPES = {"actual": "Actual speed [rpm]", "blade_velocity_ratio": "Blade velocity ratio U/c₀ [-]",
                "specific": "Specific speed [-]"}

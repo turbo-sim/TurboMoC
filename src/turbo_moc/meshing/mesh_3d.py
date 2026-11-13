@@ -5,6 +5,7 @@ and automatic core grading. Volume assembly and CGNS auditing follow the
 ParaBlade mesh_examples/3D and 3D_v2 examples, without a ParaBlade dependency.
 """
 
+import os
 import json
 from pathlib import Path
 from time import perf_counter
@@ -200,16 +201,21 @@ class CoreDeformation:
             factor = splu(laplacian[free][:, free].tocsc()) if len(free) else None
             self.tangential = (fixed, free, factor, laplacian[free][:, fixed])
 
-    def deform(self, scale, reference, target, pitch):
-        """Match a new section while keeping opposite periodic nodes paired."""
-        warped = self.section["xy"] * scale
+    def deform(self, scale, reference, target, pitch, offset=(0.0, 0.0), wall_move=None, periodic_shift=None):
+        """Match a new section while keeping opposite periodic nodes paired; offset: edge-stacking translation;
+        wall_move: per-node displacement of the blade wall and collar (section-wise blades, meshing.section_morph)."""
+        warped = self.section["xy"] * scale + np.asarray(offset, dtype=float)
         result = warped.copy()
+        if wall_move is not None:
+            result[self.collar] += wall_move[self.collar]  # Prescribed like the outer boundaries: spread into the core
         for name, edges in self.section["boundaries"].items():
             if name != "blade":
                 ids = np.unique(edges)
                 result[ids] = meridional.corresponding_boundary(
                     self.section["xy"][ids], name, reference, target
                 )
+        if periodic_shift is not None:  # Section-wise blades: periodic lines follow the blade tangentially
+            result += periodic_shift
         prescribed = result[self.fixed] - warped[self.fixed]
         if self.factor is not None:
             result[self.free] += self.factor.solve(-self.coupling @ prescribed)
@@ -231,9 +237,15 @@ class CoreDeformation:
             a, b = np.roll(p, -1, axis=1) - p, np.roll(p, -2, axis=1) - np.roll(
                 p, -1, axis=1
             )
-            if np.any(a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0] <= 0):
+            bad = np.any(a[..., 0] * b[..., 1] - a[..., 1] * b[..., 0] <= 0, axis=1)
+            if np.any(bad):
+                where = p[bad].mean(axis=1)
+                ref_xy = self.section["xy"][cells[bad]].mean(axis=1)
                 raise ValueError(
-                    "Section deformation inverted a cell; reduce taper or refine the core."
+                    f"Section deformation inverted {int(bad.sum())} cell(s) (scale {scale:.4f}, offset {np.round(offset, 4).tolist()}; "
+                    f"first at deformed {np.round(where[0], 3).tolist()}, reference {np.round(ref_xy[0], 3).tolist()}; "
+                    f"reference blade y-range {np.round([min(self.section['xy'][:, 1]), max(self.section['xy'][:, 1])], 2).tolist()}); "
+                    "reduce taper or refine the core."
                 )
         return result
 
@@ -988,10 +1000,21 @@ def volume_mesh(section, design, config, output_dir, *, progress=None):
     start = perf_counter()
     deformation = None
     mapped = []
+    profiles = (config.get("rotor_design") or {}).get("section_profiles")
+    if not profiles and "rotor_design" not in config and os.environ.get("TURBOMOC_STATOR_SECTIONS"):
+        # Stator sections (3D design option B, 2026-11-13): JSON {"hub","mid","tip": moc_result.json}. An environment
+        # variable because the stator configuration schema is closed; set it only for the build of that case.
+        profiles = json.loads(Path(os.environ["TURBOMOC_STATOR_SECTIONS"]).read_text(encoding="utf-8"))
+    morph = None
+    if profiles:  # Section-wise blades (meshing.section_morph)
+        from .section_morph import SectionMorph
+        morph = SectionMorph(profiles, section, design, config)
+        emit(progress, f"Section-wise blades: {morph.summary}")
     for j, value in enumerate(eta):
         emit(progress, f"Map span section {j + 1}/{len(eta)}", 0.05 + 0.45 * j / len(eta))
         scale = design.meridional_channel.section_scale(float(value))
-        if np.isclose(scale, 1, rtol=1e-12, atol=1e-12):
+        offset = design.section_offset(float(value)) if hasattr(design, "section_offset") else np.zeros(2)
+        if np.isclose(scale, 1, rtol=1e-12, atol=1e-12) and not np.any(offset) and morph is None:
             q = section["xy"]
         else:
             if deformation is None:
@@ -999,7 +1022,10 @@ def volume_mesh(section, design, config, output_dir, *, progress=None):
                 deformation = CoreDeformation(section, numerics,
                     sliding_boundaries=tuple(design.assembly.get("interfaces", {})))
             _, target = design.section(float(value))
-            q = deformation.deform(scale, design.curves, target, design.meridional_channel.pitch)
+            move = morph.displacement(value, scale, offset, deformation.collar) if morph else None
+            # Stator sections: shape changes < 0.5 mm, no periodic shift (its fade folded the short TE-interface strip)
+            shift = morph.periodic_shift(value, scale, offset, section) if morph and not getattr(morph, "stator", False) else None
+            q = deformation.deform(scale, design.curves, target, design.meridional_channel.pitch, offset, move, shift)
         mapped.append(design.meridional_channel.map_points(q, float(value)))
     xyz_sections = np.asarray(mapped)
     if gmsh.isInitialized():

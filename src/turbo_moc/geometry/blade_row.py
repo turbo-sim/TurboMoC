@@ -30,13 +30,38 @@ class Design:
     assembly: dict = field(default_factory=dict)
     flow_domain: dict = field(default_factory=dict)
 
+    def section_offset(self, eta):
+        """Meridional translation of the section in the conformal plane (zero unless edge stacking applies).
+
+        A row with a shared outlet interface only (an upstream row, e.g. the stator) is stacked at its trailing
+        edge: the TE keeps the midspan axial position at every span, so the strip between the TE and the
+        interface plane keeps its length. With LE stacking (the default reference) and chord proportional to r,
+        the conformal TE moves by the full chord times (r_ref/r - 1) while the interface stays put; at hub-to-tip
+        0.78 that stretched the stator outlet strip until cells inverted (2026-11-12, 3D stage). Cylindrical
+        (axial) channels only: q_m of a fixed axial position scales with r_ref / r.
+        """
+        interfaces = self.assembly.get("interfaces") or {}
+        channel = self.meridional_channel
+        if "outlet" not in interfaces or "inlet" in interfaces or getattr(channel, "is_linear", False):
+            return np.zeros(2)
+        # Follow the interface plane itself: its conformal station scales with r_ref / r, so moving the whole section
+        # by the same amount keeps the TE-interface strip identical to midspan (a rigid translation; following the TE
+        # instead left a 0.6 mm stretch at hub-to-tip 0.78 that still folded the acute outlet corner).
+        station = float(np.mean(np.asarray(self.curves["outlet"])[:, 1]))
+        radius = lambda e: float(channel.meridional_points(channel.parameter_from_prime(-station / channel.reference_radius, e), e)[0])
+        scale = channel.section_scale(float(eta))
+        return np.array([0.0, station * (radius(.5) / radius(float(eta)) - scale)])
+
     def section(self, eta):
-        """Scale shape/chord while retaining pitch and the reference translation."""
+        """Scale shape/chord while retaining pitch and the reference translation (plus the edge-stacking offset)."""
         scale = self.meridional_channel.section_scale(float(eta))
-        if (np.isclose(scale, 1, rtol=1e-12, atol=1e-12)
+        offset = self.section_offset(eta)
+        if (np.isclose(scale, 1, rtol=1e-12, atol=1e-12) and not np.any(offset)
                 and (not self.assembly.get("interfaces") or float(eta) == .5)):
             return self.blade, self.curves
         blade = scale_blade(self.blade, scale, np.zeros(2))
+        if np.any(offset):
+            blade = scale_blade(blade, 1.0, -offset)  # (p - origin) * 1: a pure translation by +offset
         blade["pitch"] = self.meridional_channel.pitch
         shift = np.array([self.curves["shift_mm"], 0.0])
         curves = dict(self.curves)
@@ -52,9 +77,9 @@ class Design:
         ):
             value = self.curves.get(name)
             if isinstance(value, BSpline):
-                curves[name] = BSpline(value.t, (value.c - shift) * scale + shift, value.k)
+                curves[name] = BSpline(value.t, (value.c - shift) * scale + shift + offset, value.k)
             elif isinstance(value, np.ndarray):
-                curves[name] = (value - shift) * scale + shift
+                curves[name] = (value - shift) * scale + shift + offset
         center = curves["passage_reference"]
         curves["periodic_left"] = center - [self.meridional_channel.pitch / 2, 0]
         curves["periodic_right"] = center + [self.meridional_channel.pitch / 2, 0]

@@ -74,10 +74,18 @@ def _run_job(request_path, request):
                 from turbo_moc.configuration.rotor import vortex_parameters
                 inputs = vortex_parameters(solver_parameters(config["rotor_design"], rotor=True))
                 blade_type = inputs.pop("blade_type", "vortex")
+                thickness = inputs.pop("impulse_thickness", None)  # t_max / chord of impulse_thin_arc
+                inputs.pop("section_profiles", None)  # Mesh-only input (3D section-wise blades)
                 rotor = design_rotor_vortex_blade(**inputs)
                 if blade_type == "impulse_constant_passage":
                     from turbo_moc.core.impulse_blade import constant_passage_blade
                     rotor = constant_passage_blade(rotor, **inputs)
+                elif blade_type == "impulse_thin_arc":
+                    from turbo_moc.core.impulse_blade import thin_arc_blade
+                    rotor = thin_arc_blade(rotor, thickness, **inputs)
+                elif blade_type in ("vortex_straight_transition", "vortex_arc_transition"):
+                    from turbo_moc.core.impulse_blade import straight_transition_blade
+                    rotor = straight_transition_blade(rotor, transition=blade_type.split("_")[1], **inputs)
                 rotor.update(P0_rel=inputs["P0_rel"], T0_rel=inputs["T0_rel"],
                              Q0_rel=inputs.get("Q0_rel", float("nan")))
                 flow.write_json(folder / "rotor_result.json", rotor)
