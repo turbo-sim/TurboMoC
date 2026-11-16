@@ -10,6 +10,7 @@ blade. Wall nodes move to the blended profile at the same arc-length fraction; t
 with its nearest wall node, and ``CoreDeformation`` spreads the displacement into the core.
 """
 import json
+import os
 
 import numpy as np
 from scipy.spatial import cKDTree
@@ -50,7 +51,14 @@ def _conformal(result, pitch):
     return _closed_resample(q)
 
 
-def _stator_conformal(path, config, chord):
+def _stator_entry(entry):
+    """Stator section entry: a moc_result.json path (option B: row metal angle, reference chord) or a dict
+    {"moc_result", "metal_angle_out", "pitch_chord"} (free-vortex option C, 2026-11-13: own exit angle and own natural
+    pitch-to-chord ratio)."""
+    return ({"moc_result": entry} if isinstance(entry, str) else dict(entry))
+
+
+def _stator_conformal(path, config, chord, metal_angle_out=None):
     """Stator section from its MoC result (``moc_result.json``, stator design option B of 2026-11-13): the blade
     template of the row's own blade_geometry on the displaced wall, LE at the origin, scaled to the reference
     conformal chord exactly as ``meridional_channel.build_section`` scales the reference stator."""
@@ -58,7 +66,10 @@ def _stator_conformal(path, config, chord):
     from turbo_moc.geometry.stator_boundary_layer import displaced_nozzle
     nozzle = displaced_nozzle(json.loads(open(path, encoding="utf-8").read()), config)
     wall = nozzle["wall_final"]
-    contour = planar.blade_contour(parametrize_stator(wall["x"], wall["y"], **config["blade_geometry"]))
+    geometry = dict(config["blade_geometry"])
+    if metal_angle_out is not None:
+        geometry["metal_angle_out"] = float(metal_angle_out)
+    contour = planar.blade_contour(parametrize_stator(wall["x"], wall["y"], **geometry))
     q = (contour - contour[np.argmax(contour[:, 1])]) * (chord / np.ptp(contour[:, 1]))
     return _closed_resample(q)
 
@@ -67,10 +78,19 @@ class SectionMorph:
     def __init__(self, profiles, section, design, config=None):
         pitch = float(design.meridional_channel.pitch)
         reference = _closed_resample(planar.xy(design.blade["blade_curve"]))
-        self.stator = str(profiles["mid"]).endswith("moc_result.json")
+        mid_entry = profiles["mid"]
+        self.stator = str(mid_entry if isinstance(mid_entry, str) else mid_entry.get("moc_result", "")).endswith(
+            "moc_result.json")
+        self.te_stacked = False
         if self.stator:  # Stator sections (MoC results)
             chord = float(np.ptp(reference[:, 1]))
-            raw = {k: _stator_conformal(profiles[k], config, chord) for k in SPANS}
+            entries = {k: _stator_entry(profiles[k]) for k in SPANS}
+            # Own natural pitch-to-chord (free vortex): chord_k = chord_ref (s/c)_mid / (s/c)_k at the common pitch
+            ratio = {k: (entries["mid"]["pitch_chord"] / e["pitch_chord"]) if "pitch_chord" in e else 1.0
+                     for k, e in entries.items()}
+            raw = {k: _stator_conformal(e["moc_result"], config, chord * ratio[k], e.get("metal_angle_out"))
+                   for k, e in entries.items()}
+            self.te_stacked = any("pitch_chord" in e for e in entries.values())
             # Shape differences only, on the exact reference: the re-fitted midspan template sat 0.09 mm off the
             # reference blade and that offset inverted cells at every span (2026-11-13). Hub/tip = reference +
             # (own section - own midspan), so the midspan is the reference and the stacking is unchanged.
@@ -87,13 +107,26 @@ class SectionMorph:
         # the TE (hub chord -10 %: 3.8 mm) and folded the pressure-side core there (2026-11-12); hub and tip sections
         # are shorter than midspan, so their LE moves downstream, away from the short inlet interface strip.
         centre = loaded["mid"].mean(axis=0)
-        for k in ("hub", "tip"):
+        if self.te_stacked:
+            # Stator sections of different chord (free vortex, 2026-11-13): LE stacking (the LE sits 0.3 mm from the
+            # periodic line; TE and centroid stacking moved it and inverted 3-70 hub cells there). The chord change
+            # goes to the TE: hub TE 1.6 mm upstream, tip TE 1.7 mm into the 4 mm interspace.
+            for k in ("hub", "tip"):
+                loaded[k] = loaded[k] - (loaded[k][0] - loaded["mid"][0])
+        for k in (() if self.te_stacked else ("hub", "tip")):
             loaded[k] = loaded[k] - (loaded[k].mean(axis=0) - centre)
             # A section longer than midspan would push its LE upstream into the short inlet interface strip (reacting
             # tip section, chord +4.6 %, folded the strip at 2026-11-13): keep the LE at or behind the midspan LE.
+            # TURBOMOC_ROTOR_LE_GAP [mm, default 0]: a clamped section's LE goes that far behind the midspan LE
+            # (constant-chord hub, 2026-11-13: LE pinned at the midspan station inverted 3 inlet-strip cells).
+            gap = 0.0 if self.stator else float(os.environ.get("TURBOMOC_ROTOR_LE_GAP", 0.0))
             upstream = loaded[k][0, 1] - loaded["mid"][0, 1]
-            if upstream > 0:
-                loaded[k] = loaded[k] - [0.0, upstream]
+            if upstream > -gap if gap else upstream > 0:
+                loaded[k] = loaded[k] - [0.0, upstream + gap]
+            # TURBOMOC_ROTOR_LE_PITCH=1: LE on the midspan LE pitchwise (constant-chord hub, 2026-11-13: the centroid
+            # stacking moved the longer hub LE sideways and folded the 2 mm inlet strip)
+            if not self.stator and os.environ.get("TURBOMOC_ROTOR_LE_PITCH") == "1":
+                loaded[k] = loaded[k] - [loaded[k][0, 0] - loaded["mid"][0, 0], 0.0]
         self.profiles = loaded
         xy = section["xy"]
         self.wall = np.unique(section["boundaries"]["blade"])

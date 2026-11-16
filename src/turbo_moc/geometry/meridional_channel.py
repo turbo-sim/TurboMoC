@@ -43,6 +43,12 @@ def validate_machine(machine):
     for name in names:
         if not np.isfinite(machine[name]) or machine[name] <= 0:
             raise ValueError(f"machine.{name} must be finite and positive [mm].")
+    diffuser = machine.get("diffuser")
+    if diffuser is not None:
+        angles = diffuser_angles(diffuser) if machine["type"] == "axial" else None
+        if angles is None or not all(0 <= a < 30 for a in angles):
+            raise ValueError("machine.diffuser (axial only) requires half_angle, or hub_angle and shroud_angle, "
+                             "in [0, 30) deg.")
     flare = machine.get("flare")
     if flare is not None:
         if machine["type"] != "axial" or set(flare) != {"ratio", "end"}:
@@ -68,6 +74,7 @@ class GeometryDefinition:
     hub: BSpline
     shroud: BSpline
     num_blades: int
+    exit_slope: tuple = None  # (hub, shroud) dr/dz of the walls downstream of the TE (exhaust diffuser), None: TE tangent
 
     def to_dict(self):
         """Record the common geometry definition alongside the exported mesh."""
@@ -83,6 +90,7 @@ class GeometryDefinition:
                 "control_points_rz_mm": self.shroud.c.tolist(),
                 "degree": self.shroud.k,
             },
+            **({"exit_slope": list(self.exit_slope)} if self.exit_slope else {}),
         }
 
 
@@ -103,12 +111,30 @@ def flared_wall(radius, shift, chord, end):
     return BSpline(knots, np.column_stack([radii, greville * chord]), 3)
 
 
+def diffuser_angles(diffuser):
+    """(hub, shroud) opening angles [deg] of the exhaust diffuser walls: {half_angle} (symmetric, 2026-11-15) or
+    {hub_angle, shroud_angle} (each wall opening outward from the channel, 2026-11-16); None if malformed."""
+    if set(diffuser) == {"half_angle"}:
+        return float(diffuser["half_angle"]), float(diffuser["half_angle"])
+    if set(diffuser) == {"hub_angle", "shroud_angle"}:
+        return float(diffuser["hub_angle"]), float(diffuser["shroud_angle"])
+    return None
+
+
 def axial_geometry(machine):
     """Convert cylindrical walls and hub/tip chords to meridional curves.
 
     Optional flare {ratio, end}: blade height (1 + ratio) x blade_height from u = end to the TE, opened
     symmetrically about midspan (midspan radius and blade speed unchanged)."""
     hub, tip = machine["hub_radius"], machine["hub_radius"] + machine["blade_height"]
+    diffuser = machine.get("diffuser")
+    if diffuser is not None:  # Exhaust diffuser (2026-11-15): cylindrical blade row, walls open from the TE onwards
+        hub_angle, shroud_angle = diffuser_angles(diffuser)
+        return GeometryDefinition(
+            hub=meridional_line((hub, 0), (hub, machine["hub_chord"])),
+            shroud=meridional_line((tip, 0), (tip, machine["tip_chord"])),
+            num_blades=machine["num_blades"],
+            exit_slope=(-float(np.tan(np.radians(hub_angle))), float(np.tan(np.radians(shroud_angle)))))
     flare = machine.get("flare")
     if flare is not None:
         shift = 0.5 * flare["ratio"] * machine["blade_height"]
@@ -188,7 +214,8 @@ class MeridionalChannel:
                     "Hub/shroud must be finite (r, z) B-splines on [0, 1]."
                 )
         self._derivatives = tuple(curve.derivative() for curve in self._curves)
-        self._straight = all(
+        self._exit_slope = definition.exit_slope
+        self._straight = not self._exit_slope and all(
             curve.k == 1 and len(curve.c) == 2 for curve in self._curves
         )
         self._chords = {}
@@ -237,11 +264,16 @@ class MeridionalChannel:
         u = np.asarray(u, dtype=float)
         clipped = np.clip(u, 0, 1)
         values = []
-        for curve, tangent in zip(self._curves, self._derivatives):
+        for k, (curve, tangent) in enumerate(zip(self._curves, self._derivatives)):
+            slope = tangent(clipped)
+            if self._exit_slope:  # Downstream of the TE the wall turns to dr/dz = exit_slope (diffuser)
+                downstream = (u > 1)[..., None]
+                turned = np.stack((slope[..., 0] + self._exit_slope[k] * slope[..., 1], slope[..., 1]), axis=-1)
+                slope = np.where(downstream, turned, slope)
             values.append(
-                tangent(clipped)
+                slope
                 if derivative
-                else curve(clipped) + (u - clipped)[..., None] * tangent(clipped)
+                else curve(clipped) + (u - clipped)[..., None] * slope
             )
         return (1 - eta) * values[0] + eta * values[1]
 

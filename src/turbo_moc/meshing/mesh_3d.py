@@ -997,6 +997,14 @@ def volume_mesh(section, design, config, output_dir, *, progress=None):
     directory.mkdir(parents=True, exist_ok=True)
     numerics = config["mesh"]["numerics"]
     eta = meridional.span_stations(numerics)
+    from . import tip_gap
+    gap = tip_gap.settings(config)  # Rotor tip clearance (opt-in, TURBOMOC_TIP_GAP_MM)
+    interior, j_tip = None, None
+    if gap:
+        eta, j_tip = tip_gap.stations(numerics, gap)
+        interior = tip_gap.BladeInterior(section, numerics["domain_size"])
+        emit(progress, f"Tip clearance {gap['gap_mm']} mm: {gap['layers']} layers, "
+                       f"{len(interior.xy)} interior nodes, {len(interior.tris)} triangles")
     start = perf_counter()
     deformation = None
     mapped = []
@@ -1022,10 +1030,13 @@ def volume_mesh(section, design, config, output_dir, *, progress=None):
                 deformation = CoreDeformation(section, numerics,
                     sliding_boundaries=tuple(design.assembly.get("interfaces", {})))
             _, target = design.section(float(value))
-            move = morph.displacement(value, scale, offset, deformation.collar) if morph else None
+            blade_eta = min(float(value) / gap["eta_tip"], 1.0) if gap else value  # morph spans the blade only
+            move = morph.displacement(blade_eta, scale, offset, deformation.collar) if morph else None
             # Stator sections: shape changes < 0.5 mm, no periodic shift (its fade folded the short TE-interface strip)
-            shift = morph.periodic_shift(value, scale, offset, section) if morph and not getattr(morph, "stator", False) else None
+            shift = morph.periodic_shift(blade_eta, scale, offset, section) if morph and not getattr(morph, "stator", False) else None
             q = deformation.deform(scale, design.curves, target, design.meridional_channel.pitch, offset, move, shift)
+        if interior is not None:
+            q = np.vstack((q, interior.positions(q) if j >= j_tip else interior.xy))
         mapped.append(design.meridional_channel.map_points(q, float(value)))
     xyz_sections = np.asarray(mapped)
     if gmsh.isInitialized():
@@ -1034,7 +1045,10 @@ def volume_mesh(section, design, config, output_dir, *, progress=None):
     try:
         gmsh.option.setNumber("General.Terminal", int(numerics["terminal_output"]))
         emit(progress, "Assemble volume topology")
-        counts = assemble_volume(section, xyz_sections, design.meridional_channel)
+        if interior is not None:
+            counts = tip_gap.assemble_volume(section, interior, xyz_sections, design.meridional_channel, j_tip, SURFACES)
+        else:
+            counts = assemble_volume(section, xyz_sections, design.meridional_channel)
         emit(progress, "Check Jacobians, boundary patches and periodicity", 0.65)
         validation = validate_volume(section, xyz_sections, design.meridional_channel)
         emit(progress, "Calculate volume skewness, orthogonality and edge aspect ratio")

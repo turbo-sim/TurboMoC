@@ -196,7 +196,8 @@ def mapping_from_data(definition):
                 definition[name]["degree"])
         for name in ("hub", "shroud")
     ]
-    return MeridionalChannel(GeometryDefinition(*walls, definition["num_blades"]))
+    slope = definition.get("exit_slope")
+    return MeridionalChannel(GeometryDefinition(*walls, definition["num_blades"], tuple(slope) if slope else None))
 
 
 def section_data(design):
