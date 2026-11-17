@@ -15,7 +15,7 @@ needs.
 
 import numpy as np
 import jaxprop as jxp
-from scipy.optimize import brentq
+from scipy.optimize import brentq, minimize_scalar
 
 
 class Isentrope:
@@ -29,8 +29,35 @@ class Isentrope:
     def state(self, v):
         return self.fluid.get_state(jxp.HmassSmass_INPUTS, self.h0 - 0.5 * v * v, self.s)
 
+    def mach(self, v):
+        return v / float(self.state(v).a)
+
+    def _mach_samples(self):
+        """M(V) on a grid, with every interior maximum located exactly (the dew-line peak of wet-to-dry
+        expansions), so that two roots close to a peak are never hidden inside one grid interval."""
+        if getattr(self, "_samples", None) is None:
+            speeds = list(np.linspace(1e-3, self.v_max, 129))
+            machs = [self.mach(v) for v in speeds]
+            for i in [i for i in range(1, len(speeds) - 1) if machs[i - 1] <= machs[i] > machs[i + 1]]:
+                peak = minimize_scalar(lambda v: -self.mach(v), bounds=(speeds[i - 1], speeds[i + 1]),
+                                       method="bounded", options={"xatol": 1e-9 * self.v_max})
+                speeds.append(float(peak.x))
+                machs.append(-float(peak.fun))
+            order = np.argsort(speeds)
+            self._samples = (np.asarray(speeds)[order], np.asarray(machs)[order])
+        return self._samples
+
     def velocity(self, mach):
-        return brentq(lambda v: v / float(self.state(v).a) - mach, 1e-3, self.v_max)
+        """Velocity at a Mach number: the first crossing along the expansion (smallest V). M(V) is not monotone
+        on wet-to-dry expansions (sound-speed jump at the dew line), as in ``vortex_blade._V_of_M``."""
+        speeds, machs = self._mach_samples()
+        above = np.flatnonzero(machs >= mach)
+        if machs[0] > mach or above.size == 0:
+            raise ValueError(f"Mach number {mach} outside the isentrope's range")
+        k = int(above[0])
+        if k == 0:
+            return float(speeds[0])
+        return brentq(lambda v: self.mach(v) - mach, speeds[k - 1], speeds[k])
 
     def flux(self, v):
         return float(self.state(v).rho) * v
@@ -41,8 +68,8 @@ def minimum_temperature(fluid_name):
     return CP.PropsSI("Tmin", fluid_name) + 5.0
 
 
-def relative_isentrope(fluid_name, P0_rel, T0_rel, Q0_rel=float("nan")):
-    fluid = jxp.Fluid(fluid_name)
+def relative_isentrope(fluid_name, P0_rel, T0_rel, Q0_rel=float("nan"), backend="HEOS"):
+    fluid = jxp.Fluid(fluid_name, backend=backend)
     total = (fluid.get_state(jxp.PQ_INPUTS, P0_rel, Q0_rel) if np.isfinite(Q0_rel)
              else fluid.get_state(jxp.PT_INPUTS, P0_rel, T0_rel))
     return Isentrope(fluid, total.h, total.s, minimum_temperature(fluid_name))
@@ -91,7 +118,7 @@ def geometric_throat(rotor):
 def starting_check(rotor):
     """Throat, Kantrowitz and isentropic ratios of a vortex rotor result (as written by the app worker)."""
     isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
-                                   rotor.get("Q0_rel", float("nan")))
+                                   rotor.get("Q0_rel", float("nan")), rotor.get("backend", "HEOS"))
     mach, beta = float(rotor["M_inlet"]), float(rotor["beta_inlet"])
     throat_ratio = geometric_throat(rotor) / (rotor["pitch"] * np.cos(np.radians(beta)))
     kantrowitz = kantrowitz_ratio(isentrope, mach)
@@ -125,7 +152,7 @@ def design_limits(rotor):
     """
     check = starting_check(rotor)
     isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
-                                   rotor.get("Q0_rel", float("nan")))
+                                   rotor.get("Q0_rel", float("nan")), rotor.get("backend", "HEOS"))
     upper = pressure_recovery(isentrope, float(rotor["M_upper"]), float(rotor["M_outlet"]))
     lower = pressure_recovery(isentrope, float(rotor["M_inlet"]), float(rotor["M_lower"]))
     limits = dict(check, recovery_upper=upper, recovery_lower=lower, recovery_limit=SEPARATION_RECOVERY,
@@ -166,7 +193,7 @@ def design_for_margin(target_margin, M_lower, M_upper_bracket, **design):
 def starting_curves(rotor, machs):
     """Isentropic and Kantrowitz ratios along the rotor's relative isentrope, for the starting chart."""
     isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
-                                   rotor.get("Q0_rel", float("nan")))
+                                   rotor.get("Q0_rel", float("nan")), rotor.get("backend", "HEOS"))
     return np.array([[isentropic_ratio(isentrope, m), kantrowitz_ratio(isentrope, m)] for m in machs])
 
 
@@ -193,7 +220,7 @@ def unique_incidence(rotor, mach):
     fix beta_1 and M_E; s is the blade spacing and r the leading-edge radius.
     """
     isentrope = relative_isentrope(rotor["fluid_name"], rotor["P0_rel"], rotor["T0_rel"],
-                                   rotor.get("Q0_rel", float("nan")))
+                                   rotor.get("Q0_rel", float("nan")), rotor.get("backend", "HEOS"))
     spacing, radius = float(rotor["pitch"]), float(rotor["blade"]["le_radius"])
     metal = np.radians(float(rotor["beta_inlet"]))
     v1 = isentrope.velocity(mach)
