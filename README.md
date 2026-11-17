@@ -1,6 +1,6 @@
 <img src="docs/icons/t3-dynamic.svg" alt="TurboMoC logo with the Atlantic nozzle icon and Dynamic wordmark" width="460">
 
-**From a real-fluid supersonic nozzle to a meshed turbine stage, in one Python package.**
+**From a real-fluid supersonic nozzle to a meshed and simulated turbine stage, in one Python package.**
 
 Python package for the design of supersonic nozzles and turbomachinery blades using the method of characteristics. Its current design
 app designs stator and vortex rotor profiles for linear cascades and axial/radial
@@ -32,7 +32,13 @@ sizing, CAD and stage-assembly tools.
 - **Stator**: the nozzle wall becomes a B-spline blade with prescribed inlet/outlet metal angles,
   trailing-edge radius and throat, editable control point by control point.
 - **Rotor**: supersonic vortex blades (Goldman's method, generalized to real gases), impulse or
-  reacting, optionally coupled to the stator exit state.
+  reacting, optionally coupled to the stator exit state (including the stator loss), with elliptic
+  leading and trailing edges. A constant-passage circular-arc impulse blade is available as a baseline.
+- **Supersonic rotor inlet**: unique incidence angle (Starken's method for a general equation of state)
+  with the leading-edge bow-shock stand-off (Moeckel), and the Kantrowitz starting check of the passage
+  on the real-fluid relative isentrope.
+- **Boundary-layer correction**: stator and rotor walls are offset by the displacement thickness of a
+  turbulent flat-plate layer computed from the inviscid design.
 
 ![Stator blade derived from the nozzle wall and a supersonic vortex rotor blade](docs/images/readme_blades.png)
 
@@ -61,6 +67,22 @@ sizing, CAD and stage-assembly tools.
 
 ![Unstructured 2D passage mesh and the inflation layers at the trailing edge](docs/images/readme_mesh_2d.png)
 
+### Stage CFD with Ansys Fluent
+
+- `turbo_moc.fluent.stage` sets up a stator–rotor stage from the design (mixing plane,
+  barotropic two-phase material built with the companion barotropy package, SST $k$–$\omega$)
+  and writes a Markdown/HTML/PDF report that compares the solution with the MoC design:
+  efficiencies, work, inflow angles, blade Mach numbers and passage fields.
+- Three-dimensional stages from two-dimensional sections: sections blended along the span,
+  optional rotor tip clearance and an exhaust diffuser on the hub and/or shroud.
+
+### Automatic differentiation (optional)
+
+- `turbo_moc.jax_rotor` is a JAX copy of the vortex rotor and its starting check, for exact
+  gradients of the blade geometry and starting margin with respect to the design inputs.
+  The app and the rest of the package use NumPy and do not import it; a test keeps the two
+  implementations identical.
+
 ### Interactive app and workflows
 
 - The current Dash app has **Geometry generation** and **Mesh generation**
@@ -72,10 +94,10 @@ sizing, CAD and stage-assembly tools.
 - Thin scripted workflows and editable cases live under
   [`examples/`](examples/readme.md):
   [Gmsh 2D](examples/gmsh_2D/readme.md),
-  [Gmsh 3D](examples/gmsh_3D/readme.md) and
-  [Fluent 2D automation](examples/fluent_2D/readme.md).
+  [Gmsh 3D](examples/gmsh_3D/readme.md),
+  [Fluent 2D automation](examples/fluent_2D/readme.md) and
+  [Fluent 3D stage](examples/fluent_3D/stage/readme.md).
 
-The [package refactor](refactor.md) describes the current module layout and import changes.
 The [app development checklist](docs/internal_information/app_development_checklist.md)
 records retained capabilities and remaining integration work.
 The [teaching guide](docs/internal_information/theory_guide.md) derives the coordinate
