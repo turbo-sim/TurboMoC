@@ -94,3 +94,17 @@ def test_gradient_matches_reference_differences(case):
             down = ref_vb.design_rotor_vortex_blade(fluid_name=fluid, **state, **{**design, var: design[var] - h})
         fd = (up["pitch"] - down["pitch"]) / (2 * h)
         assert abs(ad - fd) < TOL_GRADIENT * max(abs(fd), 1e-6), f"{var}: AD {ad} vs FD {fd}"
+
+
+@pytest.mark.parametrize("ratio", ["kantrowitz_ratio", "isentropic_ratio"])
+def test_ratio_derivative_matches_reference(ratio):
+    """d/dM of the Kantrowitz and isentropic ratios (spline on the reference values) vs a Richardson-extrapolated
+    central difference of the reference (steps 1e-3, 2e-3: truncation O(h^4), root-solve noise ~1e-8)."""
+    state = _state("Cyclopentane", "two-phase")
+    model = StartingModel("Cyclopentane", **state)
+    reference = getattr(ref_starting, ratio)
+    for mach in (1.3, 1.7):
+        ad = float(jax.grad(getattr(model, ratio))(mach))
+        d = lambda h: (reference(model.isentrope, mach + h) - reference(model.isentrope, mach - h)) / (2 * h)
+        richardson = (4 * d(1e-3) - d(2e-3)) / 3
+        assert abs(ad - richardson) < 1e-6 * abs(richardson), f"{ratio} at M {mach}: {ad} vs {richardson}"
