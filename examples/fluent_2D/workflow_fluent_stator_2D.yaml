@@ -141,7 +141,7 @@ barotropic:
   save_figures: true
 
 fluent:
-  product_version: "24.2"     # Installed Fluent 2024 R2; null selects the newest installation
+  product_version: "25.1"     # Installed Fluent 2024 R2; null selects the newest installation
   processor_count: 4
   start_timeout: 90
   ui_mode: hidden_gui

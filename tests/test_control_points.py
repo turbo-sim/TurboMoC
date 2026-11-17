@@ -4,7 +4,8 @@ import yaml
 
 from turbo_moc.configuration.project import default_project, get_row, normalize_project, validate_project
 from turbo_moc.geometry.stator_blade import (apply_control_point_offsets, blade_self_intersects,
-                                             editable_control_points, parametrize_stator)
+                                             apply_geometry_uncertainty, editable_control_points,
+                                             parametrize_stator)
 
 
 @pytest.fixture
@@ -71,3 +72,60 @@ def test_invalid_vector_displacements_are_rejected(blade, value):
     from turbo_moc.geometry.stator_blade import apply_control_point_displacements
     with pytest.raises(ValueError, match="two finite"):
         apply_control_point_displacements(blade, {5: value})
+
+
+def test_geometry_uncertainty_moves_profile_points_along_local_normals():
+    blade = {
+        "blade_curve": {"x": [0.0, 1.0, 1.0, 0.0], "y": [0.0, 0.0, 1.0, 1.0]},
+    }
+    moved = apply_geometry_uncertainty(blade, {1: 0.1})
+    chord = np.sqrt(2.0)
+    normal = np.array([-1.0, 1.0]) / np.sqrt(2.0)
+    expected = np.array([1.0, 0.0]) + 0.1 * chord * normal
+    assert np.allclose([moved["blade_curve"]["x"][1], moved["blade_curve"]["y"][1]], expected)
+    assert np.allclose(
+        np.asarray(moved["blade_curve"]["x"])[[0, 2, 3]],
+        np.asarray(blade["blade_curve"]["x"])[[0, 2, 3]],
+    )
+
+
+def test_dense_geometry_uncertainty_and_zero_values_are_supported():
+    blade = {"blade_curve": {"x": [0.0, 1.0, 1.0], "y": [0.0, 0.0, 1.0]}}
+    values = [0.0, 0.01, -0.02]
+    moved = apply_geometry_uncertainty(blade, values)
+    assert moved["geometry_uncertainty"] == {"1": 0.01, "2": -0.02}
+    assert apply_geometry_uncertainty(blade, [0.0, 0.0, 0.0]) is blade
+
+
+def test_geometry_uncertainty_moves_trailing_edge_arch_with_profile_endpoints():
+    blade = {
+        "blade_curve": {"x": [0.0, 1.0, 1.0, 0.0], "y": [0.0, 0.0, 1.0, 1.0]},
+        "trailing_edge": {"x": [1.0, 1.5, 1.0], "y": [0.0, 0.5, 1.0]},
+    }
+    moved = apply_geometry_uncertainty(blade, {0: 0.1, 1: 0.1, 3: -0.1})
+    trailing = np.column_stack((
+        blade["trailing_edge"]["x"],
+        blade["trailing_edge"]["y"],
+    ))
+    moved_trailing = np.column_stack((
+        moved["trailing_edge"]["x"],
+        moved["trailing_edge"]["y"],
+    ))
+    assert not np.array_equal(moved_trailing, trailing)
+    assert np.allclose(
+        np.diff(moved_trailing, axis=0),
+        np.diff(trailing, axis=0),
+    )
+    moved_curve = np.column_stack((moved["blade_curve"]["x"], moved["blade_curve"]["y"]))
+    for trailing_point in moved_trailing[[0, -1]]:
+        assert np.any(np.all(np.isclose(moved_curve, trailing_point), axis=1))
+
+
+@pytest.mark.parametrize(
+    "uncertainty, message",
+    [([0.0], "contain"), ({3: 0.1}, "outside"), ({1: float("nan")}, "finite")],
+)
+def test_invalid_geometry_uncertainty_is_rejected(uncertainty, message):
+    blade = {"blade_curve": {"x": [0.0, 1.0, 1.0], "y": [0.0, 0.0, 1.0]}}
+    with pytest.raises(ValueError, match=message):
+        apply_geometry_uncertainty(blade, uncertainty)

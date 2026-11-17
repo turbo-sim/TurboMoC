@@ -22,9 +22,12 @@ from .common import (
     configure_flow_boundaries,
     configure_numerics,
     configure_stage,
+    contour_graphics,
     contour_definitions,
     initialize_solution,
     load_dependencies,
+    periodic_instance_type,
+    periodic_instances,
     record_stage_iterations,
     residual_history,
     resolve_zone,
@@ -274,6 +277,13 @@ def prepare_contour_graphics(solver, options, pitch_m):
     if not any(settings["enabled"] for _, _, settings in contour_definitions(options)):
         return
     graphics = solver.settings.results.graphics
+    instances = periodic_instances(graphics)
+    contours = contour_graphics(graphics)
+    if contours is None:
+        logger.warning(
+            "Fluent does not expose active contour graphics; skipping contour definitions."
+        )
+        return
     surfaces = solver.settings.results.surfaces.zone_surface
     fluid_surfaces = []
     for index, zone in enumerate(
@@ -286,15 +296,15 @@ def prepare_contour_graphics(solver, options, pitch_m):
         if options["periodic_instancing"]["enabled"]:
             # Match the GUI's Periodic Instancing panel: copy in the negative
             # pitch direction, using metre coordinates imported from CGNS.
-            graphics.periodic_instancing[zone] = {
-                "periodic_type": "translational",
+            instances[zone] = {
+                "periodic_type": periodic_instance_type(graphics, "translational"),
                 "surfaces": [name],
                 "translation": [-pitch_m, 0.0, 0.0],
                 "repeats": options["periodic_instancing"]["repeats"],
             }
     for name, field, contour_options in contour_definitions(options):
         if contour_options["enabled"]:
-            graphics.contour[name] = {
+            contours[name] = {
                 "field": field,
                 "filled": True,
                 "node_values": True,
@@ -305,19 +315,42 @@ def prepare_contour_graphics(solver, options, pitch_m):
 def export_contours(solver, options, output_dir):
     """Render static pressure and barotropic Mach number using Fluent graphics."""
     graphics = solver.settings.results.graphics
+    instances = periodic_instances(graphics)
+    contours = contour_graphics(graphics)
+    if contours is None:
+        logger.warning(
+            "Fluent does not expose active contour graphics; skipping contour export."
+        )
+        return []
     picture = graphics.picture
     fluid_zones = solver.settings.setup.cell_zone_conditions.fluid.get_object_names()
-    picture.driver_options.hardcopy_format = "png"
-    picture.use_window_resolution = False
+    try:
+        picture.driver_options.hardcopy_format = "png"
+        picture.use_window_resolution = False
+    except RuntimeError as exc:
+        if "object is not active" not in str(exc):
+            raise
+        logger.warning(
+            "Fluent picture export is unavailable in this session; "
+            "skipping contour export."
+        )
+        return []
     filenames = []
     for name, _, contour_options in contour_definitions(options):
         if not contour_options["enabled"]:
             continue
-        graphics.contour[name].display()
+        try:
+            contour = contours[name]
+        except KeyError:
+            logger.warning(
+                "Fluent contour definitions are unavailable; skipping contour export."
+            )
+            return []
+        contour.display()
         if options["periodic_instancing"]["enabled"]:
             # Apply repeats to the active contour before fitting the camera.
             for zone in fluid_zones:
-                graphics.periodic_instancing[zone].display()
+                instances[zone].display()
         graphics.views.restore_view(view_name="front")
         graphics.views.auto_scale()
         picture.x_resolution = contour_options["width"]

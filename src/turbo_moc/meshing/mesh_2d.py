@@ -481,6 +481,9 @@ def set_mesh_sizes(blade_curves, numerics, profile=None, pitch=None):
     gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", numerics["curvature_elements"])
     gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 1)
     gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+    domain_min_size = numerics.get("domain_min_size")
+    if domain_min_size is not None:
+        gmsh.option.setNumber("Mesh.MeshSizeMin", domain_min_size)
     gmsh.option.setNumber("Mesh.MeshSizeMax", numerics["domain_size"])
     gmsh.option.setNumber("Mesh.RecombineAll", 0)
     background = gmsh.model.mesh.field.add("MathEval")

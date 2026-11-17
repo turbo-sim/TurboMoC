@@ -9,7 +9,12 @@ from pathlib import Path
 
 import numpy as np
 
-from .common import contour_definitions
+from .common import (
+    contour_definitions,
+    contour_graphics,
+    periodic_instance_type,
+    periodic_instances,
+)
 from turbo_moc.reporting import display_path, get_logger
 
 logger = get_logger("fluent.runner")
@@ -146,12 +151,23 @@ def prepare_contour_graphics(solver, options, geometry):
     )
     fluid_zone = _fluid_zone(solver) if instances is not None else None
     results = solver.settings.results
+    instances_collection = periodic_instances(results.graphics)
+    contours = contour_graphics(results.graphics)
+    if contours is None:
+        logger.warning(
+            "Fluent does not expose active contour graphics; skipping contour definitions."
+        )
+        return None
+    if instances is not None:
+        instances["periodic_type"] = periodic_instance_type(
+            results.graphics, instances["periodic_type"]
+        )
     getattr(results.surfaces, surface_type)[SECTION_NAME] = surface_settings
     summary = _validate_created_section(solver)
     if instances is not None:
-        results.graphics.periodic_instancing[fluid_zone] = instances
+        instances_collection[fluid_zone] = instances
     for name, field, _ in definitions:
-        results.graphics.contour[name] = {
+        contours[name] = {
             "field": field,
             "filled": True,
             "node_values": True,
@@ -169,16 +185,39 @@ def export_contours(solver, options, output_dir):
         _fluid_zone(solver) if options["periodic_instancing"]["enabled"] else None
     )
     graphics = solver.settings.results.graphics
+    instances_collection = periodic_instances(graphics)
+    contours = contour_graphics(graphics)
+    if contours is None:
+        logger.warning(
+            "Fluent does not expose active contour graphics; skipping contour export."
+        )
+        return []
     picture = graphics.picture
-    picture.driver_options.hardcopy_format = "png"
-    picture.use_window_resolution = False
+    try:
+        picture.driver_options.hardcopy_format = "png"
+        picture.use_window_resolution = False
+    except RuntimeError as exc:
+        if "object is not active" not in str(exc):
+            raise
+        logger.warning(
+            "Fluent picture export is unavailable in this session; "
+            "skipping contour export."
+        )
+        return []
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     filenames = []
     for name, _, settings in definitions:
-        graphics.contour[name].display()
+        try:
+            contour = contours[name]
+        except KeyError:
+            logger.warning(
+                "Fluent contour definitions are unavailable; skipping contour export."
+            )
+            return []
+        contour.display()
         if options["periodic_instancing"]["enabled"]:
-            graphics.periodic_instancing[fluid_zone].display()
+            instances_collection[fluid_zone].display()
         graphics.views.restore_view(view_name=options.get("view", "isometric"))
         graphics.views.auto_scale()
         picture.x_resolution = settings["width"]

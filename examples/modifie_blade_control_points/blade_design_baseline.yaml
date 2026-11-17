@@ -1,0 +1,211 @@
+machine:
+  design_mode: stator
+  geometry_type: linear
+  fluid_name: MM
+workflow:
+  save_figures: true
+  show_gmsh: true
+  show_pyvista: true
+  log_level: INFO
+rows:
+- id: stator_1
+  role: stator
+  geometry:
+    method_of_characteristics:
+      inlet_property_pair: PQ_INPUTS
+      inlet_property_1: 523350.5684283419
+      inlet_property_2: 0.4938083516115522
+      p_back: 34995.29455179939
+      solver: conventional
+      use_true_sauer_line: true
+      y_t: 0.010506
+      n: 15
+      rho_t: 0.2
+      rho_d: 0.1
+      delta_flow: 0.0
+      tau_max: 90.0
+      tau_step: 1.0
+    meridional_channel:
+      type: linear
+      meridional_chord: 106.5785
+      blade_height: 10.0
+    blade_geometry:
+      metal_angle_in: 21.2071
+      metal_angle_out: 70.1448
+      r_trailing: 0.4958
+      inlet_opening_ratio: 1.666
+      n_cp: 30
+      num_baseline_points: 500
+      num_curve_points: 500
+      control_point_displacements:
+        2:
+        - 0.0002534
+        - 1.22e-05
+        3:
+        - 0.0003957
+        - 0.0001728
+        4:
+        - 0.0005627
+        - 0.0003105
+        5:
+        - 0.0006886
+        - 0.0004865
+        6:
+        - 0.0008883
+        - 0.0005924
+        7:
+        - 0.0009536
+        - 0.0008348
+        8:
+        - 0.0012507
+        - 0.0007663
+        9:
+        - 0.0013714
+        - 0.0020368
+        10:
+        - 0.0024096
+        - 0.0031042
+        11:
+        - 0.0014615
+        - 0.0056908
+        12:
+        - 0.0036944
+        - 0.0026203
+        13:
+        - -0.0022569
+        - -0.0019751
+        14:
+        - 0.0069749
+        - -0.001758
+        15:
+        - -0.0118956
+        - 0.0031594
+        16:
+        - -0.0115499
+        - 0.0309856
+        17:
+        - -0.0072416
+        - 0.0334306
+        18:
+        - -0.0009747
+        - 0.0450221
+        19:
+        - 0.0269291
+        - 0.0580897
+        20:
+        - 0.003135
+        - 0.0264085
+        21:
+        - 0.0065873
+        - 0.0180783
+        22:
+        - 0.000235
+        - -0.0004634
+        23:
+        - 0.002744
+        - 0.0040016
+        24:
+        - 0.0005934
+        - -0.0002747
+        25:
+        - 0.0003128
+        - -0.0001441
+        26:
+        - 0.0002487
+        - -0.0002648
+        27:
+        - 0.0003156
+        - 0.0001345
+    flow_domain:
+      domain_shift_mode: auto
+      domain_shift_value: 0.0
+      number_of_points: 120
+      inlet:
+        extension_type: bspline
+        extension_length: 1.5
+        axial_tangent: 0.35
+        blade_tangent: 0.35
+      outlet:
+        extension_type: straight
+        extension_length: 2.0
+        axial_tangent: 0.55
+        blade_tangent: 0.15
+  mesh:
+    show_gui: false
+    numerics:
+      terminal_output: true
+      verbosity: 2
+      blade_size: 0.25
+      domain_size: 1.0
+      curvature_elements: 50
+      algorithm: 8
+      recombine: true
+      recombination_algorithm: 1
+      recombine_minimum_quality: 0.1
+      smoothing_steps: 5
+      inflation_layers:
+        enabled: true
+        first_height: 0.03
+        growth_ratio: 1.2
+        thickness: 1.0
+      span_layers: 8
+      span_stretch: 0.0
+    matplotlib:
+      num_blades: 3
+      annotate_boundaries: true
+      mesh_color: orange
+      edge_color: black
+      domain_color: lightgrey
+      dpi: 500
+      rasterize_mesh: true
+    visualization:
+      section_edge_width: 0.35
+      volume_edge_width: 0.35
+    pyvista:
+      show_mesh_edges: true
+      surfaces:
+        blade: true
+        hub: true
+        shroud: false
+        inlet: false
+        outlet: false
+        periodic_left: false
+        periodic_right: false
+    cgns:
+      enabled: true
+      filename: linear_cascade_3d.cgns
+      length_scale: 0.001
+      boundary_types:
+        blade: BCWallViscous
+        inlet: BCInflowSubsonic
+        outlet: BCOutflowSubsonic
+        periodic_left: BCGeneral
+        periodic_right: BCGeneral
+        hub: BCWallViscous
+        shroud: BCWallViscous
+row_id: stator_1
+output_dir: output
+geometry_figure:
+  save: true
+  show: false
+  size:
+  - 14
+  - 8
+  dpi: 180
+  formats:
+  - .png
+  - .svg
+show_gmsh: false
+prepare_only: false
+run_case: true
+reporting:
+  level: INFO
+  filename: workflow.log
+barotropic:
+  calculation_type: equilibrium
+  efficiency: 1.0
+  pressure_ratio: 8.0
+  polynomial_degree: 8
+  ODE_solver: LSODA
+  ODE_tolerance: 1.0e-10
+  save_figures: false

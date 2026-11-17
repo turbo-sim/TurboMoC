@@ -5,6 +5,8 @@ Dimension-specific geometry, periodicity and graphics stay with each workflow.
 """
 
 import json
+import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +18,50 @@ from turbo_moc.reporting import display_path, get_logger, section, step
 
 logger = get_logger("fluent.runner")
 MACH_EXPRESSION = "barotropic_mach_number"
+
+
+def periodic_instances(graphics):
+    """Return Fluent's periodic display collection across supported API names."""
+    try:
+        return graphics.periodic_instancing
+    except AttributeError:
+        try:
+            return graphics.periodic_instances
+        except AttributeError as error:
+            raise AttributeError(
+                "Fluent graphics does not expose a periodic display collection."
+            ) from error
+
+
+def periodic_instance_type(graphics, value):
+    """Use the enum spelling exposed by the active Fluent graphics API."""
+    try:
+        graphics.periodic_instancing
+    except AttributeError:
+        try:
+            graphics.periodic_instances
+        except AttributeError as error:
+            raise AttributeError(
+                "Fluent graphics does not expose a periodic display collection."
+            ) from error
+        return value.capitalize()
+    return value
+
+
+def contour_graphics(graphics):
+    """Return the contour collection for the active Fluent settings schema."""
+    try:
+        contours = graphics.contour
+    except AttributeError:
+        try:
+            contours = graphics.contours
+        except AttributeError as error:
+            raise AttributeError(
+                "Fluent graphics does not expose a contour collection."
+            ) from error
+    if hasattr(contours, "is_active") and not contours.is_active():
+        return None
+    return contours
 
 
 @dataclass(frozen=True)
@@ -70,6 +116,9 @@ def validate_reporting(reporting):
 
 def validate_solver_options(fluent, *, boundary_roles=None):
     """Check the solver schedule and export settings before launching Fluent."""
+    max_init_attempts = fluent.get("max_init_attempts", 1)
+    if type(max_init_attempts) is not int or max_init_attempts < 1:
+        raise ValueError("max_init_attempts must be a positive integer.")
     if (
         not isinstance(fluent["solution_strategy"], list)
         or not fluent["solution_strategy"]
@@ -331,7 +380,7 @@ def residual_history(transcript_file, output_dir, options, save_plot=False):
 
 
 def solution_diagnostics(solver, options):
-    """Record actual property extrema and boundary mass imbalance."""
+    """Record property, mass-flow and velocity diagnostics from final Fluent fields."""
     reports = solver.settings.solution.report_definitions
     cells = solver.settings.setup.cell_zone_conditions.fluid.get_object_names()
     names = []
@@ -360,6 +409,15 @@ def solution_diagnostics(solver, options):
             ],
         }
         names.append(name)
+        zone = resolve_zone(options["boundaries"][kind], collection.get_object_names())
+        for component in ("x", "y"):
+            name = f"workflow-mean-{component}-velocity-{kind}"
+            reports.surface[name] = {
+                "report_type": "surface-areaavg",
+                "field": f"{component}-velocity",
+                "surface_names": [zone],
+            }
+            names.append(name)
     result = {}
     for item in reports.compute(report_defs=names):
         for key, value in item.items():
@@ -367,7 +425,55 @@ def solution_diagnostics(solver, options):
     result["relative_mass_imbalance"] = abs(
         result["mass-inlet"] + result["mass-outlet"]
     ) / max(abs(result["mass-inlet"]), abs(result["mass-outlet"]), 1e-12)
+    for kind in ("inlet", "outlet"):
+        x_velocity = result[f"mean-x-velocity-{kind}"]
+        y_velocity = result[f"mean-y-velocity-{kind}"]
+        result[f"velocity-magnitude-{kind}"] = math.hypot(x_velocity, y_velocity)
+        result[f"flow-angle-{kind}"] = math.degrees(math.atan2(y_velocity, x_velocity))
     return result
+
+
+def optimizer_report(diagnostics, state):
+    """Convert final Fluent diagnostics and thermodynamic references to optimizer fields."""
+    required = (
+        "mass-inlet",
+        "mass-outlet",
+        "flow-angle-inlet",
+        "flow-angle-outlet",
+        "velocity-magnitude-outlet",
+    )
+    if any(name not in diagnostics for name in required):
+        return {
+            "isentropic_efficiency_status": "unavailable",
+            "isentropic_efficiency_error": "missing Fluent velocity diagnostics",
+        }
+    report = {
+        "mass_flow_inlet": abs(float(diagnostics["mass-inlet"])),
+        "mass_flow_outlet": abs(float(diagnostics["mass-outlet"])),
+        "flow_angle_inlet_deg": float(diagnostics["flow-angle-inlet"]),
+        "flow_angle_outlet_deg": float(diagnostics["flow-angle-outlet"]),
+        "report_velocity_magnitude_outlet": float(
+            diagnostics["velocity-magnitude-outlet"]
+        ),
+    }
+    reference = state.get("isentropic_reference")
+    if not reference:
+        report["isentropic_efficiency_status"] = "unavailable"
+        report["isentropic_efficiency_error"] = "missing thermodynamic reference"
+        return report
+    report["isentropic_reference"] = reference
+    v_is = reference.get("velocity_out_isentropic")
+    v_out = report["report_velocity_magnitude_outlet"]
+    if v_is is None or not math.isfinite(float(v_is)) or float(v_is) <= 0:
+        report["isentropic_efficiency_status"] = "unavailable"
+        report["isentropic_efficiency_error"] = "invalid isentropic outlet velocity"
+    elif not math.isfinite(v_out) or v_out < 0:
+        report["isentropic_efficiency_status"] = "unavailable"
+        report["isentropic_efficiency_error"] = "invalid outlet velocity"
+    else:
+        report["objective_isentropic_efficiency"] = (v_out / float(v_is)) ** 2
+        report["isentropic_efficiency_status"] = "available"
+    return report
 
 
 def initialize_solution(settings):
@@ -379,14 +485,16 @@ def initialize_solution(settings):
     initialization.initialize()
 
 
-def record_stage_iterations(transcript, stage_end_offsets, stage_results):
+def record_stage_iterations(
+    transcript, stage_end_offsets, stage_results, *, start_position=0
+):
     """Recover stage iteration counts after solving, without intermediate checks.
 
     During solving we only record the transcript's byte position. Afterwards,
     the iteration column at each position identifies how far that stage ran.
     Barotropy still reads and plots the actual residual history.
     """
-    position = 0
+    position = start_position
     previous_iteration = 0
     last_iteration = 0
     row_length = None
@@ -424,7 +532,10 @@ def run_stages(
     criteria or exhausts its iteration budget, then advances to the next block.
     Field, mass-balance and transcript checks run once, after the final block.
     Exceptions from Fluent abort immediately without saving failed solution data.
+    A transcript-detected divergence can be retried by setting
+    ``max_init_attempts`` above its backward-compatible default of one.
     """
+    simulation_started = time.perf_counter()
     compute_diagnostics = solution_diagnostics if diagnostics is None else diagnostics
     read_residuals = residual_history if residual_reader is None else residual_reader
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -439,6 +550,8 @@ def run_stages(
     summary = {
         "status": "initializing",
         "initialization": "hybrid",
+        "max_init_attempts": options.get("max_init_attempts", 1),
+        "initialization_attempts": 0,
         "completed_stages": [],
         "stage_results": [],
         "requested_iterations": {
@@ -450,55 +563,87 @@ def run_stages(
             ),
         },
     }
+
+    def transcript_segment(start):
+        if not transcript_file.exists():
+            return ""
+        return transcript_file.read_text(encoding="utf-8", errors="replace")[start:].lower()
+
+    def is_divergence(text):
+        return any(
+            marker in text
+            for marker in ("floating point exception", "error at host:", "divergence detected")
+        )
+
     try:
-        section(logger, "Hybrid initialization")
-        configure_stage(solver.settings, stages[0], options)
-        initialize_solution(solver.settings)
+        max_init_attempts = options.get("max_init_attempts", 1)
+        for attempt in range(1, max_init_attempts + 1):
+            summary["initialization_attempts"] = attempt
+            attempt_start = transcript_file.stat().st_size if transcript_file.exists() else 0
+            stage_end_offsets = []
+            summary["completed_stages"] = []
+            summary["stage_results"] = []
+            try:
+                section(
+                    logger,
+                    f"Hybrid initialization (attempt {attempt}/{max_init_attempts})",
+                )
+                configure_stage(solver.settings, stages[0], options)
+                initialize_solution(solver.settings)
 
-        for index, stage in enumerate(stages, start=1):
-            summary["status"] = stage.name
-            summary_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-            spatial_order = "first" if stage.first_order else "second"
-            stopping = (
-                "full block" if not stage.stop_on_convergence else "until convergence"
-            )
-            section(
-                logger,
-                f"Solver stage {index}/{len(stages)} | {spatial_order.capitalize()} order | "
-                f"Timescale {stage.time_scale_factor:g} | Up to {stage.iterations} iterations ({stopping})",
-            )
-            configure_stage(solver.settings, stage, options)
-            solver.settings.solution.run_calculation.iterate(
-                iter_count=stage.iterations
-            )
-
-            # Bookkeeping only: go directly to the next stage without computing
-            # reports or reading residuals. Analyse these positions at the end.
-            stage_end_offsets.append(
-                transcript_file.stat().st_size if transcript_file.exists() else 0
-            )
-            summary["completed_stages"].append(stage.name)
-            summary["stage_results"].append(
-                {
-                    "name": stage.name,
-                    "order": spatial_order,
-                    "time_scale_factor": stage.time_scale_factor,
-                    "requested_iterations": stage.iterations,
-                    "stop_on_convergence": stage.stop_on_convergence,
-                }
-            )
+                for index, stage in enumerate(stages, start=1):
+                    summary["status"] = stage.name
+                    summary_file.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+                    spatial_order = "first" if stage.first_order else "second"
+                    stopping = (
+                        "full block" if not stage.stop_on_convergence else "until convergence"
+                    )
+                    section(
+                        logger,
+                        f"Solver stage {index}/{len(stages)} | {spatial_order.capitalize()} order | "
+                        f"Timescale {stage.time_scale_factor:g} | Up to {stage.iterations} iterations ({stopping})",
+                    )
+                    configure_stage(solver.settings, stage, options)
+                    solver.settings.solution.run_calculation.iterate(
+                        iter_count=stage.iterations
+                    )
+                    stage_end_offsets.append(
+                        transcript_file.stat().st_size if transcript_file.exists() else 0
+                    )
+                    summary["completed_stages"].append(stage.name)
+                    summary["stage_results"].append(
+                        {
+                            "name": stage.name,
+                            "order": spatial_order,
+                            "time_scale_factor": stage.time_scale_factor,
+                            "requested_iterations": stage.iterations,
+                            "stop_on_convergence": stage.stop_on_convergence,
+                        }
+                    )
+                    if max_init_attempts > 1 and is_divergence(
+                        transcript_segment(attempt_start)
+                    ):
+                        raise RuntimeError(f"Fluent diverged; see {transcript_file}")
+                break
+            except Exception as exc:
+                failed_segment = transcript_segment(attempt_start)
+                retryable = is_divergence(failed_segment) or is_divergence(str(exc).lower())
+                if not retryable or attempt == max_init_attempts:
+                    raise
+                logger.warning(
+                    "Fluent diverged during initialization attempt %d/%d; retrying.",
+                    attempt,
+                    max_init_attempts,
+                )
+        else:
+            raise RuntimeError("Fluent initialization attempts were exhausted.")
 
         summary["status"] = "final_checks"
         section(logger, "Final solution checks")
         # Fluent sometimes returns normally after a solver error. Check its
         # transcript once, at the end, before saving the final solution data.
-        transcript = transcript_file.read_text(
-            encoding="utf-8", errors="replace"
-        ).lower()
-        if (
-            "floating point exception" in transcript
-            or "divergence detected" in transcript
-        ):
+        transcript = transcript_segment(attempt_start)
+        if is_divergence(transcript):
             raise RuntimeError(f"Fluent diverged; see {transcript_file}")
         summary.update(
             read_residuals(transcript_file, output_dir, options, save_plot=True)
@@ -506,6 +651,8 @@ def run_stages(
         residuals_saved = True
         diagnostics = compute_diagnostics(solver, options)
         summary["diagnostics"] = diagnostics
+        summary["optimizer"] = optimizer_report(diagnostics, state)
+        summary.update(summary["optimizer"])
         if (
             not all(np.isfinite(value) for value in diagnostics.values())
             or diagnostics["min-density"] <= 0
@@ -553,11 +700,13 @@ def run_stages(
         summary["error"] = str(exc)
         raise
     finally:
+        summary["duration_s"] = time.perf_counter() - simulation_started
         if transcript_file.exists():
             record_stage_iterations(
                 transcript_file.read_bytes(),
                 stage_end_offsets,
                 summary["stage_results"],
+                start_position=attempt_start,
             )
             if not residuals_saved:
                 summary.update(

@@ -1,6 +1,7 @@
 """Build and validate a barotropic model at the MoC inlet state."""
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -254,6 +255,7 @@ def generate_barotropic_model(barotropy, config, nozzle, settings, output_dir):
         "fluid_name": config["nozzle"]["fluid_name"],
         "P0": float(inlet.p),
         "T0": float(inlet.T),
+        "h0": float(inlet.h),
         "rho0": float(inlet.rho),
         "mu0": float(mu_max),
         "s0": float(inlet.s),
@@ -268,6 +270,21 @@ def generate_barotropic_model(barotropy, config, nozzle, settings, output_dir):
     state["mu_back"] = float(
         model.poly_fitter.evaluate_polynomial([p_back], "viscosity")[0]
     )
+    try:
+        state_out_is = fluid.get_state(barotropy.PSmass_INPUTS, p_back, inlet.s)
+        velocity_out_isentropic = math.sqrt(
+            max(2.0 * (float(inlet.h) - float(state_out_is.h)), 0.0)
+        )
+        state["isentropic_reference"] = {
+            "inlet_enthalpy": float(inlet.h),
+            "inlet_entropy": float(inlet.s),
+            "outlet_pressure": float(p_back),
+            "outlet_enthalpy_isentropic": float(state_out_is.h),
+            "velocity_out_isentropic": velocity_out_isentropic,
+        }
+    except Exception as error:
+        logger.warning("  Could not prepare isentropic efficiency reference: %r", error)
+        state["isentropic_reference_error"] = repr(error)
     (output_dir / "inlet_state.json").write_text(
         json.dumps(state, indent=2), encoding="utf-8"
     )

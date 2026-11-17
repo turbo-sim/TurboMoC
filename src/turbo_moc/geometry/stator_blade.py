@@ -15,6 +15,8 @@ export_blade_step(...) is kept separate/optional since it depends on
 cadquery, which the rest of turbo_moc does not otherwise require.
 """
 
+from collections.abc import Mapping, Sequence
+
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.interpolate import CubicHermiteSpline
@@ -24,7 +26,11 @@ from turbo_moc.geometry.splines import BSplineTool
 
 __all__ = [
     "parametrize_stator_blade", "parametrize_stator_blade_semi", "parametrize_stator", "STATOR_PARAMETRIZATIONS",
-    "apply_control_point_offsets", "apply_control_point_displacements", "editable_control_points", "blade_self_intersects",
+    "apply_control_point_offsets", "apply_control_point_displacements", "apply_geometry_uncertainty",
+    "validate_geometry_uncertainty",
+    "find_side_intersections",
+    "correct_suction_intersections",
+    "editable_control_points", "edit_blade_geometry", "blade_self_intersects",
     "export_blade_step", "export_flared_blade_step", "export_annular_blade_step",
     "export_annular_blade_stl",
     "move_control_point_along_normal",
@@ -1000,20 +1006,90 @@ LOCKED_CONTROL_POINTS = 2
 
 
 def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_offsets=None,
-                      control_point_displacements=None, **kwargs):
+                      control_point_displacements=None, geometry_uncertainty=None, **kwargs):
     if parametrization not in STATOR_PARAMETRIZATIONS:
         raise ValueError(f"Stator parametrization must be one of {tuple(STATOR_PARAMETRIZATIONS)}.")
     blade = STATOR_PARAMETRIZATIONS[parametrization](wall_x, wall_y, **kwargs)
     if control_point_offsets and control_point_displacements:
         raise ValueError("Use control_point_offsets or control_point_displacements, not both.")
     if control_point_displacements:
-        return apply_control_point_displacements(blade, control_point_displacements)
-    return apply_control_point_offsets(blade, control_point_offsets) if control_point_offsets else blade
+        blade = apply_control_point_displacements(blade, control_point_displacements)
+    elif control_point_offsets:
+        blade = apply_control_point_offsets(blade, control_point_offsets)
+    return apply_geometry_uncertainty(blade, geometry_uncertainty)
 
 
 def editable_control_points(blade):
     count = len(blade["control_points"])
     return list(range(LOCKED_CONTROL_POINTS, count - LOCKED_CONTROL_POINTS))
+
+
+def edit_blade_geometry(
+    baseline_nozzle,
+    editable_control_points,
+    normalized_values: Sequence[float] | np.ndarray,
+    bounds: Sequence[Sequence[float]] | np.ndarray,
+    blade_parameters: Mapping | None = None,
+) -> np.ndarray:
+    """Return CP displacements from a frozen MoC baseline.
+
+    ``baseline_nozzle`` is the frozen baseline nozzle object, as
+    stored in ``baseline["nozzle"]``. Its wall is used to rebuild the blade
+    control points without applying any configured control-point
+    perturbations. ``blade_parameters`` should be the corresponding
+    ``baseline["config"]["blade"]`` mapping.
+
+    The normalized values are mapped to physical normal offsets using one
+    ``(lower, upper)`` pair per editable CP. The returned offsets are divided
+    by the reconstructed blade chord and have one ``[dx, dy]`` row per
+    baseline CP; locked CPs are zero.
+    """
+    if not isinstance(baseline_nozzle, Mapping):
+        raise ValueError("baseline_nozzle must be a frozen nozzle mapping.")
+    try:
+        wall = baseline_nozzle["wall_final"]
+        wall_x = np.asarray(wall["x"], dtype=float)
+        wall_y = np.asarray(wall["y"], dtype=float)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("baseline_nozzle must contain wall_final x and y arrays.") from error
+    if wall_x.ndim != 1 or wall_y.shape != wall_x.shape or len(wall_x) < 2:
+        raise ValueError("baseline_nozzle wall_final x and y arrays must have matching shapes.")
+    if not np.isfinite(wall_x).all() or not np.isfinite(wall_y).all():
+        raise ValueError("baseline_nozzle wall_final coordinates must be finite.")
+
+    if blade_parameters is None or not isinstance(blade_parameters, Mapping):
+        raise ValueError("blade_parameters must contain the baseline blade configuration.")
+    parameters = dict(blade_parameters)
+    for key in ("control_point_offsets", "control_point_displacements", "geometry_uncertainty"):
+        parameters.pop(key, None)
+
+    try:
+        baseline_blade = parametrize_stator(wall_x, wall_y, **parameters)
+    except (TypeError, ValueError) as error:
+        raise ValueError("Could not build baseline control points from blade_parameters.") from error
+    baseline = np.asarray(baseline_blade["control_points"], dtype=float)
+
+    indices = np.asarray(editable_control_points)
+    values = np.asarray(normalized_values, dtype=float)
+    bounds_array = np.asarray(bounds, dtype=float)
+    if indices.ndim != 1 or values.ndim != 1 or values.size != indices.size:
+        raise ValueError("editable_control_points and normalized_values must have matching one-dimensional shapes.")
+    if bounds_array.shape != (indices.size, 2):
+        raise ValueError("bounds must have shape (number of editable control points, 2).")
+    if (not np.issubdtype(indices.dtype, np.integer)
+            or len(np.unique(indices)) != len(indices)
+            or np.any(indices < 0)
+            or np.any(indices >= len(baseline))):
+        raise ValueError("editable_control_points must contain unique valid integer indices.")
+    if np.any(~np.isfinite(values)) or np.any((values < 0.0) | (values > 1.0)):
+        raise ValueError("normalized_values must be finite and in [0, 1].")
+    if np.any(~np.isfinite(bounds_array)) or np.any(bounds_array[:, 1] < bounds_array[:, 0]):
+        raise ValueError("bounds must contain finite lower/upper pairs.")
+
+    physical_offsets = bounds_array[:, 0] + values * (bounds_array[:, 1] - bounds_array[:, 0])
+    perturbations = np.zeros_like(baseline)
+    perturbations[indices] = control_point_normals(baseline)[indices] * physical_offsets[:, None]
+    return perturbations / blade_chord(baseline_blade)
 
 
 def blade_chord(blade):
@@ -1027,6 +1103,231 @@ def control_point_normals(control_points):
     tangent[0], tangent[-1] = points[1] - points[0], points[-1] - points[-2]
     tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
     return np.column_stack((-tangent[:, 1], tangent[:, 0]))
+
+
+def _curve_normals(points):
+    """Return unit left-hand normals from the cyclic profile tangent."""
+    points = np.asarray(points, dtype=float)
+    tangent = np.roll(points, -1, axis=0) - np.roll(points, 1, axis=0)
+    tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-12)
+    return np.column_stack((-tangent[:, 1], tangent[:, 0]))
+
+
+def validate_geometry_uncertainty(blade, uncertainty):
+    """Validate dense or sparse signed chord-fraction profile perturbations."""
+    if uncertainty is None:
+        return {}
+    count = len(blade["blade_curve"]["x"])
+    if isinstance(uncertainty, dict):
+        values = {}
+        for key, value in uncertainty.items():
+            try:
+                index = int(key)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("geometry_uncertainty indices must be integers.") from exc
+            if index != key and not (isinstance(key, str) and str(index) == key):
+                raise ValueError("geometry_uncertainty indices must be integers.")
+            if not 0 <= index < count:
+                raise ValueError(f"geometry_uncertainty index {index} is outside [0, {count - 1}].")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
+                raise ValueError(f"geometry_uncertainty[{index}] must be finite.")
+            if value:
+                values[index] = float(value)
+        return values
+    if isinstance(uncertainty, (list, tuple, np.ndarray)):
+        if len(uncertainty) != count:
+            raise ValueError(
+                f"Dense geometry_uncertainty must contain {count} values, got {len(uncertainty)}."
+            )
+        values = {}
+        for index, value in enumerate(uncertainty):
+            if isinstance(value, bool) or not isinstance(value, (int, float, np.number)) or not np.isfinite(value):
+                raise ValueError(f"geometry_uncertainty[{index}] must be finite.")
+            if value:
+                values[index] = float(value)
+        return values
+    raise ValueError("geometry_uncertainty must be a dense list or sparse index mapping.")
+
+
+def apply_geometry_uncertainty(blade, uncertainty):
+    """Move sampled profile points along their local normals by chord fractions."""
+    values = validate_geometry_uncertainty(blade, uncertainty)
+    if not values:
+        return blade
+    points = np.column_stack((blade["blade_curve"]["x"], blade["blade_curve"]["y"]))
+    moved = points.copy()
+    chord = blade_chord(blade)
+    profile_values = np.asarray([values.get(index, 0.0) for index in range(len(points))])
+    moved += chord * _curve_normals(points) * profile_values[:, None]
+    profile_s = _normalized_arclength(points)
+    result = dict(blade)
+    result["blade_curve"] = {"x": moved[:, 0].tolist(), "y": moved[:, 1].tolist()}
+    for side_name in ("suction", "pressure"):
+        side = blade.get(side_name)
+        if side is None:
+            continue
+        side_points = np.column_stack((side["x"], side["y"]))
+        side_s = _normalized_arclength(side_points)
+        side_values = np.interp(side_s, profile_s, profile_values)
+        side_moved = side_points + blade_chord(blade) * _curve_normals(side_points) * side_values[:, None]
+        result[side_name] = {"x": side_moved[:, 0].tolist(), "y": side_moved[:, 1].tolist()}
+    trailing_edge = blade.get("trailing_edge")
+    if trailing_edge is not None:
+        trailing_points = np.column_stack((trailing_edge["x"], trailing_edge["y"]))
+        if len(trailing_points) >= 2:
+            profile = np.column_stack((blade["blade_curve"]["x"], blade["blade_curve"]["y"]))
+            profile_moved = np.column_stack((
+                result["blade_curve"]["x"],
+                result["blade_curve"]["y"],
+            ))
+            endpoint_indices = [
+                int(np.argmin(np.linalg.norm(profile - point, axis=1)))
+                for point in trailing_points[[0, -1]]
+            ]
+
+            # Keep the baseline arch rigid: uncertainty changes its location,
+            # while its sampled shape remains identical to the nominal one.
+            displacement = profile_moved[endpoint_indices] - profile[endpoint_indices]
+            moved_trailing = trailing_points + displacement.mean(axis=0)
+            result["trailing_edge"] = {
+                "x": moved_trailing[:, 0].tolist(),
+                "y": moved_trailing[:, 1].tolist(),
+            }
+
+            # The two profile endpoints must be the endpoints of the moved
+            # arch, rather than being snapped back to the nominal geometry.
+            for side_name in ("blade_curve", "suction", "pressure"):
+                side = blade.get(side_name)
+                perturbed = result.get(side_name)
+                if side is None or perturbed is None:
+                    continue
+                nominal_points = np.column_stack((side["x"], side["y"]))
+                perturbed_points = np.column_stack((perturbed["x"], perturbed["y"]))
+                if side_name == "suction":
+                    side_endpoint_indices = [(len(nominal_points) - 1, moved_trailing[-1])]
+                elif side_name == "pressure":
+                    side_endpoint_indices = [(len(nominal_points) - 1, moved_trailing[0])]
+                else:
+                    side_endpoint_indices = [
+                        (int(np.argmin(np.linalg.norm(nominal_points - point, axis=1))), trailing_point)
+                        for point, trailing_point in zip(
+                            trailing_points[[0, -1]], moved_trailing[[0, -1]]
+                        )
+                    ]
+                for index, trailing_point in side_endpoint_indices:
+                    perturbed_points[index] = trailing_point
+                result[side_name] = {
+                    "x": perturbed_points[:, 0].tolist(),
+                    "y": perturbed_points[:, 1].tolist(),
+                }
+    result["geometry_uncertainty"] = {str(index): value for index, value in values.items()}
+    return result
+
+
+def _normalized_arclength(points):
+    distances = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    arclength = np.concatenate(([0.0], np.cumsum(distances)))
+    if arclength[-1] <= 0.0:
+        raise ValueError("The side curve must have positive arclength.")
+    return arclength / arclength[-1]
+
+
+def find_side_intersections(suction, pressure, tolerance=1e-12):
+    """Find geometric intersections between suction and pressure polylines."""
+    suction = np.asarray(suction, dtype=float)
+    pressure = np.asarray(pressure, dtype=float)
+    if suction.ndim != 2 or suction.shape[1] != 2:
+        raise ValueError("suction must have shape (N, 2).")
+    if pressure.ndim != 2 or pressure.shape[1] != 2:
+        raise ValueError("pressure must have shape (N, 2).")
+
+    def cross_2d(first, second):
+        return first[0] * second[1] - first[1] * second[0]
+
+    intersections = []
+    for first in range(len(suction) - 1):
+        start = suction[first]
+        direction = suction[first + 1] - start
+        for second in range(len(pressure) - 1):
+            other = pressure[second]
+            other_direction = pressure[second + 1] - other
+            denominator = cross_2d(direction, other_direction)
+            offset = other - start
+            if abs(denominator) <= tolerance:
+                continue
+            first_fraction = cross_2d(offset, other_direction) / denominator
+            second_fraction = cross_2d(offset, direction) / denominator
+            if (-tolerance <= first_fraction <= 1.0 + tolerance
+                    and -tolerance <= second_fraction <= 1.0 + tolerance):
+                intersections.append(start + first_fraction * direction)
+    if not intersections:
+        return np.empty((0, 2))
+    points = np.asarray(intersections)
+    keep = np.r_[True, np.linalg.norm(np.diff(points, axis=0), axis=1) > tolerance]
+    return points[keep]
+
+
+def correct_suction_intersections(
+    blade, intersections=None, minimum_gap=1.0, max_iterations=1000
+):
+    """Redraw the blade curve repeatedly until its two sides do not intersect.
+
+    The transformed ``blade_curve`` is split into its two contour sides and
+    corrected directly. The first side is kept fixed and the second side is
+    moved away by ``minimum_gap``; the corrected closed curve is returned in
+    ``blade_curve``.
+    """
+    if isinstance(minimum_gap, bool) or not np.isfinite(minimum_gap) or minimum_gap <= 0.0:
+        raise ValueError("minimum_gap must be a positive finite number.")
+    if "blade_curve" not in blade:
+        raise ValueError("blade must contain a blade_curve.")
+    if "suction" not in blade or "pressure" not in blade:
+        raise ValueError("blade must contain suction and pressure sides.")
+    if isinstance(max_iterations, bool) or not isinstance(max_iterations, (int, np.integer)):
+        raise ValueError("max_iterations must be a positive integer.")
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be a positive integer.")
+
+    curve = np.column_stack((blade["blade_curve"]["x"], blade["blade_curve"]["y"])).astype(float)
+    suction_count = len(blade["suction"]["x"])
+    pressure_count = len(blade["pressure"]["x"])
+    if suction_count < 2 or pressure_count < 2:
+        raise ValueError("blade sides must each contain at least two points.")
+    split = round(len(curve) * suction_count / (suction_count + pressure_count))
+    fixed = curve[:split][::-1]
+    moved = curve[split:].copy()
+    fixed_x_order = np.argsort(fixed[:, 0])
+    fixed_sorted = fixed[fixed_x_order]
+    intersections = find_side_intersections(fixed, moved) if intersections is None else np.asarray(
+        intersections, dtype=float
+    )
+    if intersections.size == 0:
+        return blade
+    if intersections.ndim != 2 or intersections.shape[1] != 2 or not np.isfinite(intersections).all():
+        raise ValueError("intersections must have shape (N, 2) and contain finite values.")
+    lower_x = max(fixed_sorted[:, 0].min(), moved[:, 0].min())
+    upper_x = min(fixed_sorted[:, 0].max(), moved[:, 0].max())
+    affected = (moved[:, 0] >= lower_x) & (moved[:, 0] <= upper_x)
+
+    for _ in range(max_iterations):
+        current = find_side_intersections(fixed, moved)
+        if not len(current):
+            result = dict(blade)
+            corrected_curve = np.vstack((fixed[::-1], moved))
+            result["blade_curve"] = {
+                "x": corrected_curve[:, 0].tolist(),
+                "y": corrected_curve[:, 1].tolist(),
+            }
+            return result
+        if np.any(affected):
+            fixed_y = np.interp(moved[affected, 0], fixed_sorted[:, 0], fixed_sorted[:, 1])
+            moved[affected, 1] = np.maximum(moved[affected, 1], fixed_y + minimum_gap)
+        if len(find_side_intersections(fixed, moved)):
+            moved[:, 1] += minimum_gap
+
+    raise ValueError(
+        f"Could not remove blade-curve intersections after {max_iterations} iterations."
+    )
 
 
 def validate_control_point_offsets(blade, offsets):

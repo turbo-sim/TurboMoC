@@ -211,7 +211,7 @@ class MOCSolver:
         stage = StageProgress(logger, 1, "Sauer sonic line", "1 of 4", progress_callback, name="sonic line")
         stage.begin()
 
-        gamma_star = float(self.fluid_manager.critical_state["cp"] / self.fluid_manager.critical_state["cv"])
+        gamma_star = float(state_gamma(self.fluid_manager.critical_state))
 
         y_coords = np.linspace(0, self.y_t, self.n)
         for i, y_val in enumerate(y_coords):

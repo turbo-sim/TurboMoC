@@ -12,6 +12,14 @@ import pandas as pd
 import pytest
 
 
+def test_periodic_instances_supports_fluent_2025_api_name():
+    common = importlib.import_module("turbo_moc.fluent.common")
+    collection = object()
+    graphics = SimpleNamespace(periodic_instances=collection)
+
+    assert common.periodic_instances(graphics) is collection
+
+
 @pytest.fixture
 def workflow_module(monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
@@ -146,6 +154,7 @@ def test_solver_strategy_and_final_exports(
         {"iterations": 100, "time_scale_factor": 0.5, "order": "first"},
         {"iterations": 200, "time_scale_factor": 2.0, "order": "second"},
     ]
+    options["max_init_attempts"] = 1
     options["plot_residuals"] = False
     options["periodic_instancing"]["enabled"] = True
     for name in ("pressure_contour", "mach_contour"):
@@ -284,6 +293,79 @@ def test_solver_strategy_and_final_exports(
         assert "case_file" not in summary and "data_file" not in summary
     solver.settings.file.write_case.assert_not_called()
     solver.settings.file.write_data.assert_not_called()
+
+
+def test_divergence_retries_initialization_and_all_stages(
+    workflow_module, monkeypatch, tmp_path
+):
+    workflow, _ = workflow_module.read_workflow(FLUENT_CONFIG)
+    options = workflow["fluent"]
+    options["max_init_attempts"] = 3
+    options["solution_strategy"] = [
+        {"iterations": 10, "time_scale_factor": 0.5, "order": "first"}
+    ]
+    options["plot_residuals"] = False
+    solver = MagicMock()
+    stem = options["case_filename"].removesuffix(".cas.h5")
+    transcript = tmp_path / f"{stem}.trn"
+    transcript.write_text("")
+    attempts = []
+
+    def iterate(iter_count):
+        attempts.append(iter_count)
+        with transcript.open("a") as stream:
+            if len(attempts) == 1:
+                stream.write("Error at host: floating point exception\n")
+            else:
+                stream.write("iter continuity x-velocity y-velocity k omega time/iter\n")
+                stream.write(" 1 1e-8 1e-8 1e-8 1e-8 1e-8 0:00 0\n")
+
+    solver.settings.solution.run_calculation.iterate.side_effect = iterate
+    monkeypatch.setattr(
+        workflow_module,
+        "residual_history",
+        lambda *args, **kwargs: {
+            "last_iteration": 1,
+            "last_residuals": {
+                equation: 1e-8 for equation in options["residual_equations"]
+            },
+        },
+    )
+    monkeypatch.setattr(
+        workflow_module,
+        "solution_diagnostics",
+        lambda *args: {
+            "min-density": 1.0,
+            "min-viscosity": 1e-5,
+            "min-pressure": 95000.0,
+            "max-pressure": 250000.0,
+            "relative_mass_imbalance": 1e-5,
+        },
+    )
+    solver.settings.file.write_case_data.side_effect = lambda file_name: Path(
+        file_name
+    ).write_bytes(b"case")
+
+    workflow_module.run_stages(
+        solver,
+        options,
+        tmp_path,
+        {"p_min": 50000.0, "P0": 251300.0},
+    )
+
+    assert solver.settings.solution.initialization.initialize.call_count == 2
+    assert attempts == [10, 10]
+    summary = json.loads((tmp_path / "run_summary.json").read_text())
+    assert summary["initialization_attempts"] == 2
+    assert summary["status"] == "completed"
+
+
+@pytest.mark.parametrize("value", [0, -1, 1.5, True])
+def test_max_init_attempts_must_be_a_positive_integer(workflow_module, value):
+    options = workflow_module.read_workflow(FLUENT_CONFIG)[0]["fluent"].copy()
+    options["max_init_attempts"] = value
+    with pytest.raises(ValueError, match="max_init_attempts"):
+        workflow_module.validate_solver_options(options)
 
 
 @pytest.mark.parametrize(

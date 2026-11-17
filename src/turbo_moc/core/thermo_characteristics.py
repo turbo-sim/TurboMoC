@@ -1,5 +1,11 @@
 import logging
 import jaxprop as jxp
+try:
+    from jaxprop.errors import PropertyUnavailableError
+except ImportError:
+    PROPERTY_ERRORS = (KeyError, AttributeError, ValueError)
+else:
+    PROPERTY_ERRORS = (PropertyUnavailableError,)
 from jax import jit
 from jax import numpy as jnp
 import pdb
@@ -12,6 +18,16 @@ from scipy.interpolate import CubicSpline
 # =============================================================================
 # 1. JAX-COMPATIBLE HELPER FUNCTIONS (Outside Classes)
 # ============================================================================= 
+
+def state_gamma(state):
+    """Return the available heat-capacity ratio for a thermodynamic state."""
+    try:
+        return state["cp"] / state["cv"]
+    except PROPERTY_ERRORS:
+        # try:
+        #     return state["heat_capacity_ratio"]
+        # except PROPERTY_ERRORS as exc:
+        raise ValueError("Unable to calculate gamma for the given state.") #from exc
 
 @jax.jit
 def jitted_calculate_static_properties(fluid, V: jnp.ndarray, s0: float, h0: float):
@@ -28,8 +44,11 @@ def jitted_calculate_static_properties(fluid, V: jnp.ndarray, s0: float, h0: flo
     # Get state from JAXProp
     state = fluid.get_state(jxp.HmassSmass_INPUTS, h_safe, s0)
     
-    # Calculate Gamma
-    gamma = state["cp"] / state["cv"]
+    # Preserve the original cp/cv calculation whenever the state supports it.
+    try:
+        gamma = state["cp"] / state["cv"]
+    except PROPERTY_ERRORS:
+        raise ValueError("Unable to calculate gamma for the given state.")
     
     # MASK THE OUTPUT: If it was an invalid point, return 0.0 for speed of sound, etc.
     a_out = jnp.where(is_invalid, 0.0, state["a"])
@@ -432,7 +451,7 @@ class FluidManager:
         h_safe = h0_f if is_invalid else h_static_raw
 
         state = self.raw_fluid.get_state(jxp.HmassSmass_INPUTS, h_safe, s0_f)
-        gamma = float(state["cp"]) / float(state["cv"])
+        gamma = float(state_gamma(state))
         a = 0.0 if is_invalid else float(state["a"])
 
         return {"h": h_safe, "T": float(state["T"]), "p": float(state["p"]),
@@ -626,7 +645,7 @@ class InternalPoint:
             
             self.T = state["T"]
             self.rho = state["rho"]
-            self.gamma = state["cp"] / state["cv"]
+            self.gamma = state_gamma(state)
             self.s = self.manager.s0
             
             # Note: M is undefined (1.0) and V is V* (a*) at this point
@@ -1468,4 +1487,3 @@ def MassFlowCalc(IO):
             mass = mass + (rho * l * V * A)
 
     return mass
-

@@ -3,8 +3,11 @@
 Each workflow folder contains a README, a runner and its own YAML file:
 
 - `gmsh_2D/`: `run_mesh_generation.py`, `workflow_gmsh_stator_2D.yaml`.
+- `gmsh_2D_adaptive/`: bounded adaptive-size 2D Gmsh meshing example.
 - `gmsh_3D/`: `run_mesh_generation.py`, `workflow_gmsh_stator_3D.yaml`.
 - `fluent_2D/`: `run_fluent_case.py`, `workflow_fluent_stator_2D.yaml`.
+- `perturbated_blade/`: nominal/perturbed profile comparison and a Fluent 2D
+  manufacturing-uncertainty workflow.
 - `fluent_3D/stator/`: `run_fluent_case.py`, `workflow_fluent_stator_3D.yaml`.
 - `fluent_3D/stage/`: `run_fluent_stage.py`, `workflow_fluent_stage.yaml` (axial stator + rotor, mixing plane).
 
@@ -23,6 +26,7 @@ poetry run python examples/moc_design/nozzle_design.py
 poetry run python examples/moc_design/stator_design.py
 poetry run python examples/moc_design/rotor_design.py
 poetry run python examples/gmsh_2D/run_mesh_generation.py
+poetry run python examples/gmsh_2D_adaptive/run_mesh_generation.py
 poetry run python examples/gmsh_3D/run_mesh_generation.py
 poetry run python examples/fluent_2D/run_fluent_case.py
 poetry run python examples/fluent_3D/stator/run_fluent_case.py
