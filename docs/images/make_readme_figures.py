@@ -19,18 +19,19 @@ import vtk
 from vtk.util.numpy_support import numpy_to_vtk, numpy_to_vtkIdTypeArray
 
 import turbo_moc
-from turbo_moc.app import _mirrored_rotor_blade, _place_radial_rotor, _rotor_z_offset
-from turbo_moc.geometry import (
-    consistent_radial_wrap,
+from turbo_moc.core.vortex_blade import design_rotor_vortex_blade
+from turbo_moc.geometry.stator_blade import (
+    apply_control_point_displacements,
     export_annular_blade_stl,
     export_radial_blade_stl,
     parametrize_stator_blade,
-    size_rotor_from_pitch,
-    size_stator_mode_a,
 )
-from turbo_moc.meshing.stator_mesh_2d import default_mesh_sizes, mesh_sized_stator
-from turbo_moc.meshing.stator_mesh_3d import load_patch_surfaces, mesh_swept_passage
-from turbo_moc.rotor import design_rotor_vortex_blade
+# Sizing, stage placement and the swept stator mesh come from the preserved (legacy) workflow.
+from turbo_moc.legacy.app import _mirrored_rotor_blade, _place_radial_rotor, _rotor_z_offset
+from turbo_moc.legacy.geometry.radial import consistent_radial_wrap
+from turbo_moc.legacy.geometry.sizing import size_rotor_from_pitch, size_stator_mode_a
+from turbo_moc.legacy.meshing.stator_mesh_2d import default_mesh_sizes, mesh_sized_stator
+from turbo_moc.legacy.meshing.stator_mesh_3d import load_patch_surfaces, mesh_swept_passage
 
 OUT = Path(__file__).resolve().parent
 STATOR_COLOR, ROTOR_COLOR = (0.36, 0.45, 0.58), (0.80, 0.47, 0.32)
@@ -43,10 +44,15 @@ nozzle = turbo_moc.design_nozzle(fluid_name="Cyclopentane", P0=2.513e5, Q0=0.025
 wall = nozzle["wall_final"]
 blade = parametrize_stator_blade(wall["x"], wall["y"], metal_angle_in=0.0, metal_angle_out=70.0,
                                  r_trailing=0.5, inlet_opening_ratio=1.5)
-stator = size_stator_mode_a(blade, nozzle, mdot=2.0, n_blades=24, r_hub=100.0)
+# Thicken the neck behind the leading-edge bulb by moving three control points of the convergent
+# pressure-side spline (fractions of the chord, as in the app's control-point editor). The MoC walls
+# (suction side from the throat, pressure side from the mirrored wall) are not touched.
+blade = apply_control_point_displacements(blade, {17: [0.004, 0.006], 18: [0.012, 0.02], 19: [0.02, 0.035]})
+stator =size_stator_mode_a(blade, nozzle, mdot=2.0, n_blades=24, r_hub=100.0)
 rotor_data = design_rotor_vortex_blade(fluid_name="Novec649", P0_rel=5e5, T0_rel=400.0, M_inlet=1.5,
                                        M_outlet=1.5, M_lower=1.05, M_upper=2.0, beta_inlet=65.0,
-                                       backend="HEOS", num_points=60)
+                                       backend="HEOS", num_points=60, le_te_ratio=40.0,
+                                       le_ellipse_ratio=3.2, te_ellipse_ratio=5.0)
 rotor = size_rotor_from_pitch(rotor_data, stator["r_hub"], stator["r_shroud"], 40)
 
 
@@ -64,11 +70,20 @@ axes[0].set_title("Method of characteristics: two-phase Cyclopentane nozzle")
 axes[1].set_title("Expansion in the T-s diagram")
 save(fig, "readme_nozzle.png")
 
-fig, axes = plt.subplots(1, 2, figsize=(14, 4.2))
+fig, axes = plt.subplots(1, 2, figsize=(14, 5.2), gridspec_kw={"width_ratios": [1.6, 1]})
 turbo_moc.mpl.plot_blade(blade, ax=axes[0], n_blades=2, show_control_points=False)
-turbo_moc.mpl.plot_rotor_vortex_blade(rotor_data, ax=axes[1], show_surfaces=False)
+# Rotor passage: the designed blade, its neighbour one pitch below, and the characteristics of the
+# transition arcs that turn the uniform inflow into the free vortex and back.
+turbo_moc.mpl.plot_rotor_vortex_blade(rotor_data, ax=axes[1], show_surfaces=True, show_mach_lines=True)
+blade_x, blade_y = np.asarray(rotor_data["blade"]["x"]), np.asarray(rotor_data["blade"]["y"])
+axes[1].fill(blade_x, blade_y - rotor_data["pitch"], color="0.62", ec="0.25", lw=1.2)
+handles, _ = axes[1].get_legend_handles_labels()
+axes[1].legend(handles[:3], ["Blade (elliptic edges)", f"Pressure surface, M = {rotor_data['M_lower']:.2f}",
+                             f"Suction surface, M = {rotor_data['M_upper']:.2f}"], loc="upper right", fontsize=9)
+axes[1].set_aspect("equal")
+axes[1].set_ylim(-rotor_data["pitch"] - 0.1, blade_y.max() + 0.9)
 axes[0].set_title("Stator blade from the nozzle wall")
-axes[1].set_title("Supersonic vortex rotor blade")
+axes[1].set_title("Vortex rotor passage (MoC transition arcs)")
 save(fig, "readme_blades.png")
 
 scaled = stator["scaled_blade"]

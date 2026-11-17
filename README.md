@@ -40,7 +40,7 @@ sizing, CAD and stage-assembly tools.
 - **Boundary-layer correction**: stator and rotor walls are offset by the displacement thickness of a
   turbulent flat-plate layer computed from the inviscid design.
 
-![Stator blade derived from the nozzle wall and a supersonic vortex rotor blade](docs/images/readme_blades.png)
+![Stator blade derived from the nozzle wall and a supersonic vortex rotor passage with its MoC transition arcs](docs/images/readme_blades.png)
 
 ### Sizing, CAD and stages in the preserved workflow
 
