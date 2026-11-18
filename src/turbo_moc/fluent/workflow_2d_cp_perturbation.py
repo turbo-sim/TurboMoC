@@ -61,6 +61,8 @@ def _plot_geometry_comparison(
     baseline_blade: dict[str, Any],
     case_blade: dict[str, Any],
     output: Path,
+    *,
+    perturbation_name: str = "perturbed",
 ) -> int:
     baseline_points = np.asarray(baseline_blade["control_points"], dtype=float)
     case_points = np.asarray(case_blade["control_points"], dtype=float)
@@ -86,13 +88,25 @@ def _plot_geometry_comparison(
     axis.set_aspect("equal")
     axis.set_xlabel("Pitchwise coordinate [mm]")
     axis.set_ylabel("Axial coordinate [mm]")
-    axis.set_title("Frozen baseline and case control-point perturbation")
+    axis.set_title(f"Frozen baseline and {perturbation_name} blade")
     axis.grid(alpha=0.25)
     axis.legend()
     figure.tight_layout()
     for suffix in (".png", ".svg"):
         figure.savefig(output.with_suffix(suffix), dpi=240)
     plt.close(figure)
+    baseline_curve = np.column_stack((
+        baseline_blade["blade_curve"]["x"],
+        baseline_blade["blade_curve"]["y"],
+    ))
+    case_curve = np.column_stack((
+        case_blade["blade_curve"]["x"],
+        case_blade["blade_curve"]["y"],
+    ))
+    if baseline_curve.shape == case_curve.shape:
+        curve_moved = np.linalg.norm(case_curve - baseline_curve, axis=1) > 1e-12
+        if np.any(curve_moved):
+            return int(curve_moved.sum())
     return int(moved.sum())
 
 
@@ -151,19 +165,33 @@ def run_new_case(
     baseline: dict[str, Any],
     case_file: Path,
     output_dir: Path,
+    *,
+    perturbed_blade: dict[str, Any] | None = None,
+    perturbation_name: str = "case-perturbed",
 ) -> NewCaseResult:
     """Build, mesh, and prepare the perturbed case."""
     case_file = Path(case_file).resolve()
+    output_dir = Path(output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
     case_project = _read_workflow(case_file)
     case_config = case_from_baseline(baseline, case_project)
     thermodynamic_nozzle = case_thermodynamic_nozzle(baseline, case_config)
     baseline_blade, _ = build_geometry(baseline["nozzle"], baseline["config"])
-    case_blade, case_curves = build_geometry(baseline["nozzle"], case_config)
+    case_blade, case_curves = build_geometry(
+        baseline["nozzle"],
+        case_config,
+        perturbed_blade=perturbed_blade,
+    )
     if not geometry.assess_clearance(case_blade, case_curves)["contained"]:
         raise ValueError("Cannot mesh: a periodic boundary intersects the perturbed blade.")
 
     figure_path = output_dir / "baseline_vs_perturbed_geometry"
-    moved_count = _plot_geometry_comparison(baseline_blade, case_blade, figure_path)
+    moved_count = _plot_geometry_comparison(
+        baseline_blade,
+        case_blade,
+        figure_path,
+        perturbation_name=perturbation_name,
+    )
     mesh_dir = output_dir / "gmsh"
     mesh_dir.mkdir(parents=True, exist_ok=True)
     create_mesh(
@@ -197,6 +225,47 @@ def run_new_case(
     return NewCaseResult(
         case_project, case_config, thermodynamic_nozzle, mesh_dir,
         fluent_case, figure_path, moved_count,
+    )
+
+
+def run_kl_perturbation_case(
+    baseline: dict[str, Any],
+    case_file: Path,
+    output_dir: Path,
+    perturbed_blade: dict[str, Any],
+    *,
+    sample_index: int | None = None,
+) -> NewCaseResult:
+    """Run or prepare one CFD case from ``KL_result["blades"][sample_index]``.
+
+    The frozen baseline supplies the MoC wall and operating reference. The
+    supplied blade replaces the nominal blade during passage construction,
+    meshing, barotropy setup, and Fluent-case preparation.
+    """
+    if not isinstance(perturbed_blade, dict):
+        raise ValueError("perturbed_blade must be a blade dictionary.")
+    required = {"blade_curve", "trailing_edge", "pitch"}
+    if not required <= perturbed_blade.keys():
+        raise ValueError("perturbed_blade must contain blade_curve, trailing_edge, and pitch.")
+
+    output_dir = Path(output_dir).resolve()
+    if sample_index is not None:
+        if isinstance(sample_index, bool) or not isinstance(sample_index, int):
+            raise ValueError("sample_index must be a non-negative integer.")
+        if sample_index < 0:
+            raise ValueError("sample_index must be a non-negative integer.")
+        sample_dir = output_dir / f"kl_sample_{sample_index}"
+        perturbation_name = f"KL sample {sample_index}"
+    else:
+        sample_dir = output_dir
+        perturbation_name = "KL-perturbed"
+
+    return run_new_case(
+        baseline,
+        case_file,
+        sample_dir,
+        perturbed_blade=perturbed_blade,
+        perturbation_name=perturbation_name,
     )
 
 

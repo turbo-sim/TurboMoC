@@ -192,15 +192,150 @@ def sample_random_field(expansion, coefficients=None, n_samples=0, random_state=
     samples += np.asarray(expansion.get("mean", 0.0))[None, :]
     return samples, coefficients
 
-def _curve_sides(blade):
-    """Recover perturbed suction/pressure sides from the closed blade curve."""
-    curve = np.column_stack((blade["blade_curve"]["x"], blade["blade_curve"]["y"]))
+def _curve_sides(blade, include_trailing_edge=True):
+    """Recover the two perturbed walls with the trailing-edge arch attached."""
+    curve = np.column_stack((
+        blade["blade_curve"]["x"],
+        blade["blade_curve"]["y"],
+    ))
     suction_count = len(blade["suction"]["x"])
     pressure_count = len(blade["pressure"]["x"])
     split = round(curve.shape[0] * suction_count / (suction_count + pressure_count))
     suction = curve[:split][::-1]
     pressure = curve[split:]
+    trailing = blade.get("trailing_edge")
+    if include_trailing_edge and trailing is not None:
+        trailing_points = np.column_stack((trailing["x"], trailing["y"]))
+        if len(trailing_points) >= 2:
+            if np.linalg.norm(suction[-1] - trailing_points[0]) > np.linalg.norm(
+                suction[-1] - trailing_points[-1]
+            ):
+                trailing_points = trailing_points[::-1]
+            suction = np.vstack((suction, trailing_points[1:]))
     return suction, pressure
+
+
+def _cut_side_at_x(side, x_limit):
+    """Keep a wall prefix and insert the point crossing x_limit."""
+    side = np.asarray(side, dtype=float)
+    if side.ndim != 2 or side.shape[1] != 2:
+        raise ValueError("Blade side must be a two-column point array.")
+
+    if len(side) < 2:
+        return side.copy()
+    increasing = side[-1, 0] >= side[0, 0]
+    retained = []
+    previous = side[0].copy()
+    for point in side:
+        if increasing:
+            stays = point[0] <= x_limit
+        else:
+            stays = point[0] >= x_limit
+        if stays:
+            retained.append(point.copy())
+            previous = point
+            continue
+        if previous is not None:
+            denominator = point[0] - previous[0]
+            if abs(denominator) > 1e-15:
+                fraction = (x_limit - previous[0]) / denominator
+                retained.append(previous + fraction * (point - previous))
+        break
+    if not retained:
+        return np.asarray(side[:1], dtype=float)
+    return np.asarray(retained, dtype=float)
+
+
+def _trim_side_before_crossing(side, crossing):
+    """Return the wall prefix ending at the point before the crossing segment."""
+    side = np.asarray(side, dtype=float)
+    crossing = np.asarray(crossing, dtype=float)
+    if len(side) < 2:
+        return side.copy()
+
+    closest_segment = 0
+    closest_distance = np.inf
+    for index in range(len(side) - 1):
+        start = side[index]
+        direction = side[index + 1] - start
+        denominator = float(direction @ direction)
+        fraction = 0.0 if denominator <= 1e-18 else float(
+            np.clip((crossing - start) @ direction / denominator, 0.0, 1.0)
+        )
+        projection = start + fraction * direction
+        distance = float(np.linalg.norm(crossing - projection))
+        if distance < closest_distance:
+            closest_distance = distance
+            closest_segment = index
+
+    return side[:closest_segment + 1].copy()
+
+
+def _blade_range_distance(blade):
+    """Return the Euclidean range of all points in the blade perimeter."""
+    curve = np.column_stack((
+        blade["blade_curve"]["x"],
+        blade["blade_curve"]["y"],
+    ))
+    return float(np.linalg.norm(np.ptp(curve, axis=0)))
+
+
+def _correct_trailing_edge_intersection(blade, suction, pressure, intersections):
+    """Cut the main walls at the first crossing and reconnect them to the arch."""
+    intersections = np.asarray(intersections, dtype=float)
+    if not len(intersections):
+        return blade
+
+    x_limit = float(np.min(intersections[:, 0]))
+    trailing = np.column_stack((
+        blade["trailing_edge"]["x"],
+        blade["trailing_edge"]["y"],
+    ))
+    if len(trailing) < 2:
+        return blade
+
+    suction_main = np.asarray(suction, dtype=float)
+    pressure_main = np.asarray(pressure, dtype=float)
+    first_crossing = intersections[0]
+    corrected_suction = _trim_side_before_crossing(suction_main, first_crossing)
+    corrected_pressure = _trim_side_before_crossing(pressure_main, first_crossing)
+    if len(corrected_suction) < 2 or len(corrected_pressure) < 2:
+        return blade
+
+    suction_te_index = int(np.argmin(
+        np.linalg.norm(trailing - suction_main[-1], axis=1)
+    ))
+    pressure_te_index = int(np.argmin(
+        np.linalg.norm(trailing - pressure_main[-1], axis=1)
+    ))
+    suction_te = trailing[suction_te_index]
+    pressure_te = trailing[pressure_te_index]
+    if suction_te_index > pressure_te_index:
+        trailing = trailing[::-1]
+        suction_te = trailing[0]
+        pressure_te = trailing[-1]
+    else:
+        suction_te = trailing[0]
+        pressure_te = trailing[-1]
+
+    corrected_suction = np.vstack((corrected_suction, suction_te))
+    corrected_pressure = np.vstack((corrected_pressure, pressure_te))
+
+    result = dict(blade)
+    result["suction"] = {
+        "x": corrected_suction[:, 0].tolist(),
+        "y": corrected_suction[:, 1].tolist(),
+    }
+    result["pressure"] = {
+        "x": corrected_pressure[:, 0].tolist(),
+        "y": corrected_pressure[:, 1].tolist(),
+    }
+    closed_curve = np.vstack((corrected_suction[::-1], corrected_pressure))
+    result["blade_curve"] = {
+        "x": closed_curve[:, 0].tolist(),
+        "y": closed_curve[:, 1].tolist(),
+    }
+    return result
 
 
 def _profile_points(blade):
@@ -287,18 +422,20 @@ def define_perturbed_blade(
     random_state=None,
     *,
     stop_intersections=True,
+    uncertainties_only=False,
 ):
     """Build blade contours from KL realizations on an arbitrary blade shape.
 
     ``nominal`` supplies the blade to perturb and may be a nominal or already
     control-point-perturbed blade returned by the stator geometry helpers.
-    ``blade_config`` is retained for compatibility with existing callers but
-    is not used to reconstruct the blade. Supply either ``xi`` coefficient
-    rows or ``n_samples`` to generate coefficients through
-    :func:`sample_random_field`.
+    Supply either ``xi`` coefficient rows or ``n_samples`` to generate
+    coefficients through :func:`sample_random_field`.
 
     Returns a dictionary containing ``points`` (one closed contour per sample),
-    ``blades``, the nominal blade, sampled fields, coefficients, and chord.
+    ``blades``, the nominal blade, sampled fields, coefficients, chord, and
+    ``uncertainties``. Set ``uncertainties_only=True`` to evaluate the KL fields
+    and chord-normalized profile uncertainties without applying them to the
+    blade geometry.
     """
     from turbo_moc.geometry.stator_blade import apply_geometry_uncertainty, blade_chord
 
@@ -322,30 +459,53 @@ def define_perturbed_blade(
         n_samples=0 if xi is not None else n_samples,
         random_state=random_state,
     )
+    uncertainties = np.asarray([
+        np.interp(profile_s, expansion["s_nodes"], field) / chord
+        for field in fields
+    ])
+
     blades = []
     points = []
-    for field in fields:
-        uncertainty = np.interp(profile_s, expansion["s_nodes"], field) / chord
-        blade = apply_geometry_uncertainty(nominal, uncertainty.tolist())
-        suction, pressure = _curve_sides(blade)
-        intersections = find_side_intersections(pressure, suction)
-        if stop_intersections:
-            blade = correct_suction_intersections(blade, intersections)
-        blades.append(blade)
-        curve = np.column_stack((
-            blade["blade_curve"]["x"],
-            blade["blade_curve"]["y"],
-        ))
-        trailing = np.column_stack((
-            blade["trailing_edge"]["x"],
-            blade["trailing_edge"]["y"],
-        ))
-        points.append(np.vstack((curve, trailing)))
+    if not uncertainties_only:
+        for uncertainty in uncertainties:
+            blade = apply_geometry_uncertainty(nominal, uncertainty.tolist())
+            suction, pressure = _curve_sides(blade)
+            intersections = find_side_intersections(suction, pressure)
+            if stop_intersections:
+                if len(intersections):
+                    suction_main, pressure_main = _curve_sides(
+                        blade,
+                        include_trailing_edge=False,
+                    )
+                    blade = _correct_trailing_edge_intersection(
+                        blade,
+                        suction_main,
+                        pressure_main,
+                        intersections,
+                    )
+                    suction, pressure = _curve_sides(blade)
+                    residual = find_side_intersections(suction, pressure)
+                    if len(residual):
+                        blade = correct_suction_intersections(
+                            blade,
+                            residual,
+                        )
+            blades.append(blade)
+            curve = np.column_stack((
+                blade["blade_curve"]["x"],
+                blade["blade_curve"]["y"],
+            ))
+            trailing = np.column_stack((
+                blade["trailing_edge"]["x"],
+                blade["trailing_edge"]["y"],
+            ))
+            points.append(np.vstack((curve, trailing)))
     return {
         "points": points,
         "blades": blades,
         "nominal": nominal,
         "fields": fields,
         "coefficients": coefficients,
+        "uncertainties": uncertainties,
         "chord": chord,
     }

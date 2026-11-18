@@ -118,11 +118,15 @@ def from_project(project, row_id=None):
             "row_configuration": row}
 
 
-def build_geometry(nozzle, config):
+def build_geometry(nozzle, config, perturbed_blade=None):
     """Use the app geometry/scaling when a project was supplied."""
     from turbo_moc.geometry import passage_2d, blade_row
     if "row_configuration" in config:
-        design = blade_row.build_design(nozzle, config["row_configuration"])
+        design = blade_row.build_design(
+            nozzle,
+            config["row_configuration"],
+            template=perturbed_blade,
+        )
         suction = passage_2d.xy(design.blade["suction"])
         count = len(suction) - len(nozzle["wall_final"]["x"]) - 3
         curves = design.curves | {

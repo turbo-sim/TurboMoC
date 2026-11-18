@@ -6,7 +6,8 @@ the blade pitch, then applied to the YAML-defined baseline blade. A KL profile
 perturbation is applied to every control-point sample for the second plot.
 """
 from pathlib import Path
-
+import matplotlib
+matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
@@ -170,7 +171,8 @@ def _plot_sample_comparisons(baseline, cp_samples, kl_samples, output):
         path = output / f"sample_{index:02d}_comparison"
         figure.savefig(path.with_suffix(".png"), dpi=240)
         figure.savefig(path.with_suffix(".svg"))
-        plt.close(figure)
+        #plt.close(figure)
+        plt.show()
 
 
 def main():
@@ -199,8 +201,9 @@ def main():
     )
     print(f"Generating {CP_SAMPLES} control-point samples")
     pitch = float(baseline["pitch"])
-    bounds = np.tile((-0.015 * pitch, 0.10 * pitch), (len(CP_PERTURBED_IDS), 1))
+    bounds = np.tile((-0.015 * pitch, 0.015 * pitch), (len(CP_PERTURBED_IDS), 1))
     cp_samples = []
+    cp_displacements = []
     for normalized_values in normalized_samples:
         displacements = edit_blade_geometry(
             nozzle,
@@ -209,11 +212,12 @@ def main():
             bounds,
             baseline_config,
         )
+        cp_displacements.append(displacements)
         cp_samples.append(_apply_cp_displacements(baseline, displacements))
 
     expansion = build_kl_expansion(
         n_quad=500,
-        sigma0= 2.0,
+        sigma0= 0.5,
         energy_threshold=0.99,
     )
     print("Generating KL perturbations")

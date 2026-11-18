@@ -86,6 +86,32 @@ def test_2d_geometry_preserves_app_chord_pitch_and_construction():
     assert len(curves["construction_camberline"]) > 2
 
 
+def test_2d_geometry_accepts_explicit_perturbed_blade_template():
+    raw, _ = content("gmsh", "2D")
+    config = planar.from_project(raw)
+    x = np.linspace(0., .01, 80)
+    nozzle = {"converged": True, "wall_final": {
+        "x": x.tolist(), "y": (.002 + .001 * (x / x[-1]) ** 2).tolist()}}
+    nominal, _ = planar.build_geometry(nozzle, config)
+    perturbed = deepcopy(nominal)
+    perturbed["blade_curve"]["y"] = [
+        value + (0.25 if index % 2 else -0.25)
+        for index, value in enumerate(perturbed["blade_curve"]["y"])
+    ]
+
+    blade, _ = planar.build_geometry(
+        nozzle,
+        config,
+        perturbed_blade=perturbed,
+    )
+
+    nominal_perturbed_diff = np.linalg.norm(
+        np.asarray(nominal["blade_curve"]["y"]) -
+        np.asarray(blade["blade_curve"]["y"])
+    )
+    assert nominal_perturbed_diff > 1.0
+
+
 def test_stage_download_retains_shared_interface_and_rejects_rotor():
     raw, path = content("fluent", "3D")
     raw.update(yaml.safe_load((ROOT / "examples/apps/cases/stator_rotor.yaml").read_text()))

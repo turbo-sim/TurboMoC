@@ -12,7 +12,7 @@ python examples\modifie_blade_control_points\control_points_random_field_perturb
 ```
 
 The script prints progress for configuration loading, nozzle solving, sample
-generation, and figure creation. It creates the following files in the local
+generation, figure creation, and YAML export. It creates the following files in the local
 `figures` directory:
 
 - `baseline_vs_cp_samples.png` and `.svg`: YAML baseline and control-point samples.
@@ -20,7 +20,12 @@ generation, and figure creation. It creates the following files in the local
 - `sample_01_comparison.png` through `sample_05_comparison.png` and `.svg`:
   individual baseline/CP/CP+KL comparisons.
 
+It also creates `yaml_samples/sample_01.yaml` through
+`yaml_samples/sample_05.yaml`. Each YAML file is a complete app project whose
+blade geometry contains both that sample's control-point displacements and KL
+`geometry_uncertainty` values.
+
 The first control-point sample is neutral (`0.5` for every selected control
 point). The remaining samples use random seed `42`; KL samples use seeds
-starting at `90`. Control-point displacements are bounded by plus or minus
-five percent of the blade pitch.
+starting at `90`. Control-point displacements use the bounds defined by the
+script for each selected control point.
