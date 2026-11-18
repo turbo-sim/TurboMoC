@@ -2,7 +2,6 @@
 
 import copy
 import importlib
-import json
 import sys
 from pathlib import Path
 from unittest.mock import Mock
@@ -190,9 +189,9 @@ def test_invalid_periodic_geometry_closes_gmsh(mesh_example, tmp_path):
 def test_planar_workflow_obeys_yaml_controls(
         mesh_example, monkeypatch, tmp_path, generate_mesh, show_gui,
         save_figure, show_figure):
-    import yaml
     import jaxprop as jxp
     import matplotlib.pyplot as plt
+
     from turbo_moc.geometry import passage_2d as geometry_2d
     from turbo_moc.workflows import nozzle as moc
 
@@ -248,8 +247,9 @@ def test_planar_workflow_obeys_yaml_controls(
 ])
 def test_invalid_workflow_settings_fail_before_moc(monkeypatch, tmp_path, section, key, value):
     import yaml
-    from turbo_moc.workflows import nozzle as moc
+
     from turbo_moc.meshing import mesh_2d as meshing_2d
+    from turbo_moc.workflows import nozzle as moc
 
     source = Path(__file__).resolve().parents[1] / "examples/gmsh_2D/workflow_gmsh_stator_2D.yaml"
     config = yaml.safe_load(source.read_text())

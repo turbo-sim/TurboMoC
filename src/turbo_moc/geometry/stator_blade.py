@@ -32,7 +32,6 @@ __all__ = [
     "correct_suction_intersections",
     "editable_control_points", "edit_blade_geometry", "blade_self_intersects",
     "export_blade_step", "export_flared_blade_step", "export_annular_blade_step",
-    "export_annular_blade_stl",
     "move_control_point_along_normal",
 ]
 
@@ -948,7 +947,10 @@ def _build_radial_blade_solid(cq, blade_data, r1, r2, depth, source="stator",
     extrudeLinear (~1.3x), while the polyline prism matches the shoelace
     area * depth to ~10 significant figures. Point spacing is already
     sub-mm, so the faceting is not visible."""
-    from turbo_moc.legacy.geometry.radial import wrap_blade_radial, wrap_rotor_blade_radial
+    from turbo_moc.legacy.geometry.radial import (
+        wrap_blade_radial,
+        wrap_rotor_blade_radial,
+    )
 
     if source == "stator":
         wrapped = wrap_blade_radial(blade_data, r1, r2, n_blades=1, theta0=theta0)
@@ -1016,6 +1018,47 @@ def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_off
         blade = apply_control_point_displacements(blade, control_point_displacements)
     elif control_point_offsets:
         blade = apply_control_point_offsets(blade, control_point_offsets)
+    if isinstance(geometry_uncertainty, dict) and (
+        "Xi" in geometry_uncertainty or "xi" in geometry_uncertainty
+    ):
+        from turbo_moc.geometry.karhunen_loeve import build_kl_expansion, define_perturbed_blade
+
+        xi = geometry_uncertainty.get("Xi", geometry_uncertainty.get("xi"))
+        xi = np.asarray(xi, dtype=float)
+        if xi.ndim != 1 or not np.isfinite(xi).all():
+            raise ValueError("geometry_uncertainty Xi must be a finite one-dimensional coefficient array.")
+
+        sigma0 = geometry_uncertainty.get("sigma0", 1.5)
+        if isinstance(sigma0, bool) or not isinstance(sigma0, (int, float, np.number)) or not np.isfinite(sigma0):
+            raise ValueError("geometry_uncertainty sigma0 must be finite.")
+
+        scalar_parameters = ("L0", "L_le", "omega", "energy_threshold")
+        values = {}
+        defaults = (0.1, 1e-2, 0.1, 0.99)
+        for name, default in zip(scalar_parameters, defaults):
+            value = geometry_uncertainty.get(name, default)
+            if isinstance(value, bool) or not isinstance(value, (int, float, np.number)) or not np.isfinite(value):
+                raise ValueError(f"geometry_uncertainty {name} must be finite.")
+            values[name] = float(value)
+
+        n_quad = geometry_uncertainty.get("n_quad", 500)
+        if isinstance(n_quad, bool) or not isinstance(n_quad, (int, np.integer)) or n_quad < 1:
+            raise ValueError("geometry_uncertainty n_quad must be a positive integer.")
+
+        expansion = build_kl_expansion(
+            n_quad=int(n_quad),
+            sigma0=float(sigma0),
+            L0=values["L0"],
+            L_le=values["L_le"],
+            omega=values["omega"],
+            energy_threshold=values["energy_threshold"],
+        )
+        result = define_perturbed_blade(expansion, blade, xi=xi, stop_intersections=True)
+        if len(result["blades"]) != 1:
+            raise ValueError("geometry_uncertainty Xi must generate exactly one blade realization.")
+        blade = result["blades"][0]
+        blade["geometry_uncertainty"] = dict(geometry_uncertainty)
+        return blade
     return apply_geometry_uncertainty(blade, geometry_uncertainty)
 
 
@@ -1031,18 +1074,18 @@ def edit_blade_geometry(
     bounds: Sequence[Sequence[float]] | np.ndarray,
     blade_parameters: Mapping | None = None,
 ) -> np.ndarray:
-    """Return CP displacements from a frozen MoC baseline.
+    """Return complete CP displacements relative to a nominal blade.
 
     ``baseline_nozzle`` is the frozen baseline nozzle object, as
     stored in ``baseline["nozzle"]``. Its wall is used to rebuild the blade
-    control points without applying any configured control-point
-    perturbations. ``blade_parameters`` should be the corresponding
-    ``baseline["config"]["blade"]`` mapping.
+    control points. ``blade_parameters`` is the corresponding
+    ``baseline["config"]["blade"]`` mapping and may contain fixed
+    control-point displacements or offsets.
 
-    The normalized values are mapped to physical normal offsets using one
-    ``(lower, upper)`` pair per editable CP. The returned offsets are divided
-    by the reconstructed blade chord and have one ``[dx, dy]`` row per
-    baseline CP; locked CPs are zero.
+    The normalized random values are mapped to physical normal offsets using
+    one ``(lower, upper)`` pair per editable CP. Fixed baseline displacement
+    vectors and random offsets are both divided by the nominal blade chord and
+    combined. Locked CPs are zero.
     """
     if not isinstance(baseline_nozzle, Mapping):
         raise ValueError("baseline_nozzle must be a frozen nozzle mapping.")
@@ -1060,14 +1103,21 @@ def edit_blade_geometry(
     if blade_parameters is None or not isinstance(blade_parameters, Mapping):
         raise ValueError("blade_parameters must contain the baseline blade configuration.")
     parameters = dict(blade_parameters)
+    nominal_parameters = dict(parameters)
     for key in ("control_point_offsets", "control_point_displacements", "geometry_uncertainty"):
-        parameters.pop(key, None)
+        nominal_parameters.pop(key, None)
 
     try:
-        baseline_blade = parametrize_stator(wall_x, wall_y, **parameters)
+        nominal_blade = parametrize_stator(wall_x, wall_y, **nominal_parameters)
+        fixed_parameters = dict(parameters)
+        fixed_parameters.pop("geometry_uncertainty", None)
+        fixed_blade = parametrize_stator(wall_x, wall_y, **fixed_parameters)
     except (TypeError, ValueError) as error:
         raise ValueError("Could not build baseline control points from blade_parameters.") from error
-    baseline = np.asarray(baseline_blade["control_points"], dtype=float)
+    nominal = np.asarray(nominal_blade["control_points"], dtype=float)
+    fixed = np.asarray(fixed_blade["control_points"], dtype=float)
+    nominal_chord = blade_chord(nominal_blade)
+    fixed_displacements = (fixed - nominal) / nominal_chord
 
     indices = np.asarray(editable_control_points)
     values = np.asarray(normalized_values, dtype=float)
@@ -1079,7 +1129,7 @@ def edit_blade_geometry(
     if (not np.issubdtype(indices.dtype, np.integer)
             or len(np.unique(indices)) != len(indices)
             or np.any(indices < 0)
-            or np.any(indices >= len(baseline))):
+            or np.any(indices >= len(nominal))):
         raise ValueError("editable_control_points must contain unique valid integer indices.")
     if np.any(~np.isfinite(values)) or np.any((values < 0.0) | (values > 1.0)):
         raise ValueError("normalized_values must be finite and in [0, 1].")
@@ -1087,9 +1137,14 @@ def edit_blade_geometry(
         raise ValueError("bounds must contain finite lower/upper pairs.")
 
     physical_offsets = bounds_array[:, 0] + values * (bounds_array[:, 1] - bounds_array[:, 0])
-    perturbations = np.zeros_like(baseline)
-    perturbations[indices] = control_point_normals(baseline)[indices] * physical_offsets[:, None]
-    return perturbations / blade_chord(baseline_blade)
+    perturbations = np.zeros_like(nominal)
+    perturbations[indices] = (
+        control_point_normals(nominal)[indices] * physical_offsets[:, None]
+        / nominal_chord
+    )
+    result = fixed_displacements + perturbations
+    result[[0, 1, -2, -1]] = 0.0
+    return result
 
 
 def blade_chord(blade):
@@ -1268,7 +1323,7 @@ def find_side_intersections(suction, pressure, tolerance=1e-12):
 
 
 def correct_suction_intersections(
-    blade, intersections=None, minimum_gap=1.0, max_iterations=1000
+    blade, intersections=None, minimum_gap=2.0, max_iterations=1000
 ):
     """Redraw the blade curve repeatedly until its two sides do not intersect.
 

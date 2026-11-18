@@ -107,7 +107,10 @@ def case_from_baseline(baseline, project, *, row_id=None):
     case_blade = case_config["blade"]
     for key in _PERTURBATION_KEYS:
         if key in case_blade:
-            blade[key] = deepcopy(case_blade[key])
+            value = deepcopy(case_blade[key])
+            if key in ("control_point_displacements", "control_point_offsets") and isinstance(value, dict):
+                value = {str(index): displacement for index, displacement in value.items()}
+            blade[key] = value
     case_config["blade"] = blade
     if "row_configuration" in case_config:
         case_config["row_configuration"]["blade_geometry"] = deepcopy(blade)

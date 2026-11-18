@@ -168,6 +168,8 @@ def build_kl_expansion(
         "L0": L0,
         "L_le": L_le,
         "omega": omega,
+        "energy_threshold": energy_threshold,
+        "n_quad": n_quad,
     }
 
 
@@ -338,6 +340,105 @@ def _correct_trailing_edge_intersection(blade, suction, pressure, intersections)
     return result
 
 
+def _reconcile_trailing_edge(blade):
+    """Recompute the trailing-edge arc and snap spline endpoints to it."""
+    if "blade_curve" not in blade or "trailing_edge" not in blade:
+        return blade
+    if "control_points" not in blade or "knots" not in blade:
+        return blade
+
+    trailing = np.column_stack((
+        blade["trailing_edge"]["x"],
+        blade["trailing_edge"]["y"],
+    ))
+    suction, pressure = _curve_sides(blade, include_trailing_edge=False)
+    if len(trailing) < 2 or len(suction) < 2 or len(pressure) < 2:
+        return blade
+
+    suction_te = suction[-1].copy()
+    pressure_te = pressure[-1].copy()
+    if np.linalg.norm(trailing[0] - pressure_te) > np.linalg.norm(trailing[-1] - pressure_te):
+        trailing = trailing[::-1]
+
+    old_start = trailing[0]
+    old_end = trailing[-1]
+    target_start = pressure_te
+    target_end = suction_te
+    old_vector = old_end - old_start
+    target_vector = target_end - target_start
+    old_length = float(np.linalg.norm(old_vector))
+    target_length = float(np.linalg.norm(target_vector))
+    if old_length <= 1e-15 or target_length <= 1e-15:
+        return blade
+
+    old_angle = float(np.arctan2(old_vector[1], old_vector[0]))
+    target_angle = float(np.arctan2(target_vector[1], target_vector[0]))
+    scale = target_length / old_length
+    angle = target_angle - old_angle
+    cosine = float(np.cos(angle))
+    sine = float(np.sin(angle))
+    rotation_scale = scale * np.asarray([
+        [cosine, -sine],
+        [sine, cosine],
+    ])
+    old_center = 0.5 * (old_start + old_end)
+    target_center = 0.5 * (target_start + target_end)
+    rebuilt = target_center + (
+        (trailing - old_center) @ rotation_scale.T
+    )
+    rebuilt[0] = target_start
+    rebuilt[-1] = target_end
+
+    result = dict(blade)
+    result["trailing_edge"] = {
+        "x": rebuilt[:, 0].tolist(),
+        "y": rebuilt[:, 1].tolist(),
+    }
+
+    control_points = np.asarray(blade["control_points"], dtype=float).copy()
+    if len(control_points) < 2:
+        return result
+    control_points[0] = target_end
+    control_points[-1] = target_start
+    result["control_points"] = control_points.tolist()
+
+    from turbo_moc.geometry.splines import BSplineTool
+
+    closed_curve = np.vstack((suction[::-1], pressure))
+    spline = BSplineTool(degree=3)
+    refitted_controls, knots = spline.backward_fixed(
+        closed_curve,
+        len(control_points),
+    )
+    refitted_controls[0] = target_end
+    refitted_controls[-1] = target_start
+    refitted_curve = spline.forward(
+        refitted_controls,
+        knots,
+        num_points=len(np.asarray(blade["blade_curve"]["x"])),
+    )
+    result["control_points"] = refitted_controls.tolist()
+    result["knots"] = knots.tolist()
+    result["blade_curve"] = {
+        "x": refitted_curve[:, 0].tolist(),
+        "y": refitted_curve[:, 1].tolist(),
+    }
+
+    result_suction, result_pressure = _curve_sides(
+        result,
+        include_trailing_edge=False,
+    )
+    result["suction"] = {
+        "x": result_suction[:, 0].tolist(),
+        "y": result_suction[:, 1].tolist(),
+    }
+    result["pressure"] = {
+        "x": result_pressure[:, 0].tolist(),
+        "y": result_pressure[:, 1].tolist(),
+    }
+    return result
+
+
 def _profile_points(blade):
     curve = np.column_stack((blade["blade_curve"]["x"], blade["blade_curve"]["y"]))
     trailing = np.column_stack((blade["trailing_edge"]["x"], blade["trailing_edge"]["y"]))
@@ -422,7 +523,6 @@ def define_perturbed_blade(
     random_state=None,
     *,
     stop_intersections=True,
-    uncertainties_only=False,
 ):
     """Build blade contours from KL realizations on an arbitrary blade shape.
 
@@ -433,14 +533,17 @@ def define_perturbed_blade(
 
     Returns a dictionary containing ``points`` (one closed contour per sample),
     ``blades``, the nominal blade, sampled fields, coefficients, chord, and
-    ``uncertainties``. Set ``uncertainties_only=True`` to evaluate the KL fields
-    and chord-normalized profile uncertainties without applying them to the
-    blade geometry.
+    ``uncertainties`` contains the chord-normalized profile realization.
+    Single realization coefficients may be supplied as a one-dimensional array.
     """
     from turbo_moc.geometry.stator_blade import apply_geometry_uncertainty, blade_chord
 
     if xi is not None and n_samples != 1:
         raise ValueError("Provide xi or n_samples, not both.")
+    if xi is not None:
+        xi = np.asarray(xi, dtype=float)
+        if xi.ndim == 1:
+            xi = xi[None, :]
 
     profile = np.column_stack((
         nominal["blade_curve"]["x"],
@@ -466,40 +569,43 @@ def define_perturbed_blade(
 
     blades = []
     points = []
-    if not uncertainties_only:
-        for uncertainty in uncertainties:
-            blade = apply_geometry_uncertainty(nominal, uncertainty.tolist())
-            suction, pressure = _curve_sides(blade)
-            intersections = find_side_intersections(suction, pressure)
-            if stop_intersections:
-                if len(intersections):
-                    suction_main, pressure_main = _curve_sides(
+    for uncertainty in uncertainties:
+        blade = apply_geometry_uncertainty(nominal, uncertainty.tolist())
+        blade = _reconcile_trailing_edge(blade)
+        suction, pressure = _curve_sides(blade)
+        intersections = find_side_intersections(suction, pressure)
+        if stop_intersections:
+            if len(intersections):
+                suction_main, pressure_main = _curve_sides(
+                    blade,
+                    include_trailing_edge=False,
+                )
+                blade = _correct_trailing_edge_intersection(
+                    blade,
+                    suction_main,
+                    pressure_main,
+                    intersections,
+                )
+                blade = _reconcile_trailing_edge(blade)
+                suction, pressure = _curve_sides(blade)
+                residual = find_side_intersections(suction, pressure)
+                if len(residual):
+                    blade = correct_suction_intersections(
                         blade,
-                        include_trailing_edge=False,
+                        residual,
+                        minimum_gap=2.0,
                     )
-                    blade = _correct_trailing_edge_intersection(
-                        blade,
-                        suction_main,
-                        pressure_main,
-                        intersections,
-                    )
-                    suction, pressure = _curve_sides(blade)
-                    residual = find_side_intersections(suction, pressure)
-                    if len(residual):
-                        blade = correct_suction_intersections(
-                            blade,
-                            residual,
-                        )
-            blades.append(blade)
-            curve = np.column_stack((
-                blade["blade_curve"]["x"],
-                blade["blade_curve"]["y"],
-            ))
-            trailing = np.column_stack((
-                blade["trailing_edge"]["x"],
-                blade["trailing_edge"]["y"],
-            ))
-            points.append(np.vstack((curve, trailing)))
+                    blade = _reconcile_trailing_edge(blade)
+        blades.append(blade)
+        curve = np.column_stack((
+            blade["blade_curve"]["x"],
+            blade["blade_curve"]["y"],
+        ))
+        trailing = np.column_stack((
+            blade["trailing_edge"]["x"],
+            blade["trailing_edge"]["y"],
+        ))
+        points.append(np.vstack((curve, trailing)))
     return {
         "points": points,
         "blades": blades,

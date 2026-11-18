@@ -1,3 +1,4 @@
+import inspect
 import numpy as np
 import pytest
 import yaml
@@ -5,7 +6,10 @@ import yaml
 from turbo_moc.configuration.project import default_project, get_row, normalize_project, validate_project
 from turbo_moc.geometry.stator_blade import (apply_control_point_offsets, blade_self_intersects,
                                              apply_geometry_uncertainty, editable_control_points,
-                                             parametrize_stator)
+                                             blade_chord, control_point_normals,
+                                             correct_suction_intersections,
+                                             edit_blade_geometry, parametrize_stator)
+from turbo_moc.geometry.karhunen_loeve import build_kl_expansion
 
 
 @pytest.fixture
@@ -39,6 +43,82 @@ def test_dispatcher_applies_offsets_from_the_configuration(small_design, blade):
     edited = parametrize_stator(wall["wall_final"]["x"], wall["wall_final"]["y"],
                                 control_point_offsets={6: 0.01}, **inputs)
     assert edited["control_points"] == apply_control_point_offsets(blade, {6: 0.01})["control_points"]
+
+
+def test_dispatcher_replays_geometry_uncertainty_from_xi(small_design):
+    wall, config = small_design
+    inputs = {k: v for k, v in config["blade_geometry"].items()
+              if k not in {"control_point_offsets", "control_point_displacements",
+                           "geometry_uncertainty"}}
+    expansion = build_kl_expansion(n_quad=20, sigma0=1.5, energy_threshold=0.99)
+    uncertainty = {
+        "Xi": [0.0] * expansion["n_modes"],
+        "sigma0": 1.5,
+        "L0": 0.1,
+        "L_le": 1e-2,
+        "omega": 0.1,
+        "energy_threshold": 0.99,
+        "n_quad": 20,
+    }
+    edited = parametrize_stator(
+        wall["wall_final"]["x"],
+        wall["wall_final"]["y"],
+        geometry_uncertainty=uncertainty,
+        **inputs,
+    )
+    assert edited["geometry_uncertainty"] == uncertainty
+
+
+def test_edit_blade_geometry_returns_fixed_plus_random_total_vectors(small_design):
+    wall, config = small_design
+    blade_parameters = dict(config["blade_geometry"])
+    blade_parameters["control_point_displacements"] = {5: [0.01, -0.002]}
+
+    nominal_parameters = {
+        key: value
+        for key, value in blade_parameters.items()
+        if key not in {
+            "control_point_offsets",
+            "control_point_displacements",
+            "geometry_uncertainty",
+        }
+    }
+    nominal = parametrize_stator(
+        wall["wall_final"]["x"],
+        wall["wall_final"]["y"],
+        **nominal_parameters,
+    )
+    fixed = parametrize_stator(
+        wall["wall_final"]["x"],
+        wall["wall_final"]["y"],
+        **blade_parameters,
+    )
+
+    vectors = edit_blade_geometry(
+        wall,
+        [5],
+        np.asarray([0.5]),
+        np.asarray([[0.0, 0.02]]),
+        blade_parameters,
+    )
+
+    chord = blade_chord(nominal)
+    fixed_vector = (
+        np.asarray(fixed["control_points"][5])
+        - np.asarray(nominal["control_points"][5])
+    ) / chord
+    random_vector = control_point_normals(
+        np.asarray(nominal["control_points"], dtype=float)
+    )[5] * 0.01 / chord
+
+    assert vectors.shape == (len(nominal["control_points"]), 2)
+    assert np.allclose(vectors[5], fixed_vector + random_vector)
+    assert np.allclose(vectors[0], [0.0, 0.0])
+
+
+def test_suction_intersection_correction_defaults_to_two_mm():
+    parameter = inspect.signature(correct_suction_intersections).parameters["minimum_gap"]
+    assert parameter.default == 2.0
 
 
 def test_self_intersection_is_detected(blade):

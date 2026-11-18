@@ -20,6 +20,15 @@ generation, figure creation, and YAML export. It creates the following files in 
 - `sample_01_comparison.png` through `sample_05_comparison.png` and `.svg`:
   individual baseline/CP/CP+KL comparisons.
 
+It also creates complete app-project YAML files in `generated_blades`:
+
+- `blade_design_baseline_sample_01.yaml` through
+  `blade_design_baseline_sample_05.yaml`.
+
+Each file has the same structure and settings as `blade_design_baseline.yaml`,
+with the corresponding control-point displacements and KL
+`geometry_uncertainty` values.
+
 It also creates `yaml_samples/sample_01.yaml` through
 `yaml_samples/sample_05.yaml`. Each YAML file is a complete app project whose
 blade geometry contains both that sample's control-point displacements and KL

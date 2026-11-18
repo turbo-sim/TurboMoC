@@ -54,3 +54,4 @@ examples/droplet_impingment/run_2D_rotor/
 /fluent-*.trn
 /cleanup-fluent-*.bat
 /cleanup-fluent-*.sh
+/examples/modifie_blade_control_points/generated_blades/
