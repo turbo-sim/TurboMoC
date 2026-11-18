@@ -37,7 +37,6 @@ KL_RANDOM_SEED = 90
 CP_PERTURBED_IDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 25, 26, 27]
 KL_PARAMETERS = {
     "sigma0": 0.8,
-    "sigma1" : 0.2,
     "L0": 0.1,
     "L_le": 1e-2,
     "omega": 0.1,
