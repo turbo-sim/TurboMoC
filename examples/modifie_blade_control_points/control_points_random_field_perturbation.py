@@ -43,7 +43,7 @@ KL_PARAMETERS = {
     "L0": 0.1,
     "L_le": 1e-2,
     "omega": 0.1,
-    "energy_threshold": 0.99,
+    "energy_threshold": 0.95,
     "n_quad": 500,
 }
 
