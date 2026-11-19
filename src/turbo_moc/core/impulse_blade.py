@@ -179,8 +179,10 @@ def thin_arc_walls(spacing, axial_chord, beta, thickness, count=200):
     """Open walls of a classical arc-and-line impulse blade (Capetti / Deich type) thinner than Baines' constant
     passage. Pressure (lower): one arc tangent to +-beta through the sharp edges (as Baines). Suction (upper, +spacing):
     a smaller arc, also tangent to +-beta, spanning x in +-a; the closure adds straight stubs at beta to the edges.
-    Its crown sits ``thickness`` (t_max / axial chord, sharp blade) above the pressure crown:
-        t = (c/2 - a) (tan beta - tan beta/2)."""
+    Its crown sits ``thickness`` (t_max / axial chord, sharp blade) above the pressure crown::
+
+        t = (c/2 - a) (tan beta - tan beta/2)
+    """
     half = 0.5 * axial_chord
     a = half - thickness * axial_chord / (np.tan(beta) - np.tan(0.5 * beta))
     if not 0 < a < half:

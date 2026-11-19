@@ -100,6 +100,8 @@ explicit `r_star` length scale is supplied to rescale to physical units --
 see `design_rotor_vortex_blade`'s docstring.
 """
 
+import warnings
+
 import numpy as np
 
 from turbo_moc.core.thermo_characteristics import get_fluid_manager
@@ -378,20 +380,32 @@ def _V_of_M(manager, M_target):
     own isentrope (self.s0). Inverts M(V) = V / a_of_V(V) by bisection --
     a_of_V is a cheap spline lookup (see FluidManager._build_nu_table), so
     this is not a real thermodynamic call, just root-finding on the table.
+
+    M(V) need not be monotone: on a wet-to-dry expansion the HEM sound speed
+    jumps up at the dew line and M drops, so a Mach number in that band is
+    reached at up to three velocities. The flow reaches the first one (smallest
+    V) first, so the bisection runs in the first table interval where M(V)
+    crosses M_target; a warning flags the ambiguity.
     """
-    V_lo = manager._nu_V_table[0]
-    V_hi = manager._nu_V_table[-1]
+    V_nodes = np.asarray(manager._nu_V_table, dtype=float)
+    r_nodes = V_nodes / manager._spline_a_of_V(V_nodes) - M_target
 
     def resid(V):
         return V / manager.a_of_V(V) - M_target
 
-    r_lo, r_hi = resid(V_lo), resid(V_hi)
-    if r_lo > 0:
+    if r_nodes[0] > 0:
         raise ValueError(f"M_target={M_target} is below the table's minimum resolvable Mach number")
-    if r_hi < 0:
+    above = r_nodes >= 0
+    if not above.any():
         raise ValueError(f"M_target={M_target} exceeds the table's range -- rebuild with a wider table")
+    k = int(np.argmax(above))
+    if k == 0:
+        return float(V_nodes[0])
+    if np.count_nonzero(np.diff(np.sign(r_nodes)) != 0) > 1:
+        warnings.warn(f"M(V) is not monotone on this isentrope (wet-to-dry expansion?): M_target={M_target} is "
+                      "reached at more than one velocity; using the first one along the expansion.", stacklevel=2)
 
-    lo, hi = V_lo, V_hi
+    lo, hi = float(V_nodes[k - 1]), float(V_nodes[k])
     for _ in range(80):
         mid = 0.5 * (lo + hi)
         if resid(mid) > 0:
@@ -813,7 +827,7 @@ def design_rotor_vortex_blade(
             "translate": le_te_diag["translate"],
             "le_breaks": le_te_diag["le_breaks"],
         },
-        "fluid_name": fluid_name,
+        "fluid_name": fluid_name, "backend": backend,
         "M_inlet": float(M_inlet), "M_outlet": float(M_outlet),
         "M_lower": float(M_lower), "M_upper": float(M_upper),
         "beta_inlet": float(beta_inlet), "beta_outlet": float(beta_outlet),

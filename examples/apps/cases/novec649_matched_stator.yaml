@@ -1,0 +1,189 @@
+# Novec649 linear stator matched to Downloads/control_points.json (30 CPs, max error < 0.05 mm).
+# Conditions from 04_cfd_automation/config.yaml: P0 10.9 bar, x0 0.42, p_back 1.909 bar.
+# MoC inputs untouched (y_t default 0.01); blade params pinned on the locked TE points 0,1,28,29; points 2-27 moved with
+# control_point_displacements ([dx, dy] / chord). meridional_chord keeps the blade at 1:1 scale.
+machine:
+  design_mode: stator
+  geometry_type: linear
+  fluid_name: Novec649
+workflow:
+  save_figures: true
+  show_gmsh: true
+  show_pyvista: true
+  log_level: INFO
+rows:
+- id: stator_1
+  role: stator
+  geometry:
+    method_of_characteristics:
+      inlet_property_pair: PQ_INPUTS
+      inlet_property_1: 1090000.0
+      inlet_property_2: 0.42
+      p_back: 190900.0
+      solver: conventional
+      use_true_sauer_line: true
+      y_t: 0.01
+      n: 15
+      rho_t: 0.2
+      rho_d: 0.1
+      delta_flow: 0.0
+      tau_max: 90.0
+      tau_step: 1.0
+    meridional_channel:
+      type: linear
+      meridional_chord: 106.5989
+      blade_height: 10.0
+    blade_geometry:
+      metal_angle_in: 50.5716
+      metal_angle_out: 70.42
+      r_trailing: 0.508
+      inlet_opening_ratio: 1.8915
+      n_cp: 30
+      num_baseline_points: 500
+      num_curve_points: 500
+      control_point_displacements:
+        2:
+        - 0.0003714
+        - 0.0003775
+        3:
+        - 0.0008317
+        - 0.0007986
+        4:
+        - 0.0013052
+        - 0.0012422
+        5:
+        - 0.0017568
+        - 0.0016486
+        6:
+        - 0.0022473
+        - 0.0021201
+        7:
+        - 0.002671
+        - 0.0024884
+        8:
+        - 0.0031711
+        - 0.0028922
+        9:
+        - 0.0045773
+        - 0.0064451
+        10:
+        - 0.005764
+        - 0.0106685
+        11:
+        - 0.0063344
+        - 0.0166746
+        12:
+        - 0.0058257
+        - 0.0035039
+        13:
+        - 0.0004531
+        - -0.004331
+        14:
+        - 0.0129569
+        - 0.0060639
+        15:
+        - -0.0087641
+        - 0.009873
+        16:
+        - -0.0099678
+        - 0.0281427
+        17:
+        - -0.0015293
+        - 0.033853
+        18:
+        - -0.0137146
+        - 0.0274938
+        19:
+        - 0.022265
+        - 0.0544268
+        20:
+        - 0.0120073
+        - 0.0346321
+        21:
+        - 0.0076797
+        - 0.0222933
+        22:
+        - 0.0057938
+        - 0.0097811
+        23:
+        - 0.0051287
+        - 0.0076515
+        24:
+        - 0.003169
+        - 0.0023899
+        25:
+        - -0.0001318
+        - -0.0014791
+        26:
+        - 0.0007929
+        - 0.0001983
+        27:
+        - 0.000203
+        - 2.66e-05
+    flow_domain:
+      domain_shift_mode: auto
+      domain_shift_value: 0.0
+      number_of_points: 120
+      inlet:
+        extension_type: bspline
+        extension_length: 1.5
+        axial_tangent: 0.35
+        blade_tangent: 0.35
+      outlet:
+        extension_type: straight
+        extension_length: 2.0
+        axial_tangent: 0.55
+        blade_tangent: 0.15
+  mesh:
+    show_gui: false
+    numerics:
+      terminal_output: true
+      verbosity: 2
+      blade_size: 0.25
+      domain_size: 1.0
+      curvature_elements: 50
+      algorithm: 8
+      recombine: true
+      recombination_algorithm: 1
+      recombine_minimum_quality: 0.1
+      smoothing_steps: 5
+      inflation_layers:
+        enabled: true
+        first_height: 0.03
+        growth_ratio: 1.2
+        thickness: 1.0
+      span_layers: 8
+      span_stretch: 0.0
+    matplotlib:
+      num_blades: 3
+      annotate_boundaries: true
+      mesh_color: orange
+      edge_color: black
+      domain_color: lightgrey
+      dpi: 500
+      rasterize_mesh: true
+    visualization:
+      section_edge_width: 0.35
+      volume_edge_width: 0.35
+    pyvista:
+      show_mesh_edges: true
+      surfaces:
+        blade: true
+        hub: true
+        shroud: false
+        inlet: false
+        outlet: false
+        periodic_left: false
+        periodic_right: false
+    cgns:
+      enabled: true
+      filename: linear_cascade_3d.cgns
+      length_scale: 0.001
+      boundary_types:
+        blade: BCWallViscous
+        inlet: BCInflowSubsonic
+        outlet: BCOutflowSubsonic
+        periodic_left: BCGeneral
+        periodic_right: BCGeneral
+        hub: BCWallViscous
+        shroud: BCWallViscous

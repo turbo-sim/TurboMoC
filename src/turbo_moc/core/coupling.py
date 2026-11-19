@@ -59,7 +59,7 @@ def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U, stator_efficienc
     rho_static = float(wall["rho"][-1])
     M_abs = float(wall["M"][-1])
 
-    fluid = jxp.Fluid(nozzle_result["fluid_name"])
+    fluid = jxp.Fluid(nozzle_result["fluid_name"], backend=nozzle_result.get("backend", "HEOS"))
     state_static = fluid.get_state(jxp.DmassT_INPUTS, rho_static, T_static)
     a = float(state_static.a)
     h_static = float(state_static.h)
@@ -95,12 +95,17 @@ def derive_rotor_inlet_from_stator(nozzle_result, alpha_deg, U, stator_efficienc
     # FluidManager uses PQ_INPUTS. A single-phase state can still land within
     # CoolProp's 1e-4 % saturation tolerance, where the downstream PT_INPUTS
     # query raises; a scale-aware nudge clears that band and stays below the
-    # app's display precision.
+    # app's display precision. The nudge moves AWAY from saturation: down for
+    # a subcooled liquid, up for a vapour or a supercritical state. (Always
+    # nudging up turned a liquid within ~0.03 K of saturation into vapour.)
     if state0_rel.is_two_phase:
         Q0_rel = float(state0_rel.Q)
     else:
         Q0_rel = float("nan")
-        T0_rel += max(1e-3, abs(T0_rel) * 1e-4)
+        nudge = max(1e-3, abs(T0_rel) * 1e-4)
+        liquid = (P0_rel < float(fluid.critical_point.p)
+                  and T0_rel < float(fluid.get_state(jxp.PQ_INPUTS, P0_rel, 0.0).T))
+        T0_rel += -nudge if liquid else nudge
 
     return {
         "p_static": p_static, "T_static": T_static, "rho_static": rho_static,
