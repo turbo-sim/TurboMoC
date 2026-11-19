@@ -37,6 +37,9 @@ KL_RANDOM_SEED = 90
 CP_PERTURBED_IDS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 25, 26, 27]
 KL_PARAMETERS = {
     "sigma0": 0.8,
+    "sigma1": 0.2,
+    "cp_te_pressure": 1e-3,
+    "cp_te_suction": 0.999,
     "L0": 0.1,
     "L_le": 1e-2,
     "omega": 0.1,
@@ -111,7 +114,11 @@ def _save_generated_blades(project, cp_displacements, kl_samples, output):
 
         path = output / f"case_{index:02d}.yaml"
         path.write_text(
-            yaml.safe_dump(sample_project, sort_keys=False, allow_unicode=True),
+            yaml.safe_dump(
+                sample_project,
+                sort_keys=False,
+                allow_unicode=True
+            ),
             encoding="utf-8",
         )
         saved.append(path)
@@ -277,7 +284,23 @@ def main():
         cp_displacements.append(displacements)
         cp_samples.append(_apply_cp_displacements(nominal, displacements))
 
-    expansion = build_kl_expansion(**KL_PARAMETERS)
+    sigma0 = KL_PARAMETERS["sigma0"]
+    if "sigma1" in KL_PARAMETERS:
+        sigma0 = karhunen_loeve.SigmaProfile(
+            start_te_sside=KL_PARAMETERS["cp_te_suction"],
+            start_te_pside=KL_PARAMETERS["cp_te_pressure"],
+            sigma0 = KL_PARAMETERS["sigma0"],
+            sigma1 = KL_PARAMETERS["sigma1"],
+        )
+
+    expansion = build_kl_expansion(
+        sigma0 = sigma0,
+        L0 = KL_PARAMETERS["L0"],
+        L_le = KL_PARAMETERS["L_le"],
+        omega = KL_PARAMETERS["omega"],
+        energy_threshold = KL_PARAMETERS["energy_threshold"],
+        n_quad = KL_PARAMETERS["n_quad"],
+    )
     xi_coefficients = np.random.default_rng(KL_RANDOM_SEED).standard_normal(
         (CP_SAMPLES, expansion["n_modes"])
     )

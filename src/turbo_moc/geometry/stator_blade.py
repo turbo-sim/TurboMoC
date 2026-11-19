@@ -1021,7 +1021,11 @@ def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_off
     if isinstance(geometry_uncertainty, dict) and (
         "Xi" in geometry_uncertainty or "xi" in geometry_uncertainty
     ):
-        from turbo_moc.geometry.karhunen_loeve import build_kl_expansion, define_perturbed_blade
+        from turbo_moc.geometry.karhunen_loeve import (
+            SigmaProfile,
+            build_kl_expansion,
+            define_perturbed_blade,
+        )
 
         xi = geometry_uncertainty.get("Xi", geometry_uncertainty.get("xi"))
         xi = np.asarray(xi, dtype=float)
@@ -1031,6 +1035,30 @@ def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_off
         sigma0 = geometry_uncertainty.get("sigma0", 1.5)
         if isinstance(sigma0, bool) or not isinstance(sigma0, (int, float, np.number)) or not np.isfinite(sigma0):
             raise ValueError("geometry_uncertainty sigma0 must be finite.")
+        sigma0 = float(sigma0)
+
+        if "sigma1" in geometry_uncertainty:
+            sigma1 = geometry_uncertainty["sigma1"]
+            if isinstance(sigma1, bool) or not isinstance(sigma1, (int, float, np.number)) or not np.isfinite(sigma1):
+                raise ValueError("geometry_uncertainty sigma1 must be finite.")
+
+            profile_parameters = (
+                ("cp_te_pressure", 0.25),
+                ("cp_te_suction", 0.75),
+            )
+            profile_values = {}
+            for name, default in profile_parameters:
+                value = geometry_uncertainty.get(name, default)
+                if isinstance(value, bool) or not isinstance(value, (int, float, np.number)) or not np.isfinite(value):
+                    raise ValueError(f"geometry_uncertainty {name} must be finite.")
+                profile_values[name] = float(value)
+
+            sigma0 = SigmaProfile(
+                profile_values["cp_te_pressure"],
+                profile_values["cp_te_suction"],
+                sigma0=sigma0,
+                sigma1=float(sigma1),
+            )
 
         scalar_parameters = ("L0", "L_le", "omega", "energy_threshold")
         values = {}
@@ -1047,7 +1075,7 @@ def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_off
 
         expansion = build_kl_expansion(
             n_quad=int(n_quad),
-            sigma0=float(sigma0),
+            sigma0=sigma0,
             L0=values["L0"],
             L_le=values["L_le"],
             omega=values["omega"],

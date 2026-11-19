@@ -9,7 +9,7 @@ from turbo_moc.geometry.stator_blade import (apply_control_point_offsets, blade_
                                              blade_chord, control_point_normals,
                                              correct_suction_intersections,
                                              edit_blade_geometry, parametrize_stator)
-from turbo_moc.geometry.karhunen_loeve import build_kl_expansion
+from turbo_moc.geometry.karhunen_loeve import SigmaProfile, build_kl_expansion
 
 
 @pytest.fixture
@@ -67,6 +67,98 @@ def test_dispatcher_replays_geometry_uncertainty_from_xi(small_design):
         **inputs,
     )
     assert edited["geometry_uncertainty"] == uncertainty
+
+
+@pytest.mark.parametrize(
+    "profile_settings, expected_pressure, expected_suction",
+    [
+        ({"sigma1": 0.2}, 0.25, 0.75),
+        (
+            {"sigma1": 0.2, "cp_te_pressure": 0.1, "cp_te_suction": 0.9},
+            0.1,
+            0.9,
+        ),
+    ],
+)
+def test_dispatcher_initializes_sigma_profile(
+    small_design,
+    monkeypatch,
+    profile_settings,
+    expected_pressure,
+    expected_suction,
+):
+    import turbo_moc.geometry.karhunen_loeve as kl
+
+    wall, config = small_design
+    inputs = {
+        key: value
+        for key, value in config["blade_geometry"].items()
+        if key not in {
+            "control_point_offsets",
+            "control_point_displacements",
+            "geometry_uncertainty",
+        }
+    }
+    captured = {}
+
+    def fake_build_kl_expansion(**kwargs):
+        captured["sigma0"] = kwargs["sigma0"]
+        return {"n_modes": 1}
+
+    def fake_define_perturbed_blade(expansion, blade, **kwargs):
+        return {"blades": [blade]}
+
+    monkeypatch.setattr(kl, "build_kl_expansion", fake_build_kl_expansion)
+    monkeypatch.setattr(kl, "define_perturbed_blade", fake_define_perturbed_blade)
+
+    uncertainty = {
+        "Xi": [0.0],
+        "sigma0": 1.5,
+        "n_quad": 20,
+        **profile_settings,
+    }
+    edited = parametrize_stator(
+        wall["wall_final"]["x"],
+        wall["wall_final"]["y"],
+        geometry_uncertainty=uncertainty,
+        **inputs,
+    )
+
+    profile = captured["sigma0"]
+    assert isinstance(profile, SigmaProfile)
+    assert profile.sigma0 == 1.5
+    assert profile.sigma1 == 0.2
+    assert profile.start_te_pside == expected_pressure
+    assert profile.start_te_sside == expected_suction
+    assert edited["geometry_uncertainty"] == uncertainty
+
+
+def test_dispatcher_rejects_invalid_sigma_profile_endpoints(small_design):
+    wall, config = small_design
+    inputs = {
+        key: value
+        for key, value in config["blade_geometry"].items()
+        if key not in {
+            "control_point_offsets",
+            "control_point_displacements",
+            "geometry_uncertainty",
+        }
+    }
+    uncertainty = {
+        "Xi": [0.0],
+        "sigma0": 1.5,
+        "sigma1": 0.2,
+        "cp_te_pressure": 0.8,
+        "cp_te_suction": 0.2,
+        "n_quad": 20,
+    }
+    with pytest.raises(ValueError, match="endpoints"):
+        parametrize_stator(
+            wall["wall_final"]["x"],
+            wall["wall_final"]["y"],
+            geometry_uncertainty=uncertainty,
+            **inputs,
+        )
 
 
 def test_edit_blade_geometry_returns_fixed_plus_random_total_vectors(small_design):
