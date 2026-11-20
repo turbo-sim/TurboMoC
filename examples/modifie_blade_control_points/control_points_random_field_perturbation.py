@@ -41,7 +41,7 @@ KL_PARAMETERS = {
     "cp_te_pressure": 1e-3,
     "cp_te_suction": 0.999,
     "L0": 0.1,
-    "L_le": 1e-2,
+    "L_le": 2e-2,
     "omega": 0.1,
     "energy_threshold": 0.95,
     "n_quad": 500,
@@ -292,12 +292,18 @@ def main():
             sigma0 = KL_PARAMETERS["sigma0"],
             sigma1 = KL_PARAMETERS["sigma1"],
         )
-
+    half_arc_length = karhunen_loeve.compute_blade_half_arclength(
+        karhunen_loeve._profile_points(baseline)
+    ) * 1e-3
+    # half_arc_length = 0.5 * np.linalg.norm(
+    #     np.diff(profile_points, axis=0),
+    #     axis=1,
+    # ).sum() * 1e-3
     expansion = build_kl_expansion(
         sigma0 = sigma0,
-        L0 = KL_PARAMETERS["L0"],
-        L_le = KL_PARAMETERS["L_le"],
-        omega = KL_PARAMETERS["omega"],
+        L0 = KL_PARAMETERS["L0"] / half_arc_length,
+        L_le = KL_PARAMETERS["L_le"]/ half_arc_length,
+        omega = KL_PARAMETERS["omega"] / half_arc_length,
         energy_threshold = KL_PARAMETERS["energy_threshold"],
         n_quad = KL_PARAMETERS["n_quad"],
     )
