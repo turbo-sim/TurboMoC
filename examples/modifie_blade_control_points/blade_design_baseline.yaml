@@ -1,11 +1,13 @@
-# Novec649 linear stator matched to Downloads/control_points.json (30 CPs, max error < 0.05 mm).
-# Conditions from 04_cfd_automation/config.yaml: P0 10.9 bar, x0 0.42, p_back 1.909 bar.
-# Base MoC design pinned on the locked TE points 0,1,28,29; points 2-27 moved with
-# control_point_displacements ([dx, dy] / chord). meridional_chord keeps the blade at 1:1 scale.
+# App project plus Fluent automation settings (no external design_file needed).
+# Linear cascade: distances in the reference plane are physical mm.
+# Scale the source blade and its pitch together to meet meridional_chord.
+# No physical blade count or radius is needed. Display copies are translated.
+# span_layers: 1 produces an optional one-element 3D extrusion.
+# True 2D export is also available without generating the volume.
 machine:
   design_mode: stator
   geometry_type: linear
-  fluid_name: Novec649
+  fluid_name: Cyclopentane
 workflow:
   save_figures: true
   show_gmsh: true
@@ -17,18 +19,12 @@ rows:
   geometry:
     method_of_characteristics:
       inlet_property_pair: PQ_INPUTS
-      inlet_property_1: 1090000.0
-      inlet_property_2: 0.42
-      p_back: 190900.0
-      # Requires a REFPROP-capable jaxprop/barotropy installation. The current
-      # workflow has no YAML setting for REFPROP's installation path; configure
-      # REFPROP_PATH in the environment when required by the backend.
-      backend: REFPROP
+      inlet_property_1: 251300.0  # Stagnation pressure [Pa]
+      inlet_property_2: 0.025  # Vapor quality [kg/kg]
+      p_back: 95000.0
       solver: conventional
-      # The latest TurboMoC requires the flat throat front for flashing
-      # isentropes such as the Novec649 PQ inlet used by this example.
-      use_true_sauer_line: false
-      y_t: 0.010506
+      use_true_sauer_line: true
+      y_t: 0.01
       n: 15
       rho_t: 0.2
       rho_d: 0.1
@@ -37,55 +33,28 @@ rows:
       tau_step: 1.0
     meridional_channel:
       type: linear
-      meridional_chord: 106.5785
+      meridional_chord: 20.0
       blade_height: 10.0
     blade_geometry:
-      metal_angle_in: 21.2071
-      metal_angle_out: 70.1448
-      r_trailing: 0.4958
-      inlet_opening_ratio: 1.666
+      metal_angle_in: 0.0
+      metal_angle_out: 65.0
+      r_trailing: 0.5
+      inlet_opening_ratio: 1.3
       n_cp: 30
       num_baseline_points: 500
       num_curve_points: 500
-      control_point_displacements:
-        2: [0.0002534, 1.22e-05]
-        3: [0.0003957, 0.0001728]
-        4: [0.0005627, 0.0003105]
-        5: [0.0006886, 0.0004865]
-        6: [0.0008883, 0.0005924]
-        7: [0.0009536, 0.0008348]
-        8: [0.0012507, 0.0007663]
-        9: [0.0013714, 0.0020368]
-        10: [0.0024096, 0.0031042]
-        11: [0.0014615, 0.0056908]
-        12: [0.0036944, 0.0026203]
-        13: [-0.0022569, -0.0019751]
-        14: [0.0069749, -0.001758]
-        15: [-0.0118956, 0.0031594]
-        16: [-0.0115499, 0.0309856]
-        17: [-0.0072416, 0.0334306]
-        18: [-0.0009747, 0.0450221]
-        19: [0.0269291, 0.0580897]
-        20: [0.003135, 0.0264085]
-        21: [0.0065873, 0.0180783]
-        22: [0.000235, -0.0004634]
-        23: [0.002744, 0.0040016]
-        24: [0.0005934, -0.0002747]
-        25: [0.0003128, -0.0001441]
-        26: [0.0002487, -0.0002648]
-        27: [0.0003156, 0.0001345]
     flow_domain:
       domain_shift_mode: auto
-      domain_shift_value: 0.0
-      number_of_points: 120
+      domain_shift_value: 0.0  # Manual pitchwise shift / pitch [-]; ignored in auto mode
+      number_of_points: 120  # Curve samples, not mesh nodes
       inlet:
-        extension_type: bspline
-        extension_length: 1.5
+        extension_type: bspline  # bspline or straight; tangent handles apply only to bspline
+        extension_length: 1.5  # Extension distance / reference chord [-]
         axial_tangent: 0.35
         blade_tangent: 0.35
       outlet:
-        extension_type: straight
-        extension_length: 2.0
+        extension_type: straight  # bspline or straight; tangent handles apply only to bspline
+        extension_length: 2.0  # Extension distance / reference chord [-]
         axial_tangent: 0.55
         blade_tangent: 0.15
   mesh:
