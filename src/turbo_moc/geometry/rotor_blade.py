@@ -74,6 +74,17 @@ def _boundary_splines(result, points):
     return splines
 
 
+def _section_splines(result, points):
+    """Geometry-only reaction section: one spline from the pressure-side TE round the nose to the suction-side TE
+    (the square-root NACA nose is smooth), and the straight trailing-edge cut back to the start."""
+    sides = len(result["blade_lower"]["x"]) + len(result["blade_upper"]["x"]) - 1
+    if len(points) != sides + 1:
+        raise ValueError("Unexpected reaction blade boundary layout; cannot transfer its CAD safely.")
+    body = _spline(points[:sides])
+    cut = make_interp_spline([0., 1.], points[sides - 1:sides + 1], k=1)
+    return [body, cut]
+
+
 def _midpoint_guides(contour):
     """Three interior slice midpoints, avoiding the rounded blade extremities."""
     top, bottom = contour[:, 1].max(), contour[:, 1].min()
@@ -187,6 +198,10 @@ def build_rotor_design(rotor_result, config):
     if chord <= 0 or rotor_result["pitch"] <= 0:
         raise ValueError("The vortex rotor must have positive chord and pitch.")
     origin = q[np.argmax(q[:, 1])]
+    if "axial_chord" in rotor_result:  # Geometry-only sections declare their camberline chord and leading edge
+        chord = float(rotor_result["axial_chord"])
+        x0, y0 = rotor_result.get("leading_edge_point", (native[:, 0].min(), 0.))
+        origin = np.array([y0, -x0])
     if dimensions["type"] == "linear":
         scale = dimensions["meridional_chord"] / chord
         mapping = LinearCascadeMapping(LinearCascadeDefinition(
@@ -196,7 +211,8 @@ def build_rotor_design(rotor_result, config):
         mapping = MeridionalChannel(geometry_from_machine(dimensions))
         scale = mapping.reference_chord / chord
     q = (q - origin) * scale
-    splines = _boundary_splines(rotor_result, q)
+    splines = (_section_splines(rotor_result, q) if rotor_result.get("section_layout") == "le_wrap_te_cut"
+               else _boundary_splines(rotor_result, q))
     # Display/clearance use the same spline geometry transferred to Gmsh.
     sampled = np.vstack([spline(np.linspace(0, 1, max(8, len(spline.c) * 3)))[:-1]
                          for spline in splines] + [splines[0](np.array([0.]))])

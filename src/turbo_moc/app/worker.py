@@ -63,7 +63,21 @@ def _run_job(request_path, request):
         action_name = "vortex blade design" if role == "rotor" and action == "nozzle" else action
         progress(f"Run {action_name} from configuration snapshot")
         if action == "nozzle":
-            if role == "rotor":
+            if role == "rotor" and config["rotor_design"].get("blade_type", "vortex") in ("reaction", "constant_passage"):
+                # Geometry-only blade: built from geometric inputs alone, no vortex solve, any inlet Mach number.
+                from turbo_moc.core.reaction_blade import geometric_rotor
+                progress("Rotor: geometric blade section", 0.3)
+                rotor = geometric_rotor(config)
+                design = config["rotor_design"]
+                rotor.update(P0_rel=design.get("P0_rel"), T0_rel=design.get("T0_rel"),
+                             fluid_name=design.get("fluid_name"))
+                flow.write_json(folder / "rotor_result.json", rotor)
+                from turbo_moc.app.blade_counts import native_passage, sizing
+                progress("Rotor: natural passage sizing", 0.9)
+                result = {"reference": handle, "rotor_summary": {
+                    name: rotor[name] for name in ("beta_inlet", "beta_outlet", "pitch")},
+                    "blade_sizing": sizing(config, native_passage(config, rotor))}
+            elif role == "rotor":
                 from turbo_moc.core.vortex_blade import design_rotor_vortex_blade
                 from turbo_moc.app.rotor_inlet import require_supersonic_inlet
                 require_supersonic_inlet(config)

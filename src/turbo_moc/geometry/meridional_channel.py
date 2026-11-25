@@ -127,22 +127,22 @@ def axial_geometry(machine):
     Optional flare {ratio, end}: blade height (1 + ratio) x blade_height from u = end to the TE, opened
     symmetrically about midspan (midspan radius and blade speed unchanged)."""
     hub, tip = machine["hub_radius"], machine["hub_radius"] + machine["blade_height"]
-    diffuser = machine.get("diffuser")
-    if diffuser is not None:  # Exhaust diffuser (2026-11-15): cylindrical blade row, walls open from the TE onwards
-        hub_angle, shroud_angle = diffuser_angles(diffuser)
-        return GeometryDefinition(
-            hub=meridional_line((hub, 0), (hub, machine["hub_chord"])),
-            shroud=meridional_line((tip, 0), (tip, machine["tip_chord"])),
-            num_blades=machine["num_blades"],
-            exit_slope=(-float(np.tan(np.radians(hub_angle))), float(np.tan(np.radians(shroud_angle)))))
     flare = machine.get("flare")
     if flare is not None:
         shift = 0.5 * flare["ratio"] * machine["blade_height"]
+        hub_wall = flared_wall(hub, -shift, machine["hub_chord"], flare["end"])
+        shroud_wall = flared_wall(tip, shift, machine["tip_chord"], flare["end"])
+    else:
+        hub_wall = meridional_line((hub, 0), (hub, machine["hub_chord"]))
+        shroud_wall = meridional_line((tip, 0), (tip, machine["tip_chord"]))
+    diffuser = machine.get("diffuser")
+    if diffuser is not None:  # Exhaust diffuser (2026-11-15): walls open from the TE onwards; with a flare
+        hub_angle, shroud_angle = diffuser_angles(diffuser)  # (2026-11-17) they open from the flared TE radii
         return GeometryDefinition(
-            hub=flared_wall(hub, -shift, machine["hub_chord"], flare["end"]),
-            shroud=flared_wall(tip, shift, machine["tip_chord"], flare["end"]),
-            num_blades=machine["num_blades"],
-        )
+            hub=hub_wall, shroud=shroud_wall, num_blades=machine["num_blades"],
+            exit_slope=(-float(np.tan(np.radians(hub_angle))), float(np.tan(np.radians(shroud_angle)))))
+    if flare is not None:
+        return GeometryDefinition(hub=hub_wall, shroud=shroud_wall, num_blades=machine["num_blades"])
     return GeometryDefinition(
         hub=meridional_line((hub, 0), (hub, machine["hub_chord"])),
         shroud=meridional_line((tip, 0), (tip, machine["tip_chord"])),

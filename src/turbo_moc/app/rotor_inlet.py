@@ -88,8 +88,8 @@ def resolve_configuration(project, row_id, registry):
 def inlet_warnings(config):
     """Report unsupported vortex inlets without hiding the calculated state."""
     design = config.get("rotor_design")
-    if design is None:
-        return []
+    if design is None or design.get("blade_type", "vortex") in ("reaction", "constant_passage"):
+        return []  # Geometry-only blades: no supersonic inlet required
     warnings = []
     if design["M_inlet"] <= 1:
         warnings.append("The vortex rotor requires a supersonic relative inlet (M > 1). Adjust speed or inlet conditions.")

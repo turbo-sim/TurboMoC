@@ -256,6 +256,9 @@ def panel(project, registry):
                 cards.append(card("Stator", "Method of characteristics · absolute frame", stator["performance"],
                                   status))
                 stations += stator["stations"]
+            elif config["rotor_design"].get("blade_type", "vortex") in ("reaction", "constant_passage"):
+                notes.append(f"{role}: geometric blade ({config['rotor_design']['blade_type'].replace('_', ' ')}), "
+                             "no flow solution; statistics not computed.")
             else:
                 coupled = stator if config.get("rotor_source") else None
                 rotor = rotor_statistics(project, row, config, result, coupled)

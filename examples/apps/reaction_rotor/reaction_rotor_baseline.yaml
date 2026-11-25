@@ -1,0 +1,244 @@
+machine:
+  design_mode: rotor
+  geometry_type: axial
+  fluid_name: Cyclopentane
+rows:
+- id: stator_1
+  role: stator
+  geometry:
+    method_of_characteristics:
+      p_back: 95000.0
+      solver: conventional
+      use_true_sauer_line: true
+      y_t: 0.01
+      n: 15
+      rho_t: 0.2
+      rho_d: 0.1
+      delta_flow: 0.0
+      tau_max: 90.0
+      tau_step: 1.0
+      outlet_condition: pressure
+      exit_mach: 2.0
+      inlet_property_pair: PQ_INPUTS
+      inlet_property_1: 251300.0
+      inlet_property_2: 0.025
+    meridional_channel:
+      type: axial
+      hub_radius: 100.0
+      blade_height: 10.0
+      hub_chord: 20.0
+      tip_chord: 20.0
+      num_blades: 31
+    blade_geometry:
+      parametrization: full
+      metal_angle_in: 0.0
+      metal_angle_out: 65.0
+      r_trailing: 0.5
+      inlet_opening_ratio: 1.3
+      n_cp: 30
+      num_baseline_points: 500
+      num_curve_points: 500
+      control_point_offsets: {}
+    flow_domain:
+      domain_shift_mode: auto
+      domain_shift_value: 0.0
+      number_of_points: 120
+      inlet:
+        extension_type: bspline
+        extension_length: 1.5
+        axial_tangent: 0.35
+        blade_tangent: 0.35
+      outlet:
+        extension_type: straight
+        extension_length: 2.0
+        axial_tangent: 0.55
+        blade_tangent: 0.15
+  mesh:
+    show_gui: false
+    numerics:
+      terminal_output: true
+      verbosity: 2
+      blade_size: 0.25
+      domain_size: 1.0
+      curvature_elements: 50
+      algorithm: 8
+      recombine: true
+      recombination_algorithm: 1
+      recombine_minimum_quality: 0.1
+      smoothing_steps: 5
+      inflation_layers:
+        enabled: true
+        first_height: 0.03
+        growth_ratio: 1.2
+        thickness: 1.0
+      span_layers: 25
+      span_stretch: 1.5
+    matplotlib:
+      num_blades: 3
+      annotate_boundaries: true
+      mesh_color: orange
+      edge_color: black
+      domain_color: lightgrey
+      dpi: 500
+      rasterize_mesh: true
+    visualization:
+      section_edge_width: 0.35
+      volume_edge_width: 0.35
+    pyvista:
+      show_mesh_edges: true
+      surfaces:
+        blade: true
+        hub: true
+        shroud: false
+        inlet: false
+        outlet: false
+        periodic_left: false
+        periodic_right: false
+    cgns:
+      enabled: true
+      filename: stator_mesh_3d.cgns
+      length_scale: 0.001
+      boundary_types:
+        blade: BCWallViscous
+        inlet: BCInflowSubsonic
+        outlet: BCOutflowSubsonic
+        periodic_left: BCGeneral
+        periodic_right: BCGeneral
+        hub: BCWallViscous
+        shroud: BCWallViscous
+    cad:
+      span_sections: 9
+      disk_thickness: 5.0
+      axial_margin: 0.25
+      root_overlap: 0.03
+      linear_blades: 5
+      fluid_annulus: false
+  placement:
+    streamwise_offset_mm: 0.0
+    angular_phase_deg: 0.0
+- id: rotor_1
+  role: rotor
+  geometry:
+    meridional_channel:
+      type: axial
+      hub_radius: 45.0
+      blade_height: 10.0
+      hub_chord: 15.0
+      tip_chord: 15.0
+      num_blades: 24
+    parametrization_type: vortex
+    flow_domain:
+      domain_shift_mode: auto
+      domain_shift_value: 0.0
+      number_of_points: 120
+      inlet:
+        extension_type: bspline
+        extension_length: 1.5
+        axial_tangent: 0.35
+        blade_tangent: 0.35
+      outlet:
+        extension_type: straight
+        extension_length: 2.0
+        axial_tangent: 0.55
+        blade_tangent: 0.15
+    rotor_design:
+      M_inlet: 1.5
+      M_outlet: 1.5
+      M_lower: 1.05
+      M_upper: 2.0
+      beta_inlet: 65.0
+      num_points: 60
+      le_te_ratio: 25.0
+      outlet_condition: mach
+      p_back: 100000.0
+      incidence: 0.0
+      inlet_property_pair: PT_INPUTS
+      inlet_property_1: 500000.0
+      inlet_property_2: 400.0
+      blade_type: reaction
+      reaction:
+        inlet_metal_angle_deg: 0.0
+        outlet_metal_angle_deg: 60.0
+        turning_location: 0.52
+        turning_concentration: 1.2
+        maximum_thickness: 0.12
+        maximum_thickness_location: 0.3
+        leading_edge_radius: 0.01
+        trailing_edge_thickness: 0.015
+        trailing_edge_wedge_angle_deg: 8.0
+        pitch_to_chord: 0.8727
+        num_points: 241
+    inlet_coupling:
+      mode: manual
+      rotational_speed:
+        type: actual
+        value: 20716.71
+    axial_interspace_mm: 2.0
+  mesh:
+    show_gui: false
+    numerics:
+      terminal_output: true
+      verbosity: 2
+      blade_size: 0.15
+      domain_size: 0.6
+      curvature_elements: 50
+      algorithm: 6
+      recombine: true
+      recombination_algorithm: 1
+      recombine_minimum_quality: 0.1
+      smoothing_steps: 5
+      inflation_layers:
+        enabled: true
+        first_height: 0.01
+        growth_ratio: 1.2
+        thickness: 0.3
+      span_layers: 20
+      span_stretch: 1.5
+    matplotlib:
+      num_blades: 3
+      annotate_boundaries: true
+      mesh_color: orange
+      edge_color: black
+      domain_color: lightgrey
+      dpi: 500
+      rasterize_mesh: true
+    visualization:
+      section_edge_width: 0.35
+      volume_edge_width: 0.35
+    pyvista:
+      show_mesh_edges: true
+      surfaces:
+        blade: true
+        hub: true
+        shroud: false
+        inlet: false
+        outlet: false
+        periodic_left: false
+        periodic_right: false
+    cgns:
+      enabled: true
+      filename: reaction_rotor_3d.cgns
+      length_scale: 0.001
+      boundary_types:
+        blade: BCWallViscous
+        inlet: BCInflowSubsonic
+        outlet: BCOutflowSubsonic
+        periodic_left: BCGeneral
+        periodic_right: BCGeneral
+        hub: BCWallViscous
+        shroud: BCWallViscous
+    cad:
+      span_sections: 9
+      disk_thickness: 5.0
+      axial_margin: 0.25
+      root_overlap: 0.03
+      linear_blades: 5
+      fluid_annulus: false
+  placement:
+    streamwise_offset_mm: 0.0
+    angular_phase_deg: 0.0
+workflow:
+  save_figures: true
+  show_gmsh: true
+  show_pyvista: true
+  log_level: INFO

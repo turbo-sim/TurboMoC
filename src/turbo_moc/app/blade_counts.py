@@ -11,7 +11,7 @@ def native_passage(config, solution, *, template=None):
     """Extract pitch and meridional chord in the solver's own length units."""
     if "rotor_design" in config:
         pitch = float(solution["pitch"])
-        chord = float(np.ptp(solution["blade"]["x"]))
+        chord = float(solution.get("axial_chord") or np.ptp(solution["blade"]["x"]))  # Camber chord if declared
     else:
         if not solution.get("converged"):
             raise ValueError("A converged stator solution is required for natural blade sizing.")

@@ -102,6 +102,16 @@ OUTLET_OPTIONS = [{"label": "Static pressure", "value": "pressure"},
                   {"label": "Mach number", "value": "mach"}]
 
 
+ROTOR_BLADE_OPTIONS = [
+    {"label": "Vortex (MoC transitions)", "value": "vortex"},
+    {"label": "Vortex, straight transitions", "value": "vortex_straight_transition"},
+    {"label": "Vortex, arc transitions", "value": "vortex_arc_transition"},
+    {"label": "Impulse, constant passage (matched to vortex)", "value": "impulse_constant_passage"},
+    {"label": "Impulse, thin arc (matched to vortex)", "value": "impulse_thin_arc"},
+    {"label": "Constant passage (geometry only)", "value": "constant_passage"},
+    {"label": "Subsonic reaction (TurboDash camber + NACA)", "value": "reaction"}]
+
+
 ROTOR_OUTLET_OPTIONS = [{"label": "Relative exit Mach number", "value": "mach"},
                         {"label": "Static backpressure", "value": "pressure"}]
 
@@ -265,6 +275,9 @@ def controls(value, prefix, row_id, *, hidden_paths=()):
                 {"label": "Symmetric (mirrored nozzle wall)", "value": "full"},
                 {"label": "Asymmetric (circular-arc pressure side)", "value": "semi"}],
                 value=item, clearable=False, searchable=False)
+        elif path == "rotor_design.blade_type":
+            widget = dcc.Dropdown(id=identifier, options=ROTOR_BLADE_OPTIONS, value=item, clearable=False,
+                                  searchable=False)
         elif name == "extension_type" and prefix.startswith("flow_domain."):
             widget = dcc.Dropdown(id=identifier, options=[
                 {"label": "Smooth B-spline", "value": "bspline"},
@@ -315,6 +328,24 @@ def controls(value, prefix, row_id, *, hidden_paths=()):
 
 def group(title, children):
     return html.Details([html.Summary(title), *children], open=True, className="field-group")
+
+
+def geometric_blade_groups(design, row_id):
+    """Parameter groups of the geometry-only rotor blades, always mounted and shown for the selected type.
+
+    Saved values are shown, else the defaults. Hidden groups are ignored on edit (workflow.edited_project), so a
+    vortex row never gains these inputs and keeps its job identities.
+    """
+    from turbo_moc.core.reaction_blade import GEOMETRIC_BLADE_TYPES
+    selected = design.get("blade_type", "vortex")
+    titles = {"reaction": "Reaction blade (TurboDash camberline, NACA thickness; lengths / meridional chord, "
+                          "TurboDash angles)",
+              "constant_passage": "Constant-passage blade (geometry only)"}
+    return [html.Div(group(titles[kind], controls({kind: {**defaults, **(design.get(kind) or {})}}, "rotor_design",
+                                                   row_id)),
+                     id={"type": "geometric-blade", "row": row_id, "kind": kind},
+                     style={} if selected == kind else {"display": "none"})
+            for kind, defaults in GEOMETRIC_BLADE_TYPES.items()]
 
 
 def rotor_inlet_controls(geometry, row_id, combined):
@@ -456,9 +487,11 @@ def sidebar(project):
         else:
             fields = [rotor_inlet_controls(geometry, identifier,
                     project["machine"]["design_mode"] == "stator_rotor"),
-                group("Vortex blade design", controls({k: v for k, v in geometry["rotor_design"].items()
-                    if k not in {*ROTOR_INLET_FIELDS, *INLET_FIELDS, "outlet_condition", "p_back", "M_outlet"}},
-                    "rotor_design", identifier)),
+                group("Rotor blade design", controls({"blade_type": "vortex"} | {
+                    k: v for k, v in geometry["rotor_design"].items()
+                    if k not in {*ROTOR_INLET_FIELDS, *INLET_FIELDS, "outlet_condition", "p_back", "M_outlet",
+                                 "reaction", "constant_passage"}}, "rotor_design", identifier)
+                    + geometric_blade_groups(geometry["rotor_design"], identifier)),
                 outlet_controls(geometry["rotor_design"], identifier, "rotor_design"),
                 group("Linear cascade definition" if family == "linear" else "Meridional channel definition",
                     meridional_controls(geometry["meridional_channel"], identifier)),
@@ -1142,6 +1175,12 @@ def create_app(config_file=None, output_dir=None):
     def outlet_fields(condition):
         hidden = {"display": "none"}
         return ({}, hidden) if condition != "mach" else (hidden, {})
+
+    @app.callback(Output({"type": "geometric-blade", "row": MATCH, "kind": ALL}, "style"),
+        Input({"type": "parameter", "row": MATCH, "path": "rotor_design.blade_type"}, "value"),
+        State({"type": "geometric-blade", "row": MATCH, "kind": ALL}, "id"))
+    def geometric_blade_visibility(blade_type, identifiers):
+        return [{} if item["kind"] == blade_type else {"display": "none"} for item in identifiers]
 
     @app.callback(Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "pressure"}, "style"),
         Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "mach"}, "style"),

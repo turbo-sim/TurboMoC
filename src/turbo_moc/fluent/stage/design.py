@@ -120,7 +120,12 @@ def operating_point(project, registry):
     stator = statistics.stator_statistics(project, rows["stator_1"], configs["stator_1"], nozzle)
     rotor = statistics.rotor_statistics(project, rows["rotor_1"], configs["rotor_1"], rotor_result, stator)
     exit_station = next(item for item in rotor["stations"] if item["station"].startswith("Rotor exit"))
-    source = configs["rotor_1"]["rotor_source"]
+    source = configs["rotor_1"].get("rotor_source")
+    if source is None:  # Manual rotor inlet (2026-11-21, calibrated stator + rotor designed for another stator exit)
+        rotor_inputs = configs["rotor_1"]["rotor_design"]
+        source = {"rotational_speed": {"rpm": float(configs["rotor_1"]["inlet_coupling"]["rotational_speed"]["value"])},
+                  "triangle": {"M_rel": float(rotor_inputs["M_inlet"]), "beta_rel_deg": float(rotor_inputs["beta_inlet"])},
+                  "alpha_deg": float(configs["stator_1"]["blade_geometry"]["metal_angle_out"])}
     design = {"stator": {"stations": stator["stations"], "performance": stator["performance"],
                          "mass_flow": stator["mass_flow"]},
               "rotor": {"stations": rotor["stations"], "performance": rotor["performance"]},

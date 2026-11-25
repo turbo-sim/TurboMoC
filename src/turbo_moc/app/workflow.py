@@ -336,7 +336,18 @@ def edited_project(base, values, identifiers):
     from turbo_moc.configuration.project import get_row, GEOMETRY_SECTIONS
 
     project = deepcopy(base)
+    from turbo_moc.configuration.rotor import GEOMETRIC_BLADE_TYPES, with_geometric_defaults
+    # Geometry-only blade groups are always mounted; only the selected type's group is applied.
+    selected = {identifier["row"]: value for value, identifier in zip(values, identifiers)
+                if identifier["path"] == "rotor_design.blade_type"}
     for value, identifier in zip(values, identifiers):
+        path = identifier["path"].split(".")
+        if len(path) > 2 and path[0] == "rotor_design" and path[1] in GEOMETRIC_BLADE_TYPES:
+            design = get_row(project, identifier["row"])["geometry"]["rotor_design"]
+            if selected.get(identifier["row"], design.get("blade_type", "vortex")) != path[1]:
+                continue
+            design["blade_type"] = path[1]
+            with_geometric_defaults(design)
         if identifier["row"] == "" and identifier["path"] == "fluid_name":
             if not isinstance(value, str) or not value.strip():
                 raise ValueError("machine.fluid_name requires a value.")
@@ -373,5 +384,8 @@ def edited_project(base, values, identifiers):
             if any(name in inputs for name in INLET_FIELDS):
                 for name in legacy:
                     inputs.pop(name, None)
+    # Selecting a geometry-only rotor blade adds its parameter group (saved values kept).
+    for row in project["rows"]:
+        with_geometric_defaults(row["geometry"].get("rotor_design"))
     return project
 

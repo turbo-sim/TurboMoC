@@ -19,10 +19,27 @@ ROTOR_DEFAULTS = {
     "outlet_condition": "mach", "p_back": 1e5, "incidence": 0.0,
 }
 # Optional edge closure and boundary-layer correction settings passed through to design_rotor_vortex_blade.
-ROTOR_OPTIONAL = {"le_ellipse_ratio", "te_ellipse_ratio", "le_wedge_half_angle", "le_round_tip", "boundary_layer",
-                  "blade_type", "impulse_thickness", "section_profiles"}  # section_profiles: 3D section-wise blades (meshing.section_morph)
+ROTOR_OPTIONAL = {"le_ellipse_ratio", "te_ellipse_ratio", "te_thickness_ratio", "le_wedge_half_angle", "le_round_tip", "boundary_layer",
+                  "blade_type", "impulse_thickness", "section_profiles",  # section_profiles: 3D section-wise blades (meshing.section_morph)
+                  "reaction", "constant_passage"}  # Geometry-only blade inputs (core.reaction_blade)
 # blade_type "impulse_constant_passage" swaps the vortex geometry for the matched Baines baseline (core.impulse_blade).
 BLADE_TYPES = ("vortex", "impulse_constant_passage", "impulse_thin_arc", "vortex_straight_transition", "vortex_arc_transition")  # last: vortex arcs, no MoC transitions (core.impulse_blade)
+# Geometry-only blades (core.reaction_blade): built from geometric inputs alone, no vortex solve or supersonic inlet.
+GEOMETRIC_BLADE_TYPES = ("reaction", "constant_passage")
+BLADE_TYPES = BLADE_TYPES + GEOMETRIC_BLADE_TYPES
+
+
+def is_geometric(design):
+    return isinstance(design, dict) and design.get("blade_type", "vortex") in GEOMETRIC_BLADE_TYPES
+
+
+def with_geometric_defaults(design):
+    """Add the selected geometry-only blade's parameter group, keeping saved values (vortex rows unchanged)."""
+    if is_geometric(design):
+        from turbo_moc.core.reaction_blade import GEOMETRIC_BLADE_TYPES as defaults
+        kind = design["blade_type"]
+        design[kind] = {**defaults[kind], **(design.get(kind) or {})}
+    return design
 ROTOR_OUTLET_CONDITIONS = ("mach", "pressure")
 SPEED_TYPES = {"actual": "Actual speed [rpm]", "blade_velocity_ratio": "Blade velocity ratio U/c₀ [-]",
                "specific": "Specific speed [-]"}
@@ -63,6 +80,7 @@ def normalize_rotor_geometry(geometry):
                         field in values for field in INLET_FIELDS):
                     continue
                 values.setdefault(key, deepcopy(value))
+    with_geometric_defaults(result.get("rotor_design"))
     meridional_channel = result.get("meridional_channel", {})
     if isinstance(meridional_channel, dict) and meridional_channel.get("type") == "axial":
         if "axial_interspace_mm" not in result:
@@ -125,6 +143,14 @@ def validate_rotor_configuration(config):
     _finite(design["beta_inlet"], "rotor_design.beta_inlet")
     if design.get("blade_type", "vortex") not in BLADE_TYPES:
         raise ValueError(f"rotor_design.blade_type must be one of {BLADE_TYPES}.")
+    if is_geometric(design):
+        from turbo_moc.core import reaction_blade
+        kind = design["blade_type"]
+        values = design.get(kind)
+        if not isinstance(values, dict) or set(values) != set(reaction_blade.GEOMETRIC_BLADE_TYPES[kind]):
+            raise ValueError(f"rotor_design.{kind} requires {tuple(reaction_blade.GEOMETRIC_BLADE_TYPES[kind])}.")
+        {"reaction": reaction_blade.validate_reaction,
+         "constant_passage": reaction_blade.validate_constant_passage}[kind](values)
     if design["outlet_condition"] not in ROTOR_OUTLET_CONDITIONS:
         raise ValueError("rotor_design.outlet_condition must be mach or pressure.")
     _finite(design["p_back"], "rotor_design.p_back", minimum=0, strict=True)

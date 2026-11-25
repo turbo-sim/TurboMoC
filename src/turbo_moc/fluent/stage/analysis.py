@@ -137,7 +137,9 @@ def compute(output_dir, report_dir=None):
     torque_passage = sum(reports["moment"]["rotor_1"][wall] for wall in ("blade", "hub"))
     torque = torque_passage * sectors["rotor_1"]
     power = torque * omega
-    mass_flow = flows["outlet"]
+    # Stage inlet, not the outlet: a small recirculation at the outlet boundary (3D diffuser, radial-equilibrium
+    # outlet) makes the outlet mass flow swing by a few % while torque and inlet flow are steady (2026-11-19, fin_re)
+    mass_flow = flows["inlet"]
     work = power / mass_flow
     euler = abs(omega) * (rotor_in["r_c_t"] - outlet["r_c_t"])
     drop_ts = model.head(P0) - model.head(outlet["p"])

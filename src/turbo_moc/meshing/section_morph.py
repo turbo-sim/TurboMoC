@@ -22,6 +22,18 @@ EDGE_RIGID, EDGE_BLEND = 0.3, 1.5  # mm (conformal): rigid edge region, end of t
 SPANS = {"hub": 0.0, "mid": 0.5, "tip": 1.0}
 
 
+def _rigid_fit(ref, target, k):
+    """Rotation matrix and centres of the best-fit rigid motion (Kabsch) of the reference samples within EDGE_BLEND
+    of landmark k onto the same samples of the target profile (same sampling, so samples correspond)."""
+    near = np.linalg.norm(ref - ref[k], axis=1) < EDGE_BLEND
+    a, b = ref[near], target[near]
+    ca, cb = a.mean(axis=0), b.mean(axis=0)
+    u, _, vt = np.linalg.svd((a - ca).T @ (b - cb))
+    d = np.sign(np.linalg.det(vt.T @ u.T))
+    rotation = vt.T @ np.diag([1.0, d]) @ u.T
+    return rotation, ca, cb
+
+
 def _closed_resample(q, count=POINTS):
     """Closed contour, counter-clockwise, LE (largest meridional coordinate) at sample 0 and TE (smallest) at sample
     count / 2; each side is resampled by its own arc length so the edges map onto each other between profiles
@@ -162,10 +174,17 @@ class SectionMorph:
         wall = target[self.index] - ref[self.index]
         # Edges move rigidly with their landmark (LE sample 0, TE sample half), blending to the point-wise map over
         # EDGE_BLEND mm: point-wise blending of the tiny elliptical edges folded the TE cell fan (2026-11-12).
+        # The rigid motion is the best-fit rotation + translation of the edge region (samples within EDGE_BLEND of
+        # the landmark), not a translation only: with a translation the midspan edge kept its outflow direction at
+        # the hub and tip and kinked the wall where the blend starts (re rotor, beta_out -55 / -48 / -40 deg,
+        # 2026-11-17). At midspan (target == reference) the fit is the identity.
+        nodes = self.xy[self.wall] * scale + np.asarray(offset)
         for k in (0, len(ref) // 2):
-            dist = np.linalg.norm(self.xy[self.wall] * scale + np.asarray(offset) - ref[k], axis=1)
+            dist = np.linalg.norm(nodes - ref[k], axis=1)
             w = np.clip((dist - EDGE_RIGID) / (EDGE_BLEND - EDGE_RIGID), 0, 1)[:, None]
-            wall = w * wall + (1 - w) * (target[k] - ref[k])
+            rotation, centre_ref, centre_target = _rigid_fit(ref, target, k)
+            rigid = (nodes - centre_ref) @ rotation.T + centre_target - nodes
+            wall = w * wall + (1 - w) * rigid
         move[self.wall] = wall
         if len(collar):
             nearest = cKDTree(self.xy[self.wall]).query(self.xy[collar])[1]

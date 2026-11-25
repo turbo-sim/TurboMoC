@@ -369,9 +369,43 @@ def _offset_into_blade(wall, other, thickness):
     norm = np.hypot(tx, ty)
     nx, ny = -ty / norm, tx / norm
     middle = len(x) // 2
-    towards = np.array([np.mean(other["x"]) - x[middle], np.mean(other["y"]) - y[middle]])
+    # Towards the NEAREST point of the other wall (straight across the blade). The mean of the other wall picked the
+    # wrong side for the pressure wall of strongly cambered reaction sections (wall midpoint and other-wall mean at
+    # nearly the same height): delta* was applied into the passage there (found 2026-11-17).
+    ox, oy = np.asarray(other["x"], dtype=float), np.asarray(other["y"], dtype=float)
+    nearest = int(np.argmin(np.hypot(ox - x[middle], oy - y[middle])))
+    towards = np.array([ox[nearest] - x[middle], oy[nearest] - y[middle]])
     sign = 1.0 if nx[middle] * towards[0] + ny[middle] * towards[1] > 0 else -1.0
     return {"x": (x + sign * thickness * nx).tolist(), "y": (y + sign * thickness * ny).tolist()}
+
+
+TE_RAMP = 0.25  # Fraction of each wall's arc length over which te_thickness_ratio reshapes the wall
+
+
+def _te_ramp(wall):
+    """Smooth 0 -> 1 weight (C1 smoothstep) over the last TE_RAMP of a wall's arc length."""
+    x, y = np.asarray(wall["x"], dtype=float), np.asarray(wall["y"], dtype=float)
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(x), np.diff(y)))])
+    t = np.clip((s / s[-1] - (1.0 - TE_RAMP)) / TE_RAMP, 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _set_te_thickness(lower, upper, pitch, beta_inlet_rad, beta_outlet_rad, diag, ratio, closure, iterations=4):
+    """Trailing-edge gap = ratio x leading-edge gap, by a ramped wall offset near the TE (see te_thickness_ratio).
+    The closure shift is kept, so the leading edge and the spacing do not change. A few passes absorb the small
+    difference between the wall-normal offset and the gap measured normal to the outflow."""
+    target = ratio * 2.0 * diag["le_radius"]
+    ramp_lower, ramp_upper = _te_ramp(lower), _te_ramp(upper)
+    walls, shift = (lower, upper), 0.0
+    for _ in range(iterations):
+        shift += 0.5 * (target - 2.0 * diag["te_radius"])  # per side, outward positive
+        walls = (_offset_into_blade(lower, upper, -shift * ramp_lower),
+                 _offset_into_blade(upper, lower, -shift * ramp_upper))
+        blade_x, blade_y, diag = _close_blade_le_te(walls[0], walls[1], pitch, beta_inlet_rad, beta_outlet_rad,
+                                                    translate=diag["translate"], **closure)
+        if abs(2.0 * diag["te_radius"] - target) < 1e-6 * max(target, 1e-12):
+            break
+    return blade_x, blade_y, diag, walls[0], walls[1]
 
 
 def _V_of_M(manager, M_target):
@@ -608,6 +642,7 @@ def design_rotor_vortex_blade(
     le_ellipse_ratio=None,
     te_ellipse_ratio=None,
     boundary_layer=None,
+    te_thickness_ratio=None,
 ):
     """
     Design a supersonic rotor blade section by the vortex-flow method,
@@ -677,6 +712,13 @@ def design_rotor_vortex_blade(
         `_displacement_thickness`), so the viscous passage keeps the inviscid area distribution; ``chord``
         gives the metres per design unit. The spacing stays the inviscid one, so the captured inflow is
         unchanged and the trailing edge thins by the two delta*s.
+    te_thickness_ratio : float or None
+        Trailing-edge thickness as a fraction of the leading-edge thickness (1.0: equal edges). The single
+        closure shift sets both edge gaps, and the boundary-layer offset thins the trailing edge, so the two
+        edges otherwise differ. With this option both walls are moved outwards (inwards for a thinner target)
+        by a smooth ramp over the last ``TE_RAMP`` of their arc length, zero upstream of it, until the
+        trailing-edge gap is the target; the blade is then closed again with the same shift, so the leading
+        edge, the spacing, the starting check and the unique incidence are unchanged. None keeps the closure.
 
     Returns
     -------
@@ -812,6 +854,12 @@ def design_rotor_vortex_blade(
         le_round_tip=le_round_tip, le_ellipse_ratio=le_ellipse_ratio, te_ellipse_ratio=te_ellipse_ratio,
         translate=translate,
     )
+    if te_thickness_ratio is not None:
+        blade_x, blade_y, le_te_diag, blade_lower, blade_upper = _set_te_thickness(
+            blade_lower, blade_upper, pitch * scale, beta_inlet_rad, beta_outlet_rad, le_te_diag,
+            float(te_thickness_ratio), dict(le_te_ratio=le_te_ratio, num_points=num_points,
+                                            le_wedge_half_angle=le_wedge_half_angle, le_round_tip=le_round_tip,
+                                            le_ellipse_ratio=le_ellipse_ratio, te_ellipse_ratio=te_ellipse_ratio))
 
     spacing = pitch * scale + le_te_diag["translate"]
     return {

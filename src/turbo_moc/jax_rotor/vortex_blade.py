@@ -256,7 +256,9 @@ def _offset_into_blade(wall, other, thickness):
     norm = jnp.hypot(tx, ty)
     nx, ny = -ty / norm, tx / norm
     middle = x.shape[0] // 2
-    towards = jnp.array([jnp.mean(other["x"]) - x[middle], jnp.mean(other["y"]) - y[middle]])
+    # Nearest point of the other wall, as in core.vortex_blade (the mean picked the wrong side, 2026-11-17)
+    nearest = jnp.argmin(jnp.hypot(other["x"] - x[middle], other["y"] - y[middle]))
+    towards = jnp.array([other["x"][nearest] - x[middle], other["y"][nearest] - y[middle]])
     sign = jnp.where(nx[middle] * towards[0] + ny[middle] * towards[1] > 0, 1.0, -1.0)
     return {"x": x + sign * thickness * nx, "y": y + sign * thickness * ny}
 
