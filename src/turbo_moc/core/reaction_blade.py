@@ -35,6 +35,7 @@ REACTION_DEFAULTS = {
     "trailing_edge_thickness": 0.015,   # / meridional chord
     "trailing_edge_wedge_angle_deg": 8.0,
     "pitch_to_chord": 0.8727,           # Used by linear cascades; annular rows take the pitch from the blade count
+    "solidity_chord": 1.0494,           # True chord / pitch for the natural blade count (TurboDash rotor default)
     "num_points": 241,                  # Camberline stations per side
 }
 CONSTANT_PASSAGE_DEFAULTS = {
@@ -66,7 +67,7 @@ def validate_reaction(p):
         raise ValueError("rotor_design.reaction.turning_concentration must be positive.")
     if not 0 < p["maximum_thickness_location"] < 1:
         raise ValueError("rotor_design.reaction.maximum_thickness_location must lie strictly between 0 and 1.")
-    for key in ("maximum_thickness", "leading_edge_radius", "pitch_to_chord"):
+    for key in ("maximum_thickness", "leading_edge_radius", "pitch_to_chord", "solidity_chord"):
         if p[key] <= 0:
             raise ValueError(f"rotor_design.reaction.{key} must be positive.")
     if p["trailing_edge_thickness"] < 0 or p["trailing_edge_thickness"] >= p["maximum_thickness"]:
@@ -128,6 +129,13 @@ def reaction_section(p):
             "camber_parameters": camber_parameters, "thickness_parameters": thickness}
 
 
+def natural_pitch_to_chord(p):
+    """Pitch / meridional chord from the true-chord solidity, as TurboDash sizes its rows (core.turbine):
+    stagger = mean metal angle, true chord c = c_m / cos(stagger), pitch s = c / solidity."""
+    stagger = np.radians(0.5 * (p["inlet_metal_angle_deg"] + p["outlet_metal_angle_deg"]))
+    return float(1.0 / (p["solidity_chord"] * np.cos(stagger)))
+
+
 def reaction_blade(p):
     """Reaction rotor result in the solver frame (x = chord fraction, y = -theta), unit meridional chord."""
     validate_reaction(p)
@@ -143,7 +151,7 @@ def reaction_blade(p):
     return {
         "blade_type": "reaction", "section_layout": "le_wrap_te_cut",
         "beta_inlet": beta_in, "beta_outlet": beta_out, "pitch": float(p["pitch_to_chord"]),
-        "axial_chord": 1.0, "leading_edge_point": camber[0].tolist(), "num_points": int(len(s["xi"])),
+        "axial_chord": 1.0, "natural_pitch_to_chord": natural_pitch_to_chord(p), "leading_edge_point": camber[0].tolist(), "num_points": int(len(s["xi"])),
         "blade": {"x": contour[:, 0].tolist(), "y": contour[:, 1].tolist(), "closure": "naca_round_le_cut_te",
                   "le_radius": float(p["leading_edge_radius"]), "te_thickness": float(p["trailing_edge_thickness"])},
         "blade_lower": {"x": pressure[:, 0].tolist(), "y": pressure[:, 1].tolist()},

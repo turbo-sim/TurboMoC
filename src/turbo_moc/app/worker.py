@@ -68,9 +68,13 @@ def _run_job(request_path, request):
                 from turbo_moc.core.reaction_blade import geometric_rotor
                 progress("Rotor: geometric blade section", 0.3)
                 rotor = geometric_rotor(config)
-                design = config["rotor_design"]
-                rotor.update(P0_rel=design.get("P0_rel"), T0_rel=design.get("T0_rel"),
-                             fluid_name=design.get("fluid_name"))
+                # Flow states for the ideal statistics only (velocity triangles, work, degree of reaction): relative
+                # inlet Mach number and the relative exit Mach number reached at the exit condition. The geometry
+                # does not use them.
+                from turbo_moc.configuration.rotor import vortex_parameters
+                states = vortex_parameters(solver_parameters(config["rotor_design"], rotor=True))
+                rotor.update({name: states[name] for name in ("fluid_name", "P0_rel", "T0_rel", "M_inlet", "M_outlet")},
+                             Q0_rel=states.get("Q0_rel", float("nan")))
                 flow.write_json(folder / "rotor_result.json", rotor)
                 from turbo_moc.app.blade_counts import native_passage, sizing
                 progress("Rotor: natural passage sizing", 0.9)

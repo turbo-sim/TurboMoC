@@ -23,7 +23,7 @@ STAGE = HERE / "output" / "stage"
 SETTINGS = {
     "calculation_type": "equilibrium",  # HEM, as in the TurboExpo stage cases
     "efficiency": 1.0,                  # Isentropic
-    "pressure_ratio": 10.0,             # 251.3 kPa / 10 = 25 kPa: covers rotor outlet pressures down to ~30 kPa
+    "pressure_ratio": 50.0,             # 251.3 kPa / 10 = 25 kPa: covers rotor outlet pressures down to ~30 kPa
     "polynomial_degree": 8,
     "segment_pressure_ratio": 1.3,
     "ODE_solver": "LSODA",
@@ -34,10 +34,13 @@ SETTINGS = {
 if __name__ == "__main__":
     barotropy, _ = load_dependencies(True)
     flow.OUTPUT = STAGE / "jobs"
-    project = yaml.safe_load((STAGE / "project.yaml").read_text(encoding="utf-8"))
     registry = design.registry_from_jobs(STAGE / "jobs")  # Latest session: the jobs behind mesh/stage.cgns
-    config = flow.resolved_configuration(project, "stator_1", registry)
-    nozzle = flow.load_nozzle(registry["stator_1"]["nozzle"], config)
+    # Read the stator MoC job directly, with its own configuration snapshot. flow.load_nozzle would reject it once
+    # the TurboMoC source has changed (job keys include a hash of the source), but this result is the one the mesh
+    # was built from, and only its inlet state is used here.
+    job = flow.directory(registry["stator_1"]["nozzle"])
+    config = yaml.safe_load((job / "configuration.yaml").read_text(encoding="utf-8"))
+    nozzle = json.loads((job / "moc_result.json").read_text(encoding="utf-8"))
     parameters = dict(config["method_of_characteristics"])
     expressions, state = generate_barotropic_model(barotropy, {"nozzle": parameters}, nozzle, SETTINGS,
                                                    STAGE / "barotropy")

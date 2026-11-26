@@ -10,8 +10,11 @@ from turbo_moc.geometry.meridional_channel import MeridionalChannel, geometry_fr
 def native_passage(config, solution, *, template=None):
     """Extract pitch and meridional chord in the solver's own length units."""
     if "rotor_design" in config:
-        pitch = float(solution["pitch"])
         chord = float(solution.get("axial_chord") or np.ptp(solution["blade"]["x"]))  # Camber chord if declared
+        # Reaction blades: the drawn pitch is the row's own (from its blade count); the natural one comes from
+        # the true-chord solidity, as in TurboDash
+        pitch = float(solution["natural_pitch_to_chord"] * chord if "natural_pitch_to_chord" in solution
+                      else solution["pitch"])
     else:
         if not solution.get("converged"):
             raise ValueError("A converged stator solution is required for natural blade sizing.")

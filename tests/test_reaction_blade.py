@@ -266,3 +266,82 @@ def test_coupled_inlet_sets_the_inlet_metal_angle(tmp_path, monkeypatch):
     # The saved manual value is untouched
     saved = projects.get_row(project, "rotor_1")["geometry"]["rotor_design"]["reaction"]["inlet_metal_angle_deg"]
     assert saved == CASE["inlet_metal_angle_deg"]
+
+
+def test_geometric_rotor_gets_ideal_triangles_and_reaction():
+    from turbo_moc.app import design_statistics as statistics
+    from turbo_moc.configuration.fluid_inputs import solver_parameters
+    from turbo_moc.configuration.rotor import vortex_parameters
+    project = reaction_project()
+    projects.get_row(project, "rotor_1")["geometry"]["inlet_coupling"]["mode"] = "manual"
+    design = projects.get_row(project, "rotor_1")["geometry"]["rotor_design"]
+    design.update(M_inlet=0.6, outlet_condition="pressure")
+    design["reaction"]["inlet_metal_angle_deg"] = -35.0  # beta_rel = +35 deg
+    project = projects.validate_project(projects.normalize_project(project))
+    config = flow.resolved_configuration(project, "rotor_1", {})
+    config["rotor_design"]["p_back"] = 0.7 * config["rotor_design"].get("P0_rel", 5e5)
+    rotor = geometric_rotor(config)
+    states = vortex_parameters(solver_parameters(config["rotor_design"], rotor=True))  # As the worker does
+    rotor.update({name: states[name] for name in ("fluid_name", "P0_rel", "T0_rel", "M_inlet", "M_outlet")})
+    row = projects.get_row(project, "rotor_1")
+    stats = statistics.rotor_statistics(project, row, config, rotor)
+    assert stats["triangles"]["inlet"] and stats["triangles"]["outlet"]
+    performance = dict(stats["performance"])
+    assert performance["Relative inlet Mach [-]"] == pytest.approx(0.6)
+    assert 0 < performance["Relative exit Mach [-]"] < 1.5
+    # The stage card (degree of reaction, efficiency) needs the coupled stator, as for vortex rotors
+    assert stats["stage"] is None
+
+
+@pytest.mark.parametrize("target", [0.0, 0.3, 0.5])
+def test_degree_of_reaction_outlet_sets_the_backpressure(tmp_path, monkeypatch, target):
+    import jaxprop as jxp
+    from turbo_moc.app import rotor_inlet
+    from turbo_moc.configuration.fluid_inputs import solver_parameters
+    from turbo_moc.configuration.rotor import vortex_parameters
+    project = projects.set_design_mode(projects.default_project(), "stator_rotor")
+    project["machine"]["fluid_name"] = "Air"
+    rotor = projects.get_row(project, "rotor_1")["geometry"]
+    rotor["inlet_coupling"].update(mode="stator_exit", rotational_speed={"type": "actual", "value": 4000})
+    rotor["rotor_design"].update(blade_type="reaction", outlet_condition="reaction", degree_of_reaction=target)
+    project = projects.validate_project(projects.normalize_project(project))
+    stator = projects.row_configuration(project, "stator_1")
+    reference = {"session": "a" * 32, "job": "b" * 32, "row_id": "stator_1", "key": flow.keys(stator)["nozzle"]}
+    monkeypatch.setattr(flow, "OUTPUT", tmp_path)
+    folder = flow.directory(reference)
+    folder.mkdir(parents=True)
+    flow.write_json(folder / "moc_result.json", {"fluid_name": "Air", "converged": True,
+        "wall_final": {"p": [100000.], "T": [280.], "rho": [1.244], "M": [1.2]}})
+    static = jxp.Fluid("Air").get_state(jxp.PT_INPUTS, 100000., 280.)
+    monkeypatch.setattr(rotor_inlet, "_triangle", lambda *args: {  # Stator exit state, consistent with the EOS
+        "p_static": 100000., "T_static": 280., "rho_static": float(static.rho), "V_abs": 1.2 * float(static.a),
+        "P0_rel": 150000., "T0_rel": 330., "M_rel": 0.6, "beta_rel_deg": 45., "U": 40.})
+    config = flow.resolved_configuration(project, "rotor_1", {"stator_1": {"nozzle": reference}})
+    design, triangle = config["rotor_design"], config["rotor_source"]["triangle"]
+    assert design["outlet_condition"] == "pressure" and design["p_back"] <= triangle["p_static"]
+    fluid = jxp.Fluid("Air")
+    inlet = fluid.get_state(jxp.DmassT_INPUTS, triangle["rho_static"], triangle["T_static"])
+    exit_state = fluid.get_state(jxp.PSmass_INPUTS, design["p_back"], float(inlet.s))
+    h1, h2 = float(inlet.h), float(exit_state.h)
+    h00 = h1 + 0.5 * triangle["V_abs"] ** 2
+    assert (h1 - h2) / (h00 - h2) == pytest.approx(target, abs=1e-6)
+    assert vortex_parameters(solver_parameters(design, rotor=True))["M_outlet"] > 0  # Ideal statistics resolve
+
+
+def test_degree_of_reaction_outlet_needs_a_coupled_inlet():
+    from turbo_moc.configuration.rotor import vortex_parameters
+    with pytest.raises(ValueError, match="coupled"):
+        vortex_parameters({"beta_inlet": 30.0, "outlet_condition": "reaction", "degree_of_reaction": 0.5,
+                           "blade_type": "reaction"})
+
+
+def test_natural_blade_count_follows_turbodash_solidity():
+    import numpy as np
+    from turbo_moc.app import blade_counts
+    from turbo_moc.core.reaction_blade import natural_pitch_to_chord
+    p = dict(CASE, solidity_chord=1.2, inlet_metal_angle_deg=10.0, outlet_metal_angle_deg=60.0)
+    # TurboDash (core.turbine): c = c_m / cos(mean metal angle), s = c / solidity
+    assert natural_pitch_to_chord(p) == pytest.approx(1 / (1.2 * np.cos(np.radians(35.0))))
+    blade = reaction_blade(dict(p, pitch_to_chord=0.5))  # Drawn pitch differs from the natural one
+    native = blade_counts.native_passage({"rotor_design": {}}, blade)
+    assert native["pitch"] == pytest.approx(natural_pitch_to_chord(p))

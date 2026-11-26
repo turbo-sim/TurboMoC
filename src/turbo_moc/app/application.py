@@ -113,7 +113,8 @@ ROTOR_BLADE_OPTIONS = [
 
 
 ROTOR_OUTLET_OPTIONS = [{"label": "Relative exit Mach number", "value": "mach"},
-                        {"label": "Static backpressure", "value": "pressure"}]
+                        {"label": "Static backpressure", "value": "pressure"},
+                        {"label": "Degree of reaction", "value": "reaction"}]
 
 
 def outlet_controls(parameters, row_id, section="method_of_characteristics"):
@@ -124,7 +125,8 @@ def outlet_controls(parameters, row_id, section="method_of_characteristics"):
     def field(name, label, key):
         return html.Div(html.Label([html.Span(label), dcc.Input(
             id={"type": "parameter", "row": row_id, "path": f"{section}.{key}"},
-            value=parameters.get(key), type="number", debounce=True, step="any")], className="control"),
+            value=parameters.get(key, 0.5 if key == "degree_of_reaction" else None), type="number", debounce=True,
+            step="any")], className="control"),
             id={"type": kind, "row": row_id, "condition": name},
             style={} if condition == name else {"display": "none"})
 
@@ -138,7 +140,8 @@ def outlet_controls(parameters, row_id, section="method_of_characteristics"):
             clearable=False, searchable=False)], className="control", title=title),
         field("pressure", "Exit static pressure [Pa]", "p_back"),
         field("mach", "Relative exit Mach number [-]" if rotor else "Exit Mach number [-]",
-              "M_outlet" if rotor else "exit_mach")])
+              "M_outlet" if rotor else "exit_mach"),
+        *([field("reaction", "Degree of reaction [-]", "degree_of_reaction")] if rotor else [])])
 
 
 def number_field(row_id, path, label, value, kind=None):
@@ -334,7 +337,10 @@ def group(title, children):
 EDGE_FIELDS = {"num_points", "le_te_ratio", "le_wedge_half_angle", "le_round_tip", "le_ellipse_ratio",
                "te_ellipse_ratio"}
 BLADE_FIELDS = {"reaction": set(), "constant_passage": EDGE_FIELDS}
-FLOW_FREE_BLADES = {"reaction", "constant_passage"}  # No inlet state or outlet condition
+# Geometric blades: the inlet state and exit condition feed only the ideal statistics; the inlet flow angle input is
+# hidden (their metal angle sets it). No group is hidden for them any more.
+GEOMETRIC_BLADES = {"reaction", "constant_passage"}
+FLOW_FREE_BLADES = set()
 
 
 def blade_field_visible(kind, name):
@@ -347,7 +353,7 @@ def blade_field_visible(kind, name):
 def rotor_blade_fields(design, row_id):
     """Vortex-solver inputs, each shown only for the blade types that read it."""
     kind = design.get("blade_type", "vortex")
-    skip = {*ROTOR_INLET_FIELDS, *INLET_FIELDS, "outlet_condition", "p_back", "M_outlet", "blade_type",
+    skip = {*ROTOR_INLET_FIELDS, *INLET_FIELDS, "outlet_condition", "p_back", "M_outlet", "degree_of_reaction", "blade_type",
             "reaction", "constant_passage"}
     return [html.Div(controls({name: value}, "rotor_design", row_id),
                      id={"type": "rotor-field", "row": row_id, "field": name},
@@ -412,11 +418,16 @@ def rotor_inlet_controls(geometry, row_id, combined):
     for name, label in ROTOR_INLET_FIELDS.items():
         if name in ("fluid_name", "P0_rel", "T0_rel"):
             continue
-        manual.append(html.Label([html.Span(label), dcc.Input(
+        control = html.Label([html.Span(label), dcc.Input(
             id={"type": "parameter", "row": row_id, "path": f"rotor_design.{name}"},
             value=geometry["rotor_design"][name],
             type="text" if name == "fluid_name" else "number", debounce=True,
-            step="any")], className="control"))
+            step="any")], className="control")
+        if name == "beta_inlet":  # Set by the metal angle for geometric blades
+            control = html.Div(control, id={"type": "rotor-beta-inlet", "row": row_id},
+                               style={"display": "none"} if geometry["rotor_design"].get("blade_type", "vortex")
+                               in GEOMETRIC_BLADES else {})
+        manual.append(control)
     return group("Rotor inlet state", [
         html.Label([html.Span("Inlet conditions"), dcc.Dropdown(
             id={"type": "parameter", "row": row_id, "path": "inlet_coupling.mode"},
@@ -1248,20 +1259,22 @@ def create_app(config_file=None, output_dir=None):
 
     @app.callback(Output({"type": "rotor-field", "row": MATCH, "field": ALL}, "style"),
         Output({"type": "rotor-flow-group", "row": MATCH, "part": ALL}, "style"),
+        Output({"type": "rotor-beta-inlet", "row": MATCH}, "style"),
         Input({"type": "parameter", "row": MATCH, "path": "rotor_design.blade_type"}, "value"),
         State({"type": "rotor-field", "row": MATCH, "field": ALL}, "id"),
         State({"type": "rotor-flow-group", "row": MATCH, "part": ALL}, "id"))
     def rotor_field_visibility(blade_type, fields, groups):
         hidden = {"display": "none"}
         return ([{} if blade_field_visible(blade_type, item["field"]) else hidden for item in fields],
-                [hidden if blade_type in FLOW_FREE_BLADES and item["part"] == "outlet" else {} for item in groups])
+                [hidden if blade_type in FLOW_FREE_BLADES and item["part"] == "outlet" else {} for item in groups],
+                hidden if blade_type in GEOMETRIC_BLADES else {})
 
     @app.callback(Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "pressure"}, "style"),
         Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "mach"}, "style"),
+        Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "reaction"}, "style"),
         Input({"type": "parameter", "row": MATCH, "path": "rotor_design.outlet_condition"}, "value"))
     def rotor_outlet_fields(condition):
-        hidden = {"display": "none"}
-        return ({}, hidden) if condition == "pressure" else (hidden, {})
+        return tuple({} if condition == name else {"display": "none"} for name in ("pressure", "mach", "reaction"))
 
     @app.callback(Output("nozzle-views", "style"), Output("blade-views", "style"),
         Output("nozzle-mesh-views", "style"), Output("blade-mesh-views", "style"),

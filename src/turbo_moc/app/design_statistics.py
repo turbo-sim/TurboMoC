@@ -186,7 +186,10 @@ def geometric_rows(result):
                 ("Camber turning [deg]", p["outlet_metal_angle_deg"] - p["inlet_metal_angle_deg"]),
                 ("Half-turning location [-]", p["turning_location"]),
                 ("Turning concentration [-]", p["turning_concentration"]),
-                ("Pitch / meridional chord [-]", pitch), ("Solidity c/s [-]", 1 / pitch),
+                ("Pitch / meridional chord [-]", pitch),
+                ("Solidity c/s, true chord [-]", 1 / (pitch * cos(radians(.5 * (p["inlet_metal_angle_deg"]
+                                                                          + p["outlet_metal_angle_deg"]))))),
+                ("Natural solidity c/s, true chord [-]", p.get("solidity_chord", float("nan"))),
                 ("Max thickness / chord [-]", p["maximum_thickness"]),
                 ("Max thickness location [-]", p["maximum_thickness_location"]),
                 ("LE radius / chord [-]", p["leading_edge_radius"]),
@@ -280,16 +283,25 @@ def panel(project, registry):
                 cards.append(card("Stator", "Method of characteristics · absolute frame", stator["performance"],
                                   status))
                 stations += stator["stations"]
-            elif config["rotor_design"].get("blade_type", "vortex") in ("reaction", "constant_passage"):
+            elif (config["rotor_design"].get("blade_type", "vortex") in ("reaction", "constant_passage")
+                  and "M_outlet" not in result):  # Blade computed before flow states were stored
                 kind = config["rotor_design"]["blade_type"]
                 cards.append(card("Rotor", "Geometric blade · " + ("subsonic reaction" if kind == "reaction"
                                   else "constant passage"), geometric_rows(result), status))
+                notes.append(f"{role}: compute the rotor blade again for velocity triangles and stage statistics.")
             else:
                 coupled = stator if config.get("rotor_source") else None
                 rotor = rotor_statistics(project, row, config, result, coupled)
                 absolute = rotor["triangles"]["inlet"]["U"] is not None
                 frame = "relative and absolute frames" if absolute else "relative frame"
-                cards.append(card("Rotor", f"Vortex method · {frame}", rotor["performance"], status))
+                kind = config["rotor_design"].get("blade_type", "vortex")
+                if kind in ("reaction", "constant_passage"):
+                    cards.append(card("Rotor", "Geometric blade · ideal flow at the metal angles (zero deviation) · "
+                                      + frame, rotor["performance"], status))
+                    cards.append(card("Rotor blade", "Geometry · " + ("subsonic reaction" if kind == "reaction"
+                                      else "constant passage"), geometric_rows(result), status))
+                else:
+                    cards.append(card("Rotor", f"Vortex method · {frame}", rotor["performance"], status))
                 if coupled:
                     stations[-1]["station"] = "Stator exit / rotor inlet (1)"
                     stations += [item for item in rotor["stations"]

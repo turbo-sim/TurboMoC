@@ -85,6 +85,24 @@ def resolve_configuration(project, row_id, registry):
         inputs["reaction"] = {**inputs["reaction"], "inlet_metal_angle_deg": -float(triangle["beta_rel_deg"])}
     elif kind == "constant_passage" and isinstance(inputs.get("constant_passage"), dict):
         inputs["constant_passage"] = {**inputs["constant_passage"], "blade_angle_deg": float(triangle["beta_rel_deg"])}
+    if inputs.get("outlet_condition") == "reaction":
+        # Degree of reaction (h1 - h2)/(h00 - h2), the stage statistic, with h2 the rotor exit at the rotor inlet
+        # entropy: h2 = (h1 - R h00)/(1 - R), h00 = h1 + V1^2/2 (stator stagnation enthalpy, kept by the
+        # stator loss model). The backpressure p(h2, s1) then fixes the exit, as with outlet_condition "pressure".
+        import jaxprop as jxp
+        fluid = jxp.Fluid(project["machine"]["fluid_name"], backend=nozzle.get("backend", "HEOS"))
+        static = fluid.get_state(jxp.DmassT_INPUTS, triangle["rho_static"], triangle["T_static"])
+        h1, s1 = float(static.h), float(static.s)
+        target = float(inputs.get("degree_of_reaction", 0.5))
+        h2 = (h1 - target * (h1 + 0.5 * triangle["V_abs"] ** 2)) / (1 - target)
+        try:
+            back_pressure = float(fluid.get_state(jxp.HmassSmass_INPUTS, h2, s1).p)
+        except (ValueError, RuntimeError) as exc:
+            raise ValueError(f"Cannot reach the degree of reaction {target:g}: {exc}") from exc
+        if not (isfinite(back_pressure) and 0 < back_pressure < triangle["p_static"] * (1 + 1e-12)):
+            raise ValueError(f"The degree of reaction {target:g} gives no rotor exit pressure below the inlet.")
+        inputs.update(outlet_condition="pressure", p_back=back_pressure)
+        triangle["p_back_reaction"] = back_pressure
     config["rotor_source"] = {"row_id": upstream["id"], "reference": {
         key: reference[key] for key in ("session", "job", "key")},
         "alpha_deg": angle, "inlet_radius_mm": radius, "triangle": triangle,

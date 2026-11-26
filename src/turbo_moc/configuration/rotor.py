@@ -21,7 +21,8 @@ ROTOR_DEFAULTS = {
 # Optional edge closure and boundary-layer correction settings passed through to design_rotor_vortex_blade.
 ROTOR_OPTIONAL = {"le_ellipse_ratio", "te_ellipse_ratio", "te_thickness_ratio", "le_wedge_half_angle", "le_round_tip", "boundary_layer",
                   "blade_type", "impulse_thickness", "section_profiles",  # section_profiles: 3D section-wise blades (meshing.section_morph)
-                  "reaction", "constant_passage"}  # Geometry-only blade inputs (core.reaction_blade)
+                  "reaction", "constant_passage",
+                  "degree_of_reaction"}  # Target for outlet_condition "reaction" (coupled inlet only)  # Geometry-only blade inputs (core.reaction_blade)
 # blade_type "impulse_constant_passage" swaps the vortex geometry for the matched Baines baseline (core.impulse_blade).
 BLADE_TYPES = ("vortex", "impulse_constant_passage", "impulse_thin_arc", "vortex_straight_transition", "vortex_arc_transition")  # last: vortex arcs, no MoC transitions (core.impulse_blade)
 # Geometry-only blades (core.reaction_blade): built from geometric inputs alone, no vortex solve or supersonic inlet.
@@ -40,7 +41,7 @@ def with_geometric_defaults(design):
         kind = design["blade_type"]
         design[kind] = {**defaults[kind], **(design.get(kind) or {})}
     return design
-ROTOR_OUTLET_CONDITIONS = ("mach", "pressure")
+ROTOR_OUTLET_CONDITIONS = ("mach", "pressure", "reaction")
 SPEED_TYPES = {"actual": "Actual speed [rpm]", "blade_velocity_ratio": "Blade velocity ratio U/c₀ [-]",
                "specific": "Specific speed [-]"}
 COUPLING_DEFAULTS = {"mode": "manual", "rotational_speed": {"type": "actual", "value": 20716.71}}
@@ -138,8 +139,11 @@ def validate_rotor_configuration(config):
         if name not in design:
             continue
         _finite(design[name], f"rotor_design.{name}", minimum=0, strict=True)
+    # Vortex blades are supersonic. Geometric blades use the Mach numbers only for the ideal statistics: any
+    # positive value (M_lower/M_upper are not used by them).
+    geometric = is_geometric(design)
     for name in ("M_inlet", "M_outlet", "M_lower", "M_upper"):
-        _finite(design[name], f"rotor_design.{name}", minimum=1, strict=True)
+        _finite(design[name], f"rotor_design.{name}", minimum=0 if geometric else 1, strict=True)
     _finite(design["beta_inlet"], "rotor_design.beta_inlet")
     if design.get("blade_type", "vortex") not in BLADE_TYPES:
         raise ValueError(f"rotor_design.blade_type must be one of {BLADE_TYPES}.")
@@ -152,7 +156,11 @@ def validate_rotor_configuration(config):
         {"reaction": reaction_blade.validate_reaction,
          "constant_passage": reaction_blade.validate_constant_passage}[kind](values)
     if design["outlet_condition"] not in ROTOR_OUTLET_CONDITIONS:
-        raise ValueError("rotor_design.outlet_condition must be mach or pressure.")
+        raise ValueError("rotor_design.outlet_condition must be mach, pressure or reaction.")
+    if design["outlet_condition"] == "reaction":
+        _finite(design.get("degree_of_reaction", 0.5), "rotor_design.degree_of_reaction", minimum=0)
+        if not 0 <= design.get("degree_of_reaction", 0.5) < 1:
+            raise ValueError("rotor_design.degree_of_reaction must be in [0, 1).")
     _finite(design["p_back"], "rotor_design.p_back", minimum=0, strict=True)
     if abs(design["beta_inlet"]) >= 90:
         raise ValueError("rotor_design.beta_inlet must be strictly between -90 and 90 degrees.")
@@ -201,6 +209,10 @@ def vortex_parameters(inputs):
     result["beta_inlet"] = result["beta_inlet"] - result.pop("incidence", 0.0)
     condition = result.pop("outlet_condition", "mach")
     back_pressure = result.pop("p_back", None)
+    result.pop("degree_of_reaction", None)
+    if condition == "reaction":
+        raise ValueError("A degree-of-reaction outlet needs the rotor inlet coupled to the stator exit "
+                         "(Stator + Rotor); use the backpressure or exit Mach number with a manual inlet.")
     if condition != "pressure":
         return result
     import jaxprop as jxp
@@ -214,7 +226,7 @@ def vortex_parameters(inputs):
         raise ValueError("The rotor backpressure must be below the relative stagnation pressure.")
     exit_state = fluid.get_state(jxp.PSmass_INPUTS, back_pressure, total.s)
     mach = float(np.sqrt(2 * (float(total.h) - float(exit_state.h))) / float(exit_state.a))
-    if not mach > 1:
+    if not mach > 1 and not is_geometric(inputs):  # Geometric blades: subsonic exits allowed
         raise ValueError(f"The rotor backpressure gives a subsonic relative exit (M = {mach:.3f}); "
                          "the vortex rotor requires M > 1.")
     result["M_outlet"] = mach
