@@ -235,7 +235,9 @@ a {color:#376a7d}
 .cad-links {display:flex;flex-wrap:wrap;gap:8px 16px;margin:8px 0;font-size:12px}
 .cad-previews {display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
 .cad-preview {width:100%;border:1px solid #e4ebee;border-radius:5px;background:white}
-.plot-toolbar {display:flex;justify-content:flex-start;padding:6px 12px 0;margin-bottom:-26px;position:relative;z-index:1}
+.plot-toolbar {display:flex;justify-content:flex-start;padding:6px 12px 0;margin-bottom:-26px;position:relative;z-index:1;
+  pointer-events:none}  /* The strip overlaps the plots' modebars: only the buttons catch the mouse (2026-11-26) */
+.plot-toolbar > * {pointer-events:auto}
 .plot-toolbar button {font-size:12px}
 .cp-editor {background:white;border:1px solid #dfe7eb;border-radius:8px;padding:0;margin-bottom:12px;overflow:hidden;
   box-shadow:0 1px 3px rgba(35,60,70,.06)}
@@ -297,3 +299,10 @@ a {color:#376a7d}
   .cp-lock-note {display:none}
 }
 
+
+/* Rotor blade-type selector (2026-11-26): one line per option, highlight fills the whole option row */
+.blade-type-dropdown .VirtualizedSelectOption,.blade-type-dropdown .Select-option {white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;box-sizing:border-box;width:100%;padding:0 10px;display:flex;align-items:center}
+.blade-type-dropdown .VirtualizedSelectFocusedOption,.blade-type-dropdown .Select-option.is-focused {background:#e5f0f4}
+.blade-type-dropdown .VirtualizedSelectSelectedOption,.blade-type-dropdown .Select-option.is-selected {
+  background:#d3e6ee;font-weight:600}

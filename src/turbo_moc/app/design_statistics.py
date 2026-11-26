@@ -2,6 +2,7 @@
 from math import atan2, cos, degrees, hypot, isfinite, pi, radians, sin, sqrt
 
 import jaxprop as jxp
+import numpy as np
 import plotly.graph_objects as go
 from dash import dcc, html
 from scipy.optimize import brentq
@@ -175,6 +176,29 @@ def badge(status):
     return html.Span(status.title(), className=f"status-badge {status}")
 
 
+def geometric_rows(result):
+    """Blade geometry of a geometry-only rotor (no flow solution): angles, pitch and thickness."""
+    pitch = float(result["pitch"])
+    if result.get("blade_type") == "reaction":
+        p = result["parameters"]
+        return [("Inlet metal angle [deg]", p["inlet_metal_angle_deg"]),
+                ("Outlet metal angle [deg]", p["outlet_metal_angle_deg"]),
+                ("Camber turning [deg]", p["outlet_metal_angle_deg"] - p["inlet_metal_angle_deg"]),
+                ("Half-turning location [-]", p["turning_location"]),
+                ("Turning concentration [-]", p["turning_concentration"]),
+                ("Pitch / meridional chord [-]", pitch), ("Solidity c/s [-]", 1 / pitch),
+                ("Max thickness / chord [-]", p["maximum_thickness"]),
+                ("Max thickness location [-]", p["maximum_thickness_location"]),
+                ("LE radius / chord [-]", p["leading_edge_radius"]),
+                ("TE thickness / chord [-]", p["trailing_edge_thickness"]),
+                ("TE wedge angle [deg]", p["trailing_edge_wedge_angle_deg"])]
+    chord = float(np.ptp(result["blade"]["x"]))
+    return [("Blade angle [deg]", result["beta_inlet"]), ("Outlet metal angle [deg]", result["beta_outlet"]),
+            ("Pitch / axial chord [-]", pitch / chord), ("Solidity c/s [-]", chord / pitch),
+            ("LE radius / chord [-]", result["blade"]["le_radius"] / chord),
+            ("TE radius / chord [-]", result["blade"]["te_radius"] / chord)]
+
+
 def card(title, subtitle, rows, status=None):
     return html.Section([
         html.Div([html.Div([html.H4(title), html.Small(subtitle)]), badge(status) if status else None],
@@ -257,8 +281,9 @@ def panel(project, registry):
                                   status))
                 stations += stator["stations"]
             elif config["rotor_design"].get("blade_type", "vortex") in ("reaction", "constant_passage"):
-                notes.append(f"{role}: geometric blade ({config['rotor_design']['blade_type'].replace('_', ' ')}), "
-                             "no flow solution; statistics not computed.")
+                kind = config["rotor_design"]["blade_type"]
+                cards.append(card("Rotor", "Geometric blade · " + ("subsonic reaction" if kind == "reaction"
+                                  else "constant passage"), geometric_rows(result), status))
             else:
                 coupled = stator if config.get("rotor_source") else None
                 rotor = rotor_statistics(project, row, config, result, coupled)

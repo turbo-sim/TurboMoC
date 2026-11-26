@@ -116,6 +116,8 @@ def normalize(config):
     if isinstance(result.get("blade_geometry"), dict):
         result["blade_geometry"] = {"parametrization": result["blade_geometry"].get("parametrization", "full"),
                                     **result["blade_geometry"]}
+        # Opt-in (0 = off): saved and new rows keep their geometry until a ratio (e.g. 6) is set.
+        result["blade_geometry"].setdefault("min_thickness_ratio", 0.0)
         offsets = result["blade_geometry"].get("control_point_offsets") or {}
         result["blade_geometry"]["control_point_offsets"] = {int(key): float(value) for key, value in offsets.items()}
         displacements = result["blade_geometry"].get("control_point_displacements")

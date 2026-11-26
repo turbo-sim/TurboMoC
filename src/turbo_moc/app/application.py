@@ -103,13 +103,13 @@ OUTLET_OPTIONS = [{"label": "Static pressure", "value": "pressure"},
 
 
 ROTOR_BLADE_OPTIONS = [
-    {"label": "Vortex (MoC transitions)", "value": "vortex"},
-    {"label": "Vortex, straight transitions", "value": "vortex_straight_transition"},
-    {"label": "Vortex, arc transitions", "value": "vortex_arc_transition"},
-    {"label": "Impulse, constant passage (matched to vortex)", "value": "impulse_constant_passage"},
-    {"label": "Impulse, thin arc (matched to vortex)", "value": "impulse_thin_arc"},
-    {"label": "Constant passage (geometry only)", "value": "constant_passage"},
-    {"label": "Subsonic reaction (TurboDash camber + NACA)", "value": "reaction"}]
+    {"label": "Vortex · MoC transitions", "value": "vortex"},
+    {"label": "Vortex · straight transitions", "value": "vortex_straight_transition"},
+    {"label": "Vortex · arc transitions", "value": "vortex_arc_transition"},
+    {"label": "Impulse · constant passage, matched", "value": "impulse_constant_passage"},
+    {"label": "Impulse · thin arc, matched", "value": "impulse_thin_arc"},
+    {"label": "Impulse · constant passage", "value": "constant_passage"},
+    {"label": "Reaction · subsonic", "value": "reaction"}]
 
 
 ROTOR_OUTLET_OPTIONS = [{"label": "Relative exit Mach number", "value": "mach"},
@@ -277,7 +277,7 @@ def controls(value, prefix, row_id, *, hidden_paths=()):
                 value=item, clearable=False, searchable=False)
         elif path == "rotor_design.blade_type":
             widget = dcc.Dropdown(id=identifier, options=ROTOR_BLADE_OPTIONS, value=item, clearable=False,
-                                  searchable=False)
+                                  searchable=False, className="blade-type-dropdown", optionHeight=30)
         elif name == "extension_type" and prefix.startswith("flow_domain."):
             widget = dcc.Dropdown(id=identifier, options=[
                 {"label": "Smooth B-spline", "value": "bspline"},
@@ -330,6 +330,37 @@ def group(title, children):
     return html.Details([html.Summary(title), *children], open=True, className="field-group")
 
 
+# Inputs each rotor blade type actually uses (user 2026-11-26: show only those). None = every vortex input.
+EDGE_FIELDS = {"num_points", "le_te_ratio", "le_wedge_half_angle", "le_round_tip", "le_ellipse_ratio",
+               "te_ellipse_ratio"}
+BLADE_FIELDS = {"reaction": set(), "constant_passage": EDGE_FIELDS}
+FLOW_FREE_BLADES = {"reaction", "constant_passage"}  # No inlet state or outlet condition
+
+
+def blade_field_visible(kind, name):
+    used = BLADE_FIELDS.get(kind)
+    if used is not None:
+        return name in used
+    return name != "impulse_thickness" or kind == "impulse_thin_arc"
+
+
+def rotor_blade_fields(design, row_id):
+    """Vortex-solver inputs, each shown only for the blade types that read it."""
+    kind = design.get("blade_type", "vortex")
+    skip = {*ROTOR_INLET_FIELDS, *INLET_FIELDS, "outlet_condition", "p_back", "M_outlet", "blade_type",
+            "reaction", "constant_passage"}
+    return [html.Div(controls({name: value}, "rotor_design", row_id),
+                     id={"type": "rotor-field", "row": row_id, "field": name},
+                     style={} if blade_field_visible(kind, name) else {"display": "none"})
+            for name, value in design.items() if name not in skip]
+
+
+def flow_group(component, row_id, kind, part):
+    """Inlet state and outlet condition: hidden for blades built from geometry alone."""
+    return html.Div(component, id={"type": "rotor-flow-group", "row": row_id, "part": part},
+                    style={"display": "none"} if kind in FLOW_FREE_BLADES else {})
+
+
 def geometric_blade_groups(design, row_id):
     """Parameter groups of the geometry-only rotor blades, always mounted and shown for the selected type.
 
@@ -341,8 +372,14 @@ def geometric_blade_groups(design, row_id):
     titles = {"reaction": "Reaction blade (TurboDash camberline, NACA thickness; lengths / meridional chord, "
                           "TurboDash angles)",
               "constant_passage": "Constant-passage blade (geometry only)"}
+    coupled_note = {"reaction": "Coupled to the stator exit: the inlet metal angle is set to the relative inflow "
+                                "angle of the velocity triangle (the value below is used only with a manual inlet).",
+                    "constant_passage": "Coupled to the stator exit: the blade angle is set to the relative inflow "
+                                        "angle of the velocity triangle (the value below is used only with a manual "
+                                        "inlet)."}
     return [html.Div(group(titles[kind], controls({kind: {**defaults, **(design.get(kind) or {})}}, "rotor_design",
-                                                   row_id)),
+                                                   row_id) + [html.Small(coupled_note[kind],
+                                                                         className="coupled-angle-note")]),
                      id={"type": "geometric-blade", "row": row_id, "kind": kind},
                      style={} if selected == kind else {"display": "none"})
             for kind, defaults in GEOMETRIC_BLADE_TYPES.items()]
@@ -485,14 +522,14 @@ def sidebar(project):
             fields.insert(1, outlet_controls(geometry["method_of_characteristics"], identifier))
             fields.append(flow_domain_controls(project, row))
         else:
-            fields = [rotor_inlet_controls(geometry, identifier,
-                    project["machine"]["design_mode"] == "stator_rotor"),
-                group("Rotor blade design", controls({"blade_type": "vortex"} | {
-                    k: v for k, v in geometry["rotor_design"].items()
-                    if k not in {*ROTOR_INLET_FIELDS, *INLET_FIELDS, "outlet_condition", "p_back", "M_outlet",
-                                 "reaction", "constant_passage"}}, "rotor_design", identifier)
+            kind = geometry["rotor_design"].get("blade_type", "vortex")
+            fields = [flow_group(rotor_inlet_controls(geometry, identifier,
+                    project["machine"]["design_mode"] == "stator_rotor"), identifier, kind, "inlet"),
+                group("Rotor blade design", controls({"blade_type": kind}, "rotor_design", identifier)
+                    + rotor_blade_fields(geometry["rotor_design"], identifier)
                     + geometric_blade_groups(geometry["rotor_design"], identifier)),
-                outlet_controls(geometry["rotor_design"], identifier, "rotor_design"),
+                flow_group(outlet_controls(geometry["rotor_design"], identifier, "rotor_design"), identifier, kind,
+                           "outlet"),
                 group("Linear cascade definition" if family == "linear" else "Meridional channel definition",
                     meridional_controls(geometry["meridional_channel"], identifier)),
                 flow_domain_controls(project, row)]
@@ -1181,6 +1218,16 @@ def create_app(config_file=None, output_dir=None):
         State({"type": "geometric-blade", "row": MATCH, "kind": ALL}, "id"))
     def geometric_blade_visibility(blade_type, identifiers):
         return [{} if item["kind"] == blade_type else {"display": "none"} for item in identifiers]
+
+    @app.callback(Output({"type": "rotor-field", "row": MATCH, "field": ALL}, "style"),
+        Output({"type": "rotor-flow-group", "row": MATCH, "part": ALL}, "style"),
+        Input({"type": "parameter", "row": MATCH, "path": "rotor_design.blade_type"}, "value"),
+        State({"type": "rotor-field", "row": MATCH, "field": ALL}, "id"),
+        State({"type": "rotor-flow-group", "row": MATCH, "part": ALL}, "id"))
+    def rotor_field_visibility(blade_type, fields, groups):
+        hidden = {"display": "none"}
+        return ([{} if blade_field_visible(blade_type, item["field"]) else hidden for item in fields],
+                [hidden if blade_type in FLOW_FREE_BLADES else {} for _ in groups])
 
     @app.callback(Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "pressure"}, "style"),
         Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "mach"}, "style"),

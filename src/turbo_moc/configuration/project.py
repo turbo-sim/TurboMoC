@@ -302,6 +302,7 @@ _DEFAULT_STATOR_ROW = {'id': 'stator_1',
                                  'metal_angle_out': 65.0,
                                  'r_trailing': 0.5,
                                  'inlet_opening_ratio': 1.3,
+                                 'min_thickness_ratio': 0.0,  # Opt-in; e.g. 6 for a presentable stator
                                  'n_cp': 30,
                                  'num_baseline_points': 500,
                                  'num_curve_points': 500},

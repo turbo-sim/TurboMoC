@@ -239,3 +239,30 @@ def test_studio_select_edit_save_reload(tmp_path):
     new = flow.keys(state["config"], reference)
     assert state["config"]["rotor_design"]["reaction"]["turning_concentration"] == 1.5
     assert new["volume"] != old["volume"] and not flow.current({"key": old["volume"]}, new["volume"])
+
+
+def test_coupled_inlet_sets_the_inlet_metal_angle(tmp_path, monkeypatch):
+    import json as _json
+    from turbo_moc.app import rotor_inlet
+    project = projects.set_design_mode(projects.default_project(), "stator_rotor")
+    project["machine"]["fluid_name"] = "Air"
+    rotor = projects.get_row(project, "rotor_1")["geometry"]
+    rotor["inlet_coupling"].update(mode="stator_exit", rotational_speed={"type": "actual", "value": 4000})
+    rotor["rotor_design"]["blade_type"] = "reaction"
+    project = projects.validate_project(projects.normalize_project(project))
+    stator = projects.row_configuration(project, "stator_1")
+    reference = {"session": "a" * 32, "job": "b" * 32, "row_id": "stator_1", "key": flow.keys(stator)["nozzle"]}
+    monkeypatch.setattr(flow, "OUTPUT", tmp_path)
+    folder = flow.directory(reference)
+    folder.mkdir(parents=True)
+    flow.write_json(folder / "moc_result.json", {"fluid_name": "Air", "converged": True,
+        "wall_final": {"p": [100000.], "T": [280.], "rho": [1.2], "M": [2.]}})
+    monkeypatch.setattr(rotor_inlet, "_triangle", lambda *args: {
+        "P0_rel": 150000., "T0_rel": 330., "M_rel": 0.6, "beta_rel_deg": 45., "U": 40.})
+    registry = {"stator_1": {"nozzle": reference}}
+    config = flow.resolved_configuration(project, "rotor_1", registry)
+    assert config["rotor_design"]["reaction"]["inlet_metal_angle_deg"] == -45.0  # TurboDash convention
+    assert geometric_rotor(config)["beta_inlet"] == 45.0  # TurboMoC frame = beta_rel
+    # The saved manual value is untouched
+    saved = projects.get_row(project, "rotor_1")["geometry"]["rotor_design"]["reaction"]["inlet_metal_angle_deg"]
+    assert saved == CASE["inlet_metal_angle_deg"]

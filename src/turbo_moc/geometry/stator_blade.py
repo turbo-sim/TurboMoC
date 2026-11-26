@@ -334,6 +334,9 @@ def parametrize_stator_blade(
         p_le_start, p_le_end, slope_end=slope_pressure[0], type="leading_edge"
     )
 
+    # Throat of the mirrored wall on the pressure side: upstream of it the pressure side is the subsonic
+    # (convergent) construction, downstream it is the MoC wall (index n_prefix of the mirrored wall).
+    pressure_throat = (float(x_mirrored_trans[n_prefix]), float(y_mirrored_trans[n_prefix]))
     pressure_x = np.concatenate([le_x, pressure_x, x_mirrored_trans])
     pressure_y = np.concatenate([le_y, pressure_y, y_mirrored_trans])
     suction_x = np.concatenate([suction_x, divergent_straight_x])
@@ -358,8 +361,10 @@ def parametrize_stator_blade(
         trailing_x = -trailing_x
         blade_curve = np.column_stack([-blade_curve[:, 0], blade_curve[:, 1]])
         control_points = np.column_stack([-control_points[:, 0], control_points[:, 1]])
+        pressure_throat = (-pressure_throat[0], pressure_throat[1])
 
     return {
+        "pressure_throat_point": {"x": pressure_throat[0], "y": pressure_throat[1]},
         "suction": {"x": suction_x.tolist(), "y": suction_y.tolist()},
         "pressure": {"x": pressure_x.tolist(), "y": pressure_y.tolist()},
         "blade_curve": {"x": blade_curve[:, 0].tolist(), "y": blade_curve[:, 1].tolist()},
@@ -1000,15 +1005,132 @@ LOCKED_CONTROL_POINTS = 2
 
 
 def parametrize_stator(wall_x, wall_y, parametrization="full", control_point_offsets=None,
-                      control_point_displacements=None, **kwargs):
+                      control_point_displacements=None, min_thickness_ratio=0.0, **kwargs):
     if parametrization not in STATOR_PARAMETRIZATIONS:
         raise ValueError(f"Stator parametrization must be one of {tuple(STATOR_PARAMETRIZATIONS)}.")
     blade = STATOR_PARAMETRIZATIONS[parametrization](wall_x, wall_y, **kwargs)
     if control_point_offsets and control_point_displacements:
         raise ValueError("Use control_point_offsets or control_point_displacements, not both.")
+    # The minimum-thickness correction is part of the baseline: the control-point editor shows it, and the
+    # user's own edits are displacements relative to it.
+    if min_thickness_ratio:
+        blade = enforce_min_thickness(blade, min_thickness_ratio)
     if control_point_displacements:
         return apply_control_point_displacements(blade, control_point_displacements)
     return apply_control_point_offsets(blade, control_point_offsets) if control_point_offsets else blade
+
+
+def _ray_hit(origin, direction, polyline):
+    """Distance along a ray to the nearest crossing of an open polyline (inf if none)."""
+    a, b = polyline[:-1], polyline[1:]
+    e = b - a
+    denominator = direction[0] * e[:, 1] - direction[1] * e[:, 0]
+    ok = np.abs(denominator) > 1e-14
+    safe = np.where(ok, denominator, 1.0)
+    w = a - origin
+    s = (w[:, 0] * e[:, 1] - w[:, 1] * e[:, 0]) / safe
+    u = (w[:, 0] * direction[1] - w[:, 1] * direction[0]) / safe
+    valid = ok & (s > 1e-9) & (u >= 0) & (u <= 1)
+    return float(s[valid].min()) if valid.any() else np.inf
+
+
+def convergent_thickness(blade, samples=160, end=None):
+    """Body thickness from the leading edge to the throat (the convergent, subsonic part).
+
+    At stations on each side: distance along the local normal to the opposite side (the nearer of the two
+    normal directions that hits it). The leading-edge nose (first 2% of the axial extent) is excluded.
+    Returns (x, thickness) arrays.
+    """
+    curve = np.column_stack((blade["blade_curve"]["x"], blade["blade_curve"]["y"]))
+    le = int(np.argmin(curve[:, 0]))
+    first, second = curve[:le + 1], curve[le:]
+    start = curve[le, 0] + 0.02 * np.ptp(curve[:, 0])
+    if end is None:
+        end = max(float(blade["throat_point"]["x"]), float(blade.get("pressure_throat_point", {}).get(
+            "x", curve[:, 0].max() - 0.15 * np.ptp(curve[:, 0]))))
+    x_out, t_out = [], []
+    for side, other in ((first, second), (second, first)):
+        tangent = np.gradient(side, axis=0)
+        tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-14)
+        normal = np.column_stack((-tangent[:, 1], tangent[:, 0]))
+        stations = np.flatnonzero((side[:, 0] > start) & (side[:, 0] < end))
+        if not len(stations):
+            continue
+        for i in stations[np.linspace(0, len(stations) - 1, min(samples, len(stations))).astype(int)]:
+            x_out.append(side[i, 0])
+            t_out.append(min(_ray_hit(side[i], normal[i], other), _ray_hit(side[i], -normal[i], other)))
+    return np.asarray(x_out), np.asarray(t_out)
+
+
+def enforce_min_thickness(blade, ratio, max_iterations=300):
+    """Thicken the convergent body to at least ``ratio`` x the trailing-edge thickness (2 r_trailing).
+
+    Only editable control points upstream of the throat move; the supersonic MoC walls downstream of the
+    throat are untouched. They move outward (away from the opposite side) along their control-polygon
+    normals, weighted by a Gaussian around the thinnest station, until the minimum is met. The movement is
+    recorded as ``min_thickness_displacements`` (XY / chord), separate from the user's control-point edits.
+    """
+    if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not np.isfinite(ratio) or ratio < 0:
+        raise ValueError("blade_geometry.min_thickness_ratio must be a finite number >= 0.")
+    if not ratio:
+        return blade
+    target = 2.0 * float(blade["r_trailing"]) * float(ratio)
+    original = np.asarray(blade["control_points"], dtype=float)
+    points = original.copy()
+    chord = blade_chord(blade)
+    le_cp = int(np.argmin(points[:, 0]))
+    x_te = float(np.max(points[:, 0]))
+    suction_limit = float(blade["throat_point"]["x"])
+    pressure_limit = float(blade.get("pressure_throat_point", {}).get("x", x_te - 0.15 * np.ptp(points[:, 0])))
+    sign = -1.0 if blade.get("mirror") else 1.0  # Mirrored blades: x is negated
+    movable = [i for i in editable_control_points(blade) if i != le_cp
+               and sign * points[i, 0] < sign * (suction_limit if i < le_cp else pressure_limit)]
+    if not movable:
+        return blade
+    width = 0.08 * chord
+    reach = float(max(points[i, 0] for i in movable))
+    current, best, stalled = blade, -np.inf, 0
+    for _ in range(max_iterations):
+        # Only stations the movable points control: up to the last movable control point (beyond it the
+        # section lies between the two MoC walls)
+        x, thickness = convergent_thickness(current, end=reach)
+        if not len(thickness) or thickness.min() >= target * (1 - 1e-3):
+            break
+        worst = int(np.argmin(thickness))
+        deficit = target - thickness[worst]
+        # The thinnest section may be shaped by points that must not move: stop instead of diverging
+        stalled = 0 if thickness[worst] > best + 1e-4 * target else stalled + 1
+        best = max(best, thickness[worst])
+        if stalled > 15 or np.max(np.linalg.norm(points - original, axis=1)) > 0.25 * chord:
+            raise ValueError(f"blade_geometry.min_thickness_ratio = {ratio:g} cannot be reached by moving the "
+                             f"subsonic control points (thinnest section {best:.3g} mm, target {target:.3g} mm); "
+                             "lower the ratio or edit the blade by hand.")
+        curve = np.column_stack((current["blade_curve"]["x"], current["blade_curve"]["y"]))
+        area = 0.5 * np.sum(curve[:-1, 0] * curve[1:, 1] - curve[1:, 0] * curve[:-1, 1])
+        tangent = np.gradient(curve, axis=0)
+        tangent /= np.maximum(np.linalg.norm(tangent, axis=1, keepdims=True), 1e-14)
+        # Outward normal of the closed contour (counterclockwise: right-hand normal points out)
+        outward_curve = np.sign(area) * np.column_stack((tangent[:, 1], -tangent[:, 0]))
+        step = np.zeros_like(points)
+        for i in movable:
+            nearest = int(np.argmin(np.linalg.norm(curve - points[i], axis=1)))
+            step[i] = (0.25 * deficit * np.exp(-((points[i, 0] - x[worst]) / width) ** 2)
+                       * outward_curve[nearest])
+        points = points + step
+        current = _with_control_points(blade, points)
+    else:
+        raise ValueError("Could not reach blade_geometry.min_thickness_ratio by moving the convergent control "
+                         "points; lower the ratio or edit the blade by hand.")
+    if current is blade:
+        return blade
+    result = dict(current)
+    moved = (points - original) / chord
+    result["min_thickness_displacements"] = {str(i): moved[i].tolist() for i in movable
+                                             if np.any(np.abs(moved[i]) > 0)}
+    if blade_self_intersects(result):
+        raise ValueError("Thickening the convergent body made the blade self-intersect; lower "
+                         "blade_geometry.min_thickness_ratio.")
+    return result
 
 
 def editable_control_points(blade):

@@ -78,6 +78,13 @@ def resolve_configuration(project, row_id, registry):
     inputs.pop("Q0_rel", None)
     if isfinite(triangle.get("Q0_rel", float("nan"))):
         inputs["Q0_rel"] = triangle["Q0_rel"]
+    # Geometry-only blades take their inlet metal angle from the same velocity triangle (zero incidence).
+    # TurboMoC frame -> TurboDash convention for the reaction blade: kappa = -beta (core.reaction_blade).
+    kind = inputs.get("blade_type", "vortex")
+    if kind == "reaction" and isinstance(inputs.get("reaction"), dict):
+        inputs["reaction"] = {**inputs["reaction"], "inlet_metal_angle_deg": -float(triangle["beta_rel_deg"])}
+    elif kind == "constant_passage" and isinstance(inputs.get("constant_passage"), dict):
+        inputs["constant_passage"] = {**inputs["constant_passage"], "blade_angle_deg": float(triangle["beta_rel_deg"])}
     config["rotor_source"] = {"row_id": upstream["id"], "reference": {
         key: reference[key] for key in ("session", "job", "key")},
         "alpha_deg": angle, "inlet_radius_mm": radius, "triangle": triangle,
