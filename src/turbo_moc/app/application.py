@@ -356,33 +356,48 @@ def rotor_blade_fields(design, row_id):
 
 
 def flow_group(component, row_id, kind, part):
-    """Inlet state and outlet condition: hidden for blades built from geometry alone."""
+    """Outlet condition: hidden for blades built from geometry alone. The inlet group stays (coupling selector and
+    rotor speed); its manual thermodynamic fields are hidden by rotor_inlet_display for those blades."""
     return html.Div(component, id={"type": "rotor-flow-group", "row": row_id, "part": part},
-                    style={"display": "none"} if kind in FLOW_FREE_BLADES else {})
+                    style={"display": "none"} if kind in FLOW_FREE_BLADES and part == "outlet" else {})
 
 
-def geometric_blade_groups(design, row_id):
+COUPLED_ANGLE = {"reaction": "inlet_metal_angle_deg", "constant_passage": "blade_angle_deg"}
+
+
+def geometric_blade_groups(design, row_id, coupled=False):
     """Parameter groups of the geometry-only rotor blades, always mounted and shown for the selected type.
 
     Saved values are shown, else the defaults. Hidden groups are ignored on edit (workflow.edited_project), so a
-    vortex row never gains these inputs and keeps its job identities.
+    vortex row never gains these inputs and keeps its job identities. With the inlet coupled to the stator exit,
+    the inlet angle comes from the velocity triangle: its manual field is hidden (kept for the manual inlet).
     """
     from turbo_moc.core.reaction_blade import GEOMETRIC_BLADE_TYPES
     selected = design.get("blade_type", "vortex")
     titles = {"reaction": "Reaction blade (TurboDash camberline, NACA thickness; lengths / meridional chord, "
                           "TurboDash angles)",
               "constant_passage": "Constant-passage blade (geometry only)"}
-    coupled_note = {"reaction": "Coupled to the stator exit: the inlet metal angle is set to the relative inflow "
-                                "angle of the velocity triangle (the value below is used only with a manual inlet).",
-                    "constant_passage": "Coupled to the stator exit: the blade angle is set to the relative inflow "
-                                        "angle of the velocity triangle (the value below is used only with a manual "
-                                        "inlet)."}
-    return [html.Div(group(titles[kind], controls({kind: {**defaults, **(design.get(kind) or {})}}, "rotor_design",
-                                                   row_id) + [html.Small(coupled_note[kind],
-                                                                         className="coupled-angle-note")]),
-                     id={"type": "geometric-blade", "row": row_id, "kind": kind},
-                     style={} if selected == kind else {"display": "none"})
-            for kind, defaults in GEOMETRIC_BLADE_TYPES.items()]
+    notes = {"reaction": "Inlet metal angle: relative inflow angle of the stator velocity triangle "
+                         "(TurboDash convention, minus beta_rel).",
+             "constant_passage": "Blade angle: relative inflow angle of the stator velocity triangle (beta_rel)."}
+    groups = []
+    for kind, defaults in GEOMETRIC_BLADE_TYPES.items():
+        values = {**defaults, **(design.get(kind) or {})}
+        angle = COUPLED_ANGLE[kind]
+        children = []
+        for name, value in values.items():
+            control = controls({name: value}, f"rotor_design.{kind}", row_id)
+            if name == angle:
+                control = [html.Div(control, id={"type": "coupled-angle", "row": row_id, "kind": kind},
+                                    style={"display": "none"} if coupled else {}),
+                           html.Small(notes[kind], id={"type": "coupled-angle-note", "row": row_id, "kind": kind},
+                                      className="coupled-angle-note",
+                                      style={} if coupled else {"display": "none"})]
+            children += control
+        groups.append(html.Div(group(titles[kind], children),
+                               id={"type": "geometric-blade", "row": row_id, "kind": kind},
+                               style={} if selected == kind else {"display": "none"}))
+    return groups
 
 
 def rotor_inlet_controls(geometry, row_id, combined):
@@ -527,7 +542,8 @@ def sidebar(project):
                     project["machine"]["design_mode"] == "stator_rotor"), identifier, kind, "inlet"),
                 group("Rotor blade design", controls({"blade_type": kind}, "rotor_design", identifier)
                     + rotor_blade_fields(geometry["rotor_design"], identifier)
-                    + geometric_blade_groups(geometry["rotor_design"], identifier)),
+                    + geometric_blade_groups(geometry["rotor_design"], identifier,
+                                             geometry["inlet_coupling"]["mode"] == "stator_exit")),
                 flow_group(outlet_controls(geometry["rotor_design"], identifier, "rotor_design"), identifier, kind,
                            "outlet"),
                 group("Linear cascade definition" if family == "linear" else "Meridional channel definition",
@@ -1148,7 +1164,9 @@ def create_app(config_file=None, output_dir=None):
                 inlet_alerts.append([])
                 continue
             coupled = row["geometry"]["inlet_coupling"]["mode"] == "stator_exit"
-            manual_styles.append({"display": "none"} if coupled else {})
+            # Geometric blades need no thermodynamic inlet: the coupling selector and speed stay, these hide
+            geometric = row["geometry"].get("rotor_design", {}).get("blade_type", "vortex") in FLOW_FREE_BLADES
+            manual_styles.append({"display": "none"} if coupled or geometric else {})
             computed_styles.append({} if coupled else {"display": "none"})
             speed_styles.append({} if coupled else {"display": "none"})
             values, message = {}, (
@@ -1219,6 +1237,15 @@ def create_app(config_file=None, output_dir=None):
     def geometric_blade_visibility(blade_type, identifiers):
         return [{} if item["kind"] == blade_type else {"display": "none"} for item in identifiers]
 
+    @app.callback(Output({"type": "coupled-angle", "row": MATCH, "kind": ALL}, "style"),
+        Output({"type": "coupled-angle-note", "row": MATCH, "kind": ALL}, "style"),
+        Input({"type": "parameter", "row": MATCH, "path": "inlet_coupling.mode"}, "value"),
+        State({"type": "coupled-angle", "row": MATCH, "kind": ALL}, "id"))
+    def coupled_angle_visibility(mode, identifiers):
+        coupled = mode == "stator_exit"
+        hidden = {"display": "none"}
+        return ([hidden if coupled else {} for _ in identifiers], [{} if coupled else hidden for _ in identifiers])
+
     @app.callback(Output({"type": "rotor-field", "row": MATCH, "field": ALL}, "style"),
         Output({"type": "rotor-flow-group", "row": MATCH, "part": ALL}, "style"),
         Input({"type": "parameter", "row": MATCH, "path": "rotor_design.blade_type"}, "value"),
@@ -1227,7 +1254,7 @@ def create_app(config_file=None, output_dir=None):
     def rotor_field_visibility(blade_type, fields, groups):
         hidden = {"display": "none"}
         return ([{} if blade_field_visible(blade_type, item["field"]) else hidden for item in fields],
-                [hidden if blade_type in FLOW_FREE_BLADES else {} for _ in groups])
+                [hidden if blade_type in FLOW_FREE_BLADES and item["part"] == "outlet" else {} for item in groups])
 
     @app.callback(Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "pressure"}, "style"),
         Output({"type": "rotor-outlet-field", "row": MATCH, "condition": "mach"}, "style"),
