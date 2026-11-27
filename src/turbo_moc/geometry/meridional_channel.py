@@ -51,10 +51,10 @@ def validate_machine(machine):
                              "in [0, 30) deg.")
     flare = machine.get("flare")
     if flare is not None:
-        if machine["type"] != "axial" or set(flare) != {"ratio", "end"}:
-            raise ValueError("machine.flare (axial only) requires ratio and end.")
-        if not -0.5 < flare["ratio"] < 1.0 or not 0.0 < flare["end"] <= 1.0:
-            raise ValueError("machine.flare requires -0.5 < ratio < 1 and 0 < end <= 1.")
+        if machine["type"] != "axial" or not {"ratio", "end"} <= set(flare) <= {"ratio", "end", "start"}:
+            raise ValueError("machine.flare (axial only) requires ratio and end (optional start).")
+        if not -0.5 < flare["ratio"] < 1.5 or not 0.0 <= flare.get("start", 0.0) < flare["end"] <= 1.0:
+            raise ValueError("machine.flare requires -0.5 < ratio < 1.5 and 0 <= start < end <= 1.")
     if (
         machine["type"] == "radial"
         and machine["inlet_radius"] == machine["outlet_radius"]
@@ -99,15 +99,23 @@ def meridional_line(start, end):
     return BSpline([0, 0, 1, 1], np.asarray([start, end], dtype=float), 1)
 
 
-def flared_wall(radius, shift, chord, end):
+def flared_wall(radius, shift, chord, end, start=0.0):
     """Clamped cubic wall: radius at the LE, radius + shift from u = end to the TE, zero slope at both ends.
 
     The wall stays exactly at radius + shift on [end, 1] (only equal control points act there), and the zero end
-    slopes keep the linear extensions of meridional_points at constant radius upstream and downstream.
+    slopes keep the linear extensions of meridional_points at constant radius upstream and downstream. With
+    ``start`` > 0 the wall stays exactly at ``radius`` on [0, start] and opens over [start, end] only (a rear flare,
+    e.g. on the outlet transition of a constant-axial-velocity reaction rotor).
     """
-    knots = np.asarray([0, 0, 0, 0, end / 2, end, 1, 1, 1, 1], dtype=float)
-    greville = np.asarray([knots[i + 1:i + 4].mean() for i in range(6)])
-    radii = radius + shift * np.asarray([0, 0, 1, 1, 1, 1], dtype=float)
+    if start > 0:
+        inner = start + (end - start) * np.asarray([0, 1 / 3, 2 / 3, 1])
+        knots = np.concatenate([[0, 0, 0, 0], inner, [1, 1, 1, 1]])
+        steps = np.asarray([0, 0, 0, 0, 1, 1, 1, 1], dtype=float)
+    else:
+        knots = np.asarray([0, 0, 0, 0, end / 2, end, 1, 1, 1, 1], dtype=float)
+        steps = np.asarray([0, 0, 1, 1, 1, 1], dtype=float)
+    greville = np.asarray([knots[i + 1:i + 4].mean() for i in range(len(steps))])
+    radii = radius + shift * steps
     return BSpline(knots, np.column_stack([radii, greville * chord]), 3)
 
 
@@ -130,8 +138,8 @@ def axial_geometry(machine):
     flare = machine.get("flare")
     if flare is not None:
         shift = 0.5 * flare["ratio"] * machine["blade_height"]
-        hub_wall = flared_wall(hub, -shift, machine["hub_chord"], flare["end"])
-        shroud_wall = flared_wall(tip, shift, machine["tip_chord"], flare["end"])
+        hub_wall = flared_wall(hub, -shift, machine["hub_chord"], flare["end"], flare.get("start", 0.0))
+        shroud_wall = flared_wall(tip, shift, machine["tip_chord"], flare["end"], flare.get("start", 0.0))
     else:
         hub_wall = meridional_line((hub, 0), (hub, machine["hub_chord"]))
         shroud_wall = meridional_line((tip, 0), (tip, machine["tip_chord"]))
